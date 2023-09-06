@@ -1,7 +1,6 @@
-name: test-build
+name: test-reusable-build
 run-name: Build IDocker Image - ${{ github.actor }}
-# may not be required as should not necessarily run on push to workflow repo
-#on: [push]
+on: [push]
 jobs:
   assessment-runtime:
     runs-on: ubuntu-latest
