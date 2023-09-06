@@ -1,0 +1,25 @@
+name: test-build
+run-name: Build IDocker Image - ${{ github.actor }}
+# may not be required as should not necessarily run on push to workflow repo
+#on: [push]
+jobs:
+  assessment-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout assessment-runtime repo
+        uses: actions/checkout@v4
+        with:
+          repository: compliance-framework/assessment-runtime
+          path: assessment-runtime
+          ref: main
+          fetch-depth: 1
+          show-progress: false
+      - name: List Directories
+        run:
+          ls -la          
+      - name: Run the Docker Compose
+        working-directory: ./test
+        run: docker-compose -f docker-compose.yml up -d
+      - name: Check running containers
+        run: docker ps -a
