@@ -1,6 +1,6 @@
 name: test-reusable-build
 run-name: Build IDocker Image - ${{ github.actor }}
-on: [push]
+on: [workflow_call]
 jobs:
   assessment-runtime:
     runs-on: ubuntu-latest
