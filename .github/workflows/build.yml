@@ -5,9 +5,9 @@ on:
     outputs:
       docker_ps:
         description: "The output of docker ps command"
-        value: ${{ jobs.assessment-runtime.outputs.docker_ps }}
+        value: ${{ jobs.delpoy-assessment-runtime.outputs.docker_ps }}
 jobs:
-  assessment-runtime:
+  delpoy-assessment-runtime:
     outputs:
       docker_ps: ${{ steps.docker_ps.outputs.out }}
     runs-on: ubuntu-latest
@@ -17,15 +17,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: compliance-framework/assessment-runtime
-          path: assessment-runtime
+          #path: assessment-runtime
           ref: main
           fetch-depth: 1
           show-progress: false
       - name: List Directories
         run:
-          ls -la          
+          ls -la
       - name: Run the Docker Compose
-        working-directory: ./test
+        working-directory: test
         run: docker-compose -f docker-compose.yml up -d
       - name: Check running containers
         id: docker_ps
