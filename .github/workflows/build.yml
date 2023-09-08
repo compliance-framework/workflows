@@ -5,9 +5,9 @@ on:
     outputs:
       docker_ps:
         description: "The output of docker ps command"
-        value: ${{ jobs.delpoy-assessment-runtime.outputs.docker_ps }}
+        value: ${{ jobs.delpoy-app.outputs.docker_ps }}
 jobs:
-  delpoy-assessment-runtime:
+  delpoy-app:
     outputs:
       docker_ps: ${{ steps.docker_ps.outputs.out }}
     runs-on: ubuntu-latest
@@ -17,15 +17,28 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: compliance-framework/assessment-runtime
-          #path: assessment-runtime
           ref: main
           fetch-depth: 1
           show-progress: false
-      - name: List Directories
-        run:
-          ls -la
+      - name: Checkout configuration-service repo
+        uses: actions/checkout@v4
+        with:
+          repository: compliance-framework/configuration-service
+          ref: main
+          fetch-depth: 1
+          show-progress: false
+      - name: Checkout workflows repo
+        uses: actions/checkout@v4
+        with:
+          repository: compliance-framework/workflows
+          ref: main
+          fetch-depth: 1
+          show-progress: false
       - name: Run the Docker Compose
-        run: docker-compose -f ./test/docker-compose.yml up -d
+        run: 
+          pwd
+          ls -la
+          docker compose -f workflows/docker-compose.yml up
       - name: Check running containers
         id: docker_ps
         run: echo "out=\"$(docker ps -a | xargs)\"" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,25 @@
+services:
+  plugin-registry:
+    extends:
+      file: ../assessment-runtime/test/docker-compose.yml
+      service: plugin-registry
+    depends_on:
+      - configuration-service
+  nats:
+    image: nats:latest
+    volumes:
+      - ${PWD}/assessment-runtime/test/config/messaging/nats-server.conf:/nats-server.conf
+    ports:
+      - "4222:4222"
+  assessment-runtime:
+    extends:
+      file: ../assessment-runtime/test/docker-compose.yml
+      service: assessment-runtime
+  configuration-service:
+    extends:
+      file: ../configuration-service/tests/docker-compose.yml
+      service: configuration-service
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
