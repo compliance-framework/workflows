@@ -25,6 +25,7 @@ jobs:
         with:
           repository: compliance-framework/configuration-service
           ref: main
+          token: ${{ secrets.GH_PAT }}
           fetch-depth: 1
           show-progress: false
       - name: Checkout workflows repo
