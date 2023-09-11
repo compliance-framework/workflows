@@ -14,7 +14,7 @@ jobs:
     outputs:
       docker_ps: ${{ steps.docker_ps.outputs.out }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout workflows repo
         uses: actions/checkout@v4
