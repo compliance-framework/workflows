@@ -16,11 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Test Directory 1
-        run: |
-          pwd
-          ls -la
-          echo "${{ secrets.GH_DEPL_KEY_CONF_SVC }}"
       - name: Checkout workflows repo
         uses: actions/checkout@v4
         with:
@@ -29,11 +24,6 @@ jobs:
           ref: main
           fetch-depth: 1
           show-progress: false
-      - name: Test Directory 2
-        run: |
-          pwd
-          ls -la
-          ls -la ./workflows
       - name: Checkout assessment-runtime repo
         uses: actions/checkout@v4
         with:
@@ -42,12 +32,6 @@ jobs:
           ref: main
           fetch-depth: 1
           show-progress: false
-      - name: Test Directory 3
-        run: |
-          pwd
-          ls -la
-          ls -la ./workflows
-          ls -la ./assessment-runtime
       - name: Checkout configuration-service repo
         uses: actions/checkout@v4
         with:
