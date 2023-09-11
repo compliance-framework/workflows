@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 1
           show-progress: false
       - name: Test Directory
-        run: 
+        run: |
           pwd
           ls -la
           ls -la ./assessment-runtime
@@ -42,7 +42,7 @@ jobs:
           fetch-depth: 1
           show-progress: false
       - name: Run the Docker Compose
-        run: 
+        run: |
           pwd
           ls -la
           docker compose -f workflows/docker-compose.yml up
