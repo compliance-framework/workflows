@@ -13,23 +13,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Test Directory 1
+        run: |
+          pwd
+          ls -la
+          echo "${{ secrets.GH_DEPL_KEY_CONF_SVC }}"
       - name: Checkout workflows repo
         uses: actions/checkout@v4
         with:
           repository: compliance-framework/workflows
+          path: workflows
           ref: main
           fetch-depth: 1
           show-progress: false
-      - name: Test Directory
+      - name: Test Directory 2
         run: |
           pwd
           ls -la
-          ls -la ./assessment-runtime
-          echo "${{ secrets.GH_DEPL_KEY_CONF_SVC }}"
+          ls -la ./workflows
       - name: Checkout configuration-service repo
         uses: actions/checkout@v4
         with:
           repository: compliance-framework/configuration-service
+          path: configuration-service
           ref: main
           ssh-key: ${{ secrets.GH_DEPL_KEY_CONF_SVC }}
           fetch-depth: 1
