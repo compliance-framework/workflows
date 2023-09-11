@@ -20,6 +20,12 @@ jobs:
           ref: main
           fetch-depth: 1
           show-progress: false
+      - name: Test Directory
+        run: 
+          pwd
+          ls -la
+          ls -la ./assessment-runtime
+          echo "${{ secrets.GH_DEPL_KEY_CONF_SVC }}"
       - name: Checkout configuration-service repo
         uses: actions/checkout@v4
         with:
