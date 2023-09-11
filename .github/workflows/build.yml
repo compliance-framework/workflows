@@ -2,6 +2,9 @@ name: test-reusable-build
 run-name: Build Docker Image
 on:
   workflow_call:
+    secrets:
+      GH_DEPL_KEY_CONF_SVC:
+        required: true
     outputs:
       docker_ps:
         description: "The output of docker ps command"
@@ -31,6 +34,20 @@ jobs:
           pwd
           ls -la
           ls -la ./workflows
+      - name: Checkout assessment-runtime repo
+        uses: actions/checkout@v4
+        with:
+          repository: compliance-framework/assessment-runtime
+          path: assessment-runtime
+          ref: main
+          fetch-depth: 1
+          show-progress: false
+      - name: Test Directory 3
+        run: |
+          pwd
+          ls -la
+          ls -la ./workflows
+          ls -la ./assessment-runtime
       - name: Checkout configuration-service repo
         uses: actions/checkout@v4
         with:
@@ -38,13 +55,6 @@ jobs:
           path: configuration-service
           ref: main
           ssh-key: ${{ secrets.GH_DEPL_KEY_CONF_SVC }}
-          fetch-depth: 1
-          show-progress: false
-      - name: Checkout assessment-runtime repo
-        uses: actions/checkout@v4
-        with:
-          repository: compliance-framework/assessment-runtime
-          ref: main
           fetch-depth: 1
           show-progress: false
       - name: Run the Docker Compose
