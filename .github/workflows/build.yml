@@ -13,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Checkout assessment-runtime repo
+      - name: Checkout workflows repo
         uses: actions/checkout@v4
         with:
-          repository: compliance-framework/assessment-runtime
+          repository: compliance-framework/workflows
           ref: main
           fetch-depth: 1
           show-progress: false
@@ -28,10 +28,10 @@ jobs:
           ssh-key: ${{ secrets.GH_DEPL_KEY_CONF_SVC }}
           fetch-depth: 1
           show-progress: false
-      - name: Checkout workflows repo
+      - name: Checkout assessment-runtime repo
         uses: actions/checkout@v4
         with:
-          repository: compliance-framework/workflows
+          repository: compliance-framework/assessment-runtime
           ref: main
           fetch-depth: 1
           show-progress: false
