@@ -1,0 +1,9 @@
+lisa-design:
+- Part 2 of the W1-S1-T05 split (part 1: PR #14, internal/reposettings logic).
+- Token scoping: the workflow runs `repo-settings list` first and passes its output to create-github-app-token `repositories:`; the step fails on an empty list because an empty `repositories` with `owner` set mints a token for every repo of the org-wide install. The tool then re-checks via GET /installation/repositories (--check-token-scope, default true; false only for local personal-token runs).
+- permission-administration is `read` for dry runs and `write` only with apply, so a dry run can't write even if the app is later granted write. apply is refused unless the run is on refs/heads/main (a branch could otherwise run modified code with an admin-write token).
+- manifest input is a `choice` (repos.yaml | repos.mock.yaml), not free text, so no path is user-controlled.
+- Bypass actor: --bypass-app-id from input `release-bot-app-id`, else org variable `vars.RELEASE_BOT_APP_ID` (not the secret: a secret would be masked as *** in the diff). Empty/non-numeric fails before any API call.
+- Vulnerability alerts: GET 204 = on, 404 = off. automated-security-fixes: 404 treated as off. Rulesets: GET ?includes_parents=false, non-Repository source_type skipped, each fetched by ID; more than one page is an error rather than a silent partial read.
+- HTTP errors carry method + path + status + 200 bytes of body, never headers (the token).
+- `list` and `sync` share one flag set (unused flags harmless) to keep the CLI small.
