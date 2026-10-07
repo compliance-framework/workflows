@@ -5,3 +5,8 @@ lisa-design:
 - SecurityUpdates returns *bool: nil (403 or missing "enabled") = unknown -> Plan.Unknown, and Apply writes the desired value, mirroring the merge-settings unknown handling. 404 stays "disabled" (GitHub's documented meaning: Dependabot off).
 - Apply returns []StepResult and never aborts; order is merge, rulesets, vulnerability alerts, security updates (the refusable writes last). Run prints per-step failures + "applied N step(s)"/"partly applied: F of N step(s) failed" and returns errors.Join, so main still exits 1.
 - The original misread was not a defaulting bug: the old code decoded enabled as a plain bool (absent -> false) and treated 404 as false, so GitHub actually returned enabled:true at plan time; the org config's updated_at (23:06:48Z) is 35s before the run, so propagation of a just-changed enforced config is the likely cause. Skipping enforced settings makes the tool independent of that.
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- CORE-NAME-001 should-fix plan.go Plan.Unknown: doc says merge settings only, now also security updates -> fix
+- CORE-STYLE-001 nit plan.go var `enabled` shadowed by `enabled bool` params in github.go -> rename to stateName
