@@ -705,6 +705,13 @@ compliance-framework/mock-ui: up to date
 28 change(s) in 1 of 2 repo(s) (dry run, nothing written; re-run with apply to write)
 ```
 
+GitHub leaves the merge settings out of `GET /repos/{owner}/{repo}` for a token with
+Administration **read**, so a dry run can't see them. They print as
+`repo.allow_merge_commit: unknown (not readable with Administration read) -> false`, count as
+`N unknown` next to the changes (`<repo>: <n> change(s), 7 unknown`), and a line under the
+totals says apply writes them. Apply PATCHes the full desired merge settings whenever any of them
+is unknown or differs; the PATCH is idempotent.
+
 How to run it:
 
 1. **Dry run** (anyone, any time): Actions, `repo-settings`, Run workflow, with `apply` off. Or
@@ -712,8 +719,10 @@ How to run it:
    Administration **read** only, so a dry run can't change anything. Review the diff.
 2. **Apply** (a human, never an agent): in the `ccf-repo-admin` app settings, temporarily grant
    **Administration: Read and write** and accept the new permission on the org installation. Run
-   the workflow from `main` with the same inputs and `apply` on. Re-run the dry run: every repo
-   should be `up to date` (the sync is idempotent). Then set Administration back to **read**.
+   the workflow from `main` with the same inputs and `apply` on. Run it again with `apply` on:
+   every repo should be `up to date` and nothing is written (the sync is idempotent). A dry run
+   can't show this, since its token is always read-only: a repo that is otherwise in sync shows
+   `0 change(s), 7 unknown`. Then set Administration back to **read**.
    Do the mocks first.
 
 The workflow calls `go run ./cmd/repo-settings sync`. Flags it doesn't expose: `--owner`
@@ -731,6 +740,12 @@ go run ./cmd/repo-settings sync --manifest repos.mock.yaml --repos mock-api --by
 `renovate.yml` runs self-hosted Renovate daily on the manifest's repos, with the shared preset
 `renovate/default.json` (third-party updates on the 8th and 22nd, vulnerability fixes any day,
 non-majors grouped and auto-merged). See [docs/renovate.md](docs/renovate.md).
+
+## Vulnerability summary
+
+`vuln-summary.yml` posts the open Dependabot alerts of the manifest's repos, per repo and
+severity, to Slack every Monday (and on `workflow_dispatch`). See
+[docs/vuln-summary.md](docs/vuln-summary.md).
 
 ## Development
 

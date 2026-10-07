@@ -64,8 +64,10 @@ func (g *GitHub) InstallationRepos(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-func (g *GitHub) MergeSettings(ctx context.Context, repo string) (MergeSettings, error) {
-	var s MergeSettings
+// MergeSettings reads the merge settings; with Administration read only, GitHub leaves them out
+// and the fields stay nil (unknown).
+func (g *GitHub) MergeSettings(ctx context.Context, repo string) (CurrentMergeSettings, error) {
+	var s CurrentMergeSettings
 	err := g.do(ctx, http.MethodGet, repoPath(repo, ""), nil, &s)
 	return s, err
 }

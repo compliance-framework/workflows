@@ -1,0 +1,64 @@
+name: vuln-summary
+
+# Weekly summary of the open Dependabot alerts of the manifest's repos, per repo and severity,
+# posted to Slack (docs/vuln-summary.md). The logic is cmd/vuln-summary.
+
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Manifest to read the repos from
+        type: choice
+        options: [repos.mock.yaml, repos.yaml]
+        # The mocks until the summary is proven on them; MANIFEST below is the schedule's.
+        default: repos.mock.yaml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vuln-summary
+  cancel-in-progress: false
+
+jobs:
+  summary:
+    name: summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # A scheduled run has no inputs: keep this fallback equal to the input's default.
+      MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Select repos
+        id: select
+        run: |
+          repos="$(go run ./cmd/vuln-summary list --manifest "$MANIFEST")"
+          # An empty list would mint a token for every repo the app is installed on (all of them).
+          if [ -z "$repos" ]; then
+            echo "::error::no repos selected"
+            exit 1
+          fi
+          echo "repos=$repos" >> "$GITHUB_OUTPUT"
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: token
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ steps.select.outputs.repos }}
+          permission-vulnerability-alerts: read
+      - name: Post the summary
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPOS: ${{ steps.select.outputs.repos }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ vars.SLACK_CHANNEL_VULNS || vars.SLACK_CHANNEL_CI_FAILURES }}
+        run: go run ./cmd/vuln-summary post --manifest "$MANIFEST" --repos "$REPOS"
