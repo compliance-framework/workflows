@@ -1,6 +1,6 @@
-# Posts a failed CI run to Slack, once per repo + commit + workflow. Call it from a job
-# with `needs: <your CI jobs>`, `if: failure()` and `secrets: inherit`; callers must grant
-# actions: read. The rules live in internal/notify (run by cmd/notify); see README.
+# Posts a failed CI run to Slack once per repo + commit + workflow (rules: internal/notify).
+# Call it from a job with `needs: <CI jobs>`, `if: failure()`, `secrets: inherit` and
+# `permissions: {actions: read}`; see README.
 name: notify-failure
 
 on:
@@ -40,7 +40,7 @@ jobs:
           if [ -n "${SLACK_BOT_TOKEN}" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "SLACK_BOT_TOKEN is not available (e.g. a fork); not notifying."
+            echo "No SLACK_BOT_TOKEN (e.g. a fork); not notifying."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -59,16 +59,14 @@ jobs:
           go-version-file: .ccf-workflows/go.mod
           cache: false
 
-      - name: Build cmd/notify
-        if: steps.token.outputs.enabled == 'true'
-        run: go -C "$TOOLS_DIR" build -o "$RUNNER_TEMP/notify" ./cmd/notify
-
       - name: Decide
         id: plan
         if: steps.token.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: '"$RUNNER_TEMP/notify" plan'
+        run: |
+          go -C "$TOOLS_DIR" build -o "$RUNNER_TEMP/notify" ./cmd/notify
+          "$RUNNER_TEMP/notify" plan
 
       - name: Look up the dedupe marker
         id: marker
@@ -97,7 +95,3 @@ jobs:
         with:
           path: ${{ env.MARKER }}
           key: ${{ steps.plan.outputs.key }}
-
-      - name: Already reported
-        if: steps.marker.outputs.cache-hit == 'true'
-        run: echo "This commit's failure of this workflow was already posted; not posting again."

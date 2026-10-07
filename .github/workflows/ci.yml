@@ -41,12 +41,17 @@ jobs:
           go run ./cmd/manifest --manifest repos.yaml
           go run ./cmd/manifest --manifest repos.mock.yaml
 
-  # pr-title, vulns and actionlint: the shared checks every CCF repo runs, from this commit.
-  common:
-    name: common
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: read
-      security-events: write
-    uses: ./.github/workflows/ci-common.yml
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: actionlint
+        # Built from source at a pinned version; shellcheck is preinstalled on the runner.
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12

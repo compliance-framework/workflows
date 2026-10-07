@@ -1,21 +1,9 @@
-# Checks every CCF repo runs, whatever its kind. The kind-specific CI workflows call this one.
-# Callers must grant: contents: read, pull-requests: read, actions: read, security-events: write
-# (see README).
+# Checks every CCF repo runs; the kind-specific CI workflows call it. Callers must grant
+# actions: read, contents: read, pull-requests: read and security-events: write (see README).
 name: ci-common
 
 on:
   workflow_call:
-    inputs:
-      vulns-scan-args:
-        description: "osv-scanner arguments (newline-separated); the default scans the whole repo recursively"
-        type: string
-        default: |-
-          -r
-          ./
-      vulns-upload-sarif:
-        description: "Upload the osv-scanner SARIF to code scanning (always skipped for pull requests from forks)"
-        type: boolean
-        default: true
 
 permissions: {}
 
@@ -43,9 +31,13 @@ jobs:
       security-events: write
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
     with:
-      scan-args: ${{ inputs.vulns-scan-args }}
+      # Repos without lockfiles (policies, helm) would otherwise fail the scan.
+      scan-args: |-
+        -r
+        --allow-no-lockfiles
+        ./
       # PRs from forks get a read-only token, so the code-scanning upload would fail there.
-      upload-sarif: ${{ inputs.vulns-upload-sarif && github.event.pull_request.head.repo.full_name == github.repository }}
+      upload-sarif: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
 
   actionlint:
     name: actionlint
