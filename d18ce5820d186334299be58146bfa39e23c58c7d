@@ -1,0 +1,15 @@
+lisa-design:
+- Tag rules live in internal/release ReleaseTags(tag, prefix, style). Only a FINAL tag (no pre-release part, from the tag name, never release.prerelease) gets latest AND the floating X.Y / X; an rc gets X.Y.Z-rcN only. Reading the spec's "X.Y.Z, X.Y, X, plus latest only when no -" literally would move :1.2 / :1 to an rc for anyone following them; deliberately rejected.
+- Two tag styles: "image" (X.Y.Z without v, as the existing images use: agent:0.7.0) and "artifact" (vX.Y.Z kept, as every plugin/policy OCI ref in the field uses: plugin-x:v0.4.0). The artifact style is for the plugin/policy release workflows in the next PR of the stack.
+- publish-image.yml stays the single image builder behind the same inputs (images, tags): native amd64 (ubuntu-latest) + arm64 (ubuntu-24.04-arm) builds pushed by digest, digests passed as digests-<name>-<arch> artifacts, one merge job per image does imagetools create. Previews are therefore multi-arch too. The merge downloads every digests-* artifact into its own dir and picks exactly digests-<name>-amd64/-arm64, so an image named agent never picks agent-ci's digest (a download pattern digests-agent-* would).
+- release-ui.yml is a thin caller of release-go-image.yml (same pattern per the spec) rather than a copy; nesting is consumer -> release-ui -> release-go-image -> publish-image (4 levels).
+- release-finished.yml is the shared tail every release workflow calls with needs: [all jobs], if: always(): job dispatch (conclusion computed from toJSON(needs) by jq: failure > cancelled > success; skipped alone = success) then job prune (if: always()). Dispatch token: ccf-release-bot, owner compliance-framework, repositories from job env TOKEN_REPO=workflows, guarded to exactly one repo name (the #8 guard pattern), contents: write only.
+- Prune deletes a package version only when it has tags, ALL of them sha-*/pr-*, and updated_at is > 30 days old; versions also tagged main/release/latest and untagged versions (multi-arch platform manifests) stay. Done in jq in the step (no Go toolchain in that job); a 404 package is skipped, any other API error fails the job. Packages = names from the images input (default repo name).
+- The release tag comes from github.event.release.tag_name only; there is no tag input (re-runs reuse the event).
+
+lisa-selfreview:
+pass 1 (strict):
+- [must-fix CORE-ERR-001] release-finished.yml dispatch job has no if: always(): when the run is cancelled, the caller's always() job starts the called workflow but its dispatch job (default success()) is skipped, so no release-finished is sent for a cancelled release.
+- [must-fix CORE-INPUT-001] publish-image.yml: two images entries with the same (lowercased) name silently overwrite each other's digests-<name>-<arch> artifact (overwrite: true) and push the same tags twice; reject duplicate names before building.
+- [should-fix CORE-DUP-001] "Check the tools ref" step is now in preview.yml and release-go-image.yml (and cut-prerelease.yml); pin the copies with a test.
+- [nit CORE-STYLE-001] release-tags with an empty --tag says 'tag "" is not vX.Y.Z'; say the tag is missing and hint at release: published.
