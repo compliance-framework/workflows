@@ -1,7 +1,8 @@
-# Publishes preview images to ghcr.io/compliance-framework: :main and :sha-<7> on pushes to the
+# Publishes previews to ghcr.io/compliance-framework: :main and :sha-<7> on pushes to the
 # default branch (unless on-main is false), :pr-<number> on PRs labelled `preview`. It never
-# touches :latest. Tag rules: internal/release (PreviewTags). The image build itself is
-# publish-image.yml, which the release workflows reuse; see README.
+# touches :latest. Tag rules: internal/release (PreviewTags). By kind: container images
+# (publish-image.yml, which the release workflows reuse), or gooci OCI artifacts for plugins
+# (a goreleaser snapshot) and policies (an opa build bundle); see README.
 name: preview
 
 on:
@@ -15,6 +16,22 @@ on:
         description: 'JSON list of {"name", "dockerfile", "context"}; name defaults to the repo name, dockerfile to Dockerfile, context to .'
         type: string
         default: '[{}]'
+      kind:
+        description: "What to publish: image (container images), go-plugin (goreleaser + gooci) or policies (opa build + gooci)"
+        type: string
+        default: image
+      protocol-version:
+        description: "go-plugin: the agent plugin protocol version (org.ccf.plugin.protocol.version)"
+        type: string
+        default: "2"
+      directory:
+        description: "policies: directory holding the policies (the bundle root)"
+        type: string
+        default: policies
+      opa-version:
+        description: "policies: OPA version, without the leading v"
+        type: string
+        default: "1.14.1"
 
 permissions: {}
 
@@ -28,6 +45,14 @@ jobs:
     outputs:
       tags: ${{ steps.tags.outputs.tags }}
     steps:
+      - name: Check the kind
+        env:
+          KIND: ${{ inputs.kind }}
+        run: |
+          case "$KIND" in
+            image | go-plugin | policies) ;;
+            *) echo "::error::unknown kind '$KIND' (want image, go-plugin or policies)"; exit 1 ;;
+          esac
       - name: Check the tools ref
         env:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
@@ -55,7 +80,7 @@ jobs:
   image:
     name: image
     needs: [tags]
-    if: needs.tags.outputs.tags != ''
+    if: needs.tags.outputs.tags != '' && inputs.kind == 'image'
     # A local reference in a called workflow resolves to this repo at the same commit (README).
     uses: ./.github/workflows/publish-image.yml
     with:
@@ -64,3 +89,87 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+  plugin:
+    name: plugin
+    needs: [tags]
+    if: needs.tags.outputs.tags != '' && inputs.kind == 'go-plugin'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # goreleaser reads the tags for the snapshot version
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # A snapshot: the archives gooci uploads, without publishing a release.
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: v2.18.2
+          args: release --snapshot --clean
+      - name: Install gooci
+        run: go install github.com/compliance-framework/gooci@v0.0.7
+      # gooci reads the Docker credentials (the default keychain).
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Upload the plugin
+        env:
+          TAGS: ${{ needs.tags.outputs.tags }}
+          PROTOCOL_VERSION: ${{ inputs.protocol-version }}
+        run: |
+          [ -n "$TAGS" ] || { echo "::error::no tags to publish"; exit 1; }
+          for tag in $TAGS; do
+            echo "Uploading dist/ to ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
+            gooci upload --annotate="org.ccf.plugin.protocol.version=$PROTOCOL_VERSION" dist/ "ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
+          done
+
+  policies:
+    name: policies
+    needs: [tags]
+    if: needs.tags.outputs.tags != '' && inputs.kind == 'policies'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1 # v2.4.0
+        with:
+          version: ${{ inputs.opa-version }}
+      - name: opa build
+        env:
+          POLICY_DIR: ${{ inputs.directory }}
+        run: opa build --bundle "$POLICY_DIR" --output "$RUNNER_TEMP/bundle.tar.gz"
+      # gooci is built from source at a pinned version.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false
+      - name: Install gooci
+        run: go install github.com/compliance-framework/gooci@v0.0.7
+      # gooci reads the Docker credentials (the default keychain).
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Upload the bundle
+        env:
+          TAGS: ${{ needs.tags.outputs.tags }}
+        run: |
+          [ -n "$TAGS" ] || { echo "::error::no tags to publish"; exit 1; }
+          for tag in $TAGS; do
+            echo "Uploading the bundle to ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
+            gooci upload-single "$RUNNER_TEMP/bundle.tar.gz" "ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
+          done
