@@ -1,0 +1,16 @@
+api:
+  image:
+    repository: ghcr.io/compliance-framework/api
+    tag: '0.17.1'
+init:
+  - image:
+      repository: alpine
+      tag: "3.21"
+ui:
+  image:
+    repository: ghcr.io/compliance-framework/ui
+    tag: 2.10.1 # explicit
+dex:
+  image:
+    repository: ghcr.io/dexidp/dex
+    tag: "v2.44.0"

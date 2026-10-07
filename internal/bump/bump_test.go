@@ -149,6 +149,20 @@ func TestUpdaters(t *testing.T) {
 			golden:        true,
 			reapplyStable: true,
 		},
+		{
+			fixture: "helm",
+			targets: map[string]string{"mock-api": "v0.1.0", "mock-ui": "v0.1.0", "mock-agent": "v0.2.0", "api": "v0.18.0", "ui": "v2.10.1"},
+			changes: []string{
+				"helm charts/ccf-app/values.yaml api.image.tag: 0.17.1 -> v0.18.0",
+				"helm charts/ccf-app/Chart.yaml appVersion: 0.17.1 -> v0.18.0",
+				"helm charts/mock-agent/Chart.yaml appVersion: 0.0.0 -> v0.2.0",
+				"helm charts/mock-app/values.yaml ui.image.tag: 0.0.0 -> v0.1.0",
+				"helm charts/mock-app/Chart.yaml appVersion: 0.0.0 -> v0.1.0",
+			},
+			upToDate:      []string{"charts/ccf-app/values.yaml ui.image.tag: 2.10.1"},
+			golden:        true,
+			reapplyStable: true,
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d-%s", i, tc.fixture), func(t *testing.T) {

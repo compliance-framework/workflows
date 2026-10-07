@@ -35,7 +35,7 @@ type Config struct {
 
 // Updaters returns every updater for c; one with nothing to do in a checkout finds no refs.
 func Updaters(c Config) []Updater {
-	us := []Updater{goMod{c}, goInstall{c}, workflowRef{c}}
+	us := []Updater{goMod{c}, goInstall{c}, workflowRef{c}, helm{c}}
 	if c.Source != "" {
 		us = append(us, dockerfile{c})
 	}
