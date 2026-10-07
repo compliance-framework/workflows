@@ -1,0 +1,6 @@
+# actionlint configuration (https://github.com/rhysd/actionlint/blob/main/docs/config.md).
+paths:
+  # Legacy workflow, kept until it is removed (W3-S5-T03); not edited meanwhile.
+  .github/workflows/plugin-release.yml:
+    ignore:
+      - 'SC2086'
