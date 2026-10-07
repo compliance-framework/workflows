@@ -6,3 +6,7 @@ lisa-design:
 - Required check pinned to the GitHub Actions app (integration_id 15368, confirmed from mock-api's `ci / required` check run) so a commit status from another source can't satisfy it; configurable, 0 = any source.
 - ccf-review bypass: actor_type Integration, actor_id = ccf-release-bot app ID, bypass_mode "always". Equivalent to "pull_request" here because ccf-required (no bypass) already requires a PR; "always" avoids depending on how auto-merge attributes the merge.
 - Run continues past a failing repo and returns all errors (errors.Join); CheckTokenScope fails before any repo read if the token reaches a repo outside the selection (the ccf-repo-admin app is installed org-wide).
+
+lisa-selfreview:
+pass 1 (strict): 1 finding
+- [must-fix CORE-TEST-001 89558c47b0ad] internal/reposettings/desired.go isManaged: no test shows a hand-added rule of an unmanaged type as removed (`-> (unset)`) in the diff. Fix: add a `creation` rule to the existing ccf-review in TestPlanRepoDiff and assert the change.
