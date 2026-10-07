@@ -13,3 +13,8 @@ pass 1 (strict, whole stack reviewed before splitting) — request_changes:
 - CORE-INPUT-001: workflow refs could hit the semver downgrade check (v1.2.0 -> v1 conflict), contradicting "replaced whenever they differ".
 - nit: rewrite() reset file modes to 0644.
 pass 2 (strict) — approve: no new findings on internal/bump.
+
+lisa-addressed:
+- find() matches key AND current version; opa-version Apply rewrites only matches whose value is a planned change's current (test: preview.yml 1.16.0 conflict stays).
+- Decide replaces DepWorkflows refs whenever they differ (test: @v1.2.0 -> @v1).
+- rewrite() keeps the file's permission bits.
