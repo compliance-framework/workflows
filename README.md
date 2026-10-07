@@ -311,8 +311,10 @@ Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, via `secrets: inher
 `releases-created` and `paths-released` (JSON list of package paths), from the action.
 
 **Shared defaults.** `release-please/defaults.json` holds the settings every repo uses:
-`bump-minor-pre-major: true` (breaking changes bump the minor before 1.0), and changelog
-sections where `feat`, `fix`, `perf`, `revert` and `deps` are shown and `chore`, `ci`,
+`bump-minor-pre-major: true` (breaking changes bump the minor before 1.0),
+`initial-version: "0.1.0"` (a repo's first release; without it release-please proposes
+1.0.0 for a repo with no release yet, which `version-guard` blocks as a major bump), and
+changelog sections where `feat`, `fix`, `perf`, `revert` and `deps` are shown and `chore`, `ci`,
 `docs`, `test`, `refactor` and `build` are hidden. release-please has no remote `extends`,
 and it reads its config through the API from the target branch, so the workflow can't merge
 the defaults in at runtime. Callers copy every key of `defaults.json` into their
@@ -322,8 +324,23 @@ and prints a warning for each key that differs.
 
 ```json
 {
-  "$schema": "...", "bump-minor-pre-major": true, "changelog-sections": ["... from defaults.json ..."],
+  "$schema": "...", "bump-minor-pre-major": true, "initial-version": "0.1.0",
+  "changelog-sections": ["... from defaults.json ..."],
   "packages": { ".": { "release-type": "go" } }
+}
+```
+
+A `node` package (the ui) needs `"include-component-in-tag": false` in its package entry.
+release-please takes a node package's component from the `name` in `package.json` and tags
+its releases `<name>-vX.Y.Z` by default, and `release-ui.yml` and `cut-prerelease.yml` only
+accept `vX.Y.Z`. The setting goes in the package, not at the top level, so the defaults
+check doesn't warn about it:
+
+```json
+{
+  "$schema": "...", "bump-minor-pre-major": true, "initial-version": "0.1.0",
+  "changelog-sections": ["... from defaults.json ..."],
+  "packages": { ".": { "release-type": "node", "include-component-in-tag": false } }
 }
 ```
 
