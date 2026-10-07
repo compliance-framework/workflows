@@ -1,0 +1,8 @@
+lisa-design:
+- Stages gate the train: a stage starts when every repo of the earlier stages is released or skipped (Stages() order, not per-repo depends_on). Helm waits for everything; a blocked stage-2 repo holds stage 3.
+- Bumping always runs ccf-bump (cmd/ccf-bump --mode train --pr) instead of adopting an open bump PR: a PR left from an earlier train would pin older versions. A same-day rerun updates the same PR.
+- The train merges bump PRs itself (the release bot bypasses ccf-review) once green, when ccf-bump left auto-merge on; auto-merge off (a major or unversioned pin) means needs-human.
+- release-pr waits for release-please's push run on the default branch head, then takes the open release PR (none = nothing to release). Not "PR contains main": release-please leaves its PR behind for commits that release nothing.
+- Publishing: the tags pointing at the merge commit, and the latest release-event run per tag and workflow, must all succeed.
+- --set versions: every single-package repo released in an earlier stage; ccf-bump ignores deps a repo doesn't pin.
+- version-guard is computed with internal/release.MajorIncreases on the PR's base/head manifests, so a major is needs-human (not just a failing check) until the release:major-approved label.
