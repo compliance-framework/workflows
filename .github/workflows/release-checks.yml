@@ -1,0 +1,79 @@
+# Checks a release-please PR (head branch release-please--*) before it merges: final
+# compliance-framework dependencies, an approved major bump, a matching Go module path. On any
+# other PR the job is skipped, which a required check counts as passing. Rules: internal/release.
+name: release-checks
+
+on:
+  workflow_call: {}
+
+permissions: {}
+
+jobs:
+  release-checks:
+    name: release-checks
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      TOOLS_DIR: ${{ github.workspace }}/.ccf-workflows
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Check the tools ref
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so cmd/release can't be fetched"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ccf-workflows
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .ccf-workflows/go.mod
+          cache: false
+      - name: Build cmd/release
+        id: build
+        run: |
+          go -C "$TOOLS_DIR" build -o "$RUNNER_TEMP/release" ./cmd/release
+          rm -rf "$TOOLS_DIR"
+      - name: Read the base manifest
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # The manifest before this release; none yet means every package starts at 0.0.0.
+          if ! gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$GITHUB_REPOSITORY/contents/.release-please-manifest.json?ref=$BASE_SHA" \
+            > "$RUNNER_TEMP/base.json" 2> "$RUNNER_TEMP/gh.err"; then
+            cat "$RUNNER_TEMP/gh.err"
+            grep -q "HTTP 404" "$RUNNER_TEMP/gh.err" || exit 1
+            echo "No .release-please-manifest.json at the base; treating it as empty."
+            echo '{}' > "$RUNNER_TEMP/base.json"
+          fi
+
+      # Each check runs even when an earlier one failed, so one run reports all of them.
+      - name: internal-deps-final
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          if [ ! -f go.mod ]; then echo "No go.mod; not a Go repo, skipping."; exit 0; fi
+          "$RUNNER_TEMP/release" check internal-deps --gomod go.mod
+      - name: version-guard
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.base.outcome == 'success' }}
+        run: '"$RUNNER_TEMP/release" check version-guard --base "$RUNNER_TEMP/base.json" --head .release-please-manifest.json'
+      - name: go-module-path
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          if [ ! -f go.mod ]; then echo "No go.mod; not a Go repo, skipping."; exit 0; fi
+          "$RUNNER_TEMP/release" check module-path --gomod go.mod --manifest .release-please-manifest.json
