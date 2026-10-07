@@ -1,0 +1,114 @@
+# Loads plugins through the agent's runner library and reports the protocol each speaks and the
+# agent library it was built with, and checks policy bundles with the agent's OPA version
+# (cmd/plugin-probe, docs/plugin-probe.md). Fails if any plugin fails to load or bundle fails its check.
+name: plugin-probe
+
+on:
+  workflow_call:
+    inputs:
+      plugins:
+        description: Plugins to probe, comma- or newline-separated OCI tags (registry/repository:tag)
+        type: string
+        required: true
+      agent-ref:
+        description: Agent version, tag, branch or commit to probe with (default the version in this repo's go.mod)
+        type: string
+        default: ""
+      policies:
+        description: Policy bundles to check, comma- or newline-separated OCI tags
+        type: string
+        default: ""
+    outputs:
+      report:
+        description: The probe's JSON report (docs/plugin-probe.md)
+        value: ${{ jobs.probe.outputs.report }}
+  workflow_dispatch:
+    inputs:
+      plugins:
+        description: Plugins to probe, comma-separated OCI tags (registry/repository:tag)
+        type: string
+        required: true
+      agent-ref:
+        description: Agent version, tag, branch or commit to probe with (default the version in go.mod)
+        type: string
+        default: ""
+      policies:
+        description: Policy bundles to check, comma-separated OCI tags
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  probe:
+    name: plugin-probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      report: ${{ steps.probe.outputs.report }}
+    env:
+      TOOLS_DIR: ${{ github.workspace }}/.ccf-workflows
+    steps:
+      - name: Check the tools ref
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so cmd/plugin-probe can't be fetched"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ccf-workflows
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .ccf-workflows/go.mod
+          cache: false
+      - name: Use the agent ref
+        if: inputs.agent-ref != ''
+        env:
+          AGENT_REF: ${{ inputs.agent-ref }}
+        run: |
+          cd "$TOOLS_DIR"
+          go get "github.com/compliance-framework/agent@$AGENT_REF"
+          # Check policies with the OPA the agent requires, not merely the highest one in the graph.
+          gomod="$(go list -m -f '{{.GoMod}}' github.com/compliance-framework/agent)"
+          opa="$(go mod edit -json "$gomod" | jq -r '.Require[] | select(.Path == "github.com/open-policy-agent/opa") | .Version')"
+          if [ -z "$opa" ]; then
+            echo "::error::the agent at $AGENT_REF does not require github.com/open-policy-agent/opa"
+            exit 1
+          fi
+          go get "github.com/open-policy-agent/opa@$opa"
+          go mod tidy
+          agent="$(go list -m -f '{{.Version}}' github.com/compliance-framework/agent)"
+          selected="$(go list -m -f '{{.Version}}' github.com/open-policy-agent/opa)"
+          if [ "$selected" != "$opa" ]; then
+            echo "::error::OPA $selected is selected, but the agent at $agent requires $opa"
+            exit 1
+          fi
+          echo "Probing with agent $agent and OPA $opa"
+      - name: Build cmd/plugin-probe
+        run: |
+          go -C "$TOOLS_DIR" build -o "$RUNNER_TEMP/plugin-probe" ./cmd/plugin-probe
+          rm -rf "$TOOLS_DIR"
+      - name: Probe
+        id: probe
+        env:
+          PLUGINS: ${{ inputs.plugins }}
+          POLICIES: ${{ inputs.policies }}
+        run: |
+          status=0
+          "$RUNNER_TEMP/plugin-probe" --plugins "$PLUGINS" --policies "$POLICIES" \
+            --json "$RUNNER_TEMP/report.json" --markdown "$GITHUB_STEP_SUMMARY" || status=$?
+          if [ -s "$RUNNER_TEMP/report.json" ]; then
+            # Compact JSON is one line: newlines inside strings are escaped.
+            echo "report=$(jq -c . "$RUNNER_TEMP/report.json")" >> "$GITHUB_OUTPUT"
+            cat "$RUNNER_TEMP/report.json"
+          fi
+          exit "$status"
