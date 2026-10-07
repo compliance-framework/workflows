@@ -28,6 +28,7 @@ permissions: {}
 jobs:
   dispatch:
     name: dispatch
+    if: always() # also when the run is cancelled
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: {}

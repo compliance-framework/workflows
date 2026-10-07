@@ -197,6 +197,9 @@ func previewTags(onMain bool, getenv func(string) string, stdout io.Writer) erro
 }
 
 func releaseTags(tag, prefix, style string, getenv func(string) string, stdout io.Writer) error {
+	if tag == "" {
+		return errors.New("no release tag: --tag is empty (is the workflow called on release: published?)")
+	}
 	tags, final, err := release.ReleaseTags(tag, prefix, style)
 	if err != nil {
 		return err

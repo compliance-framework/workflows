@@ -442,7 +442,8 @@ build by digest only. A `merge` job per image then creates one manifest list fro
 digests (passed between jobs as `digests-<name>-<arch>` artifacts, kept a day) and tags it
 `ghcr.io/<owner>/<name>:<tag>` for every tag, with the `source` and `revision` annotations
 on the index, which GHCR uses to link the package to the repo. It publishes whatever tags it
-is given; the caller decides them. If any build fails, no image is tagged.
+is given; the caller decides them. If any build fails, no image is tagged, and two
+`images` entries with the same name (case-insensitive) fail the run before any build.
 
 #### `cut-prerelease.yml`
 

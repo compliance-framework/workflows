@@ -91,8 +91,30 @@ func TestMergeManifests(t *testing.T) {
 	}
 }
 
+func TestImageNames(t *testing.T) {
+	need(t, "jq")
+	src := script(t, "publish-image.yml", "build", "Check the image names")
+	for _, tc := range []struct {
+		images string
+		failed bool
+	}{
+		{`[{}]`, false},
+		{`[{"name": "agent"}, {"name": "agent-ci", "dockerfile": "Dockerfile-ci"}]`, false},
+		{`[{}, {"name": "Agent"}]`, true}, // the repo name, lowercased
+		{`[{"name": "x"}, {"name": "x", "dockerfile": "Dockerfile-x"}]`, true},
+	} {
+		if r := run(t, t.TempDir(), src, "IMAGES="+tc.images, "REPO_NAME=agent"); r.failed != tc.failed {
+			t.Fatalf("%s: failed=%v, want %v; output:\n%s", tc.images, r.failed, tc.failed, r.out)
+		}
+	}
+}
+
 func TestReleaseTagsStep(t *testing.T) {
 	need(t, "go")
+	const step = "Check the tools ref"
+	if src := script(t, "preview.yml", "tags", step); script(t, "release-go-image.yml", "tags", step) != src || script(t, "cut-prerelease.yml", "cut", step) != src {
+		t.Fatalf("step %q differs between preview.yml, release-go-image.yml and cut-prerelease.yml", step)
+	}
 	src := script(t, "release-go-image.yml", "tags", "Choose the tags")
 	for _, tc := range []struct{ tag, want string }{
 		{"v1.2.3", "1.2.3 1.2 1 latest"},
@@ -103,7 +125,7 @@ func TestReleaseTagsStep(t *testing.T) {
 			t.Fatalf("%s: tags=%q, want %q; output:\n%s", tc.tag, r.outputs["tags"], tc.want, r.out)
 		}
 	}
-	if r := run(t, filepath.Join("..", ".."), src, "TAG=", "PREFIX=v"); !r.failed {
+	if r := run(t, filepath.Join("..", ".."), src, "TAG=", "PREFIX=v"); !r.failed || !strings.Contains(r.out, "no release tag") {
 		t.Fatalf("no tag: want a failure; output:\n%s", r.out)
 	}
 }
