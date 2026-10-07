@@ -1,0 +1,8 @@
+lisa-design:
+- Split: lisa's 1000-line limit. PR A (this branch) = internal/reposettings logic + fake-client tests; PR B (ra/w1-s1-t05b-repo-settings-workflow) = GitHub REST client, cmd/repo-settings, repo-settings.yml, README.
+- Dry-run safety is structural: PlanRepo takes only a Reader; Writer is called only from Apply, which Run calls only with Options.Apply. Tests assert zero write calls (fake client here; real HTTP client in PR B asserts only GETs).
+- Diff = flatten current and desired to dotted keys (JSON leaves) and compare. Rulesets are viewed with rules keyed by type and bypass actors keyed "type:id", so ordering/ids don't cause spurious diffs; read-only fields (id, source, links) are dropped by decoding into the typed Ruleset.
+- Only managed rule parameters are compared (managedParams); preview params GitHub adds (e.g. required_reviewers) are ignored, otherwise apply would never converge. A write replaces the whole ruleset (PUT), so the tool owns ccf-required/ccf-review entirely; other rulesets are never touched. Duplicate names are an error, not a guess.
+- Required check pinned to the GitHub Actions app (integration_id 15368, confirmed from mock-api's `ci / required` check run) so a commit status from another source can't satisfy it; configurable, 0 = any source.
+- ccf-review bypass: actor_type Integration, actor_id = ccf-release-bot app ID, bypass_mode "always". Equivalent to "pull_request" here because ccf-required (no bypass) already requires a PR; "always" avoids depending on how auto-merge attributes the merge.
+- Run continues past a failing repo and returns all errors (errors.Join); CheckTokenScope fails before any repo read if the token reaches a repo outside the selection (the ccf-repo-admin app is installed org-wide).
