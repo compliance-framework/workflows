@@ -1,0 +1,60 @@
+# Manifest of the mock repos used to develop and test the shared workflows and
+# tools without touching product repos. Same schema as repos.yaml; pass it with
+# --manifest repos.mock.yaml (tools) or the `manifest` input (workflows).
+
+holidays:
+  - "2026-12-25"
+  - "2027-01-01"
+
+include_patterns: []
+exclude: []
+
+repos:
+  - name: mock-api
+    kind: go-service
+    release: true
+
+  - name: mock-gooci
+    kind: go-lib
+    release: true
+
+  - name: mock-agent
+    kind: go-service
+    depends_on: [mock-api, mock-gooci]
+    release: true
+
+  - name: mock-ui
+    kind: ui
+    depends_on: [mock-api]
+    release: true
+
+  - name: mock-agent-action
+    kind: action
+    depends_on: [mock-agent]
+    release: true
+
+  - name: mock-plugin-1
+    kind: go-plugin
+    depends_on: [mock-agent]
+    release: true
+
+  - name: mock-plugin-2
+    kind: go-plugin
+    depends_on: [mock-agent]
+    release: true
+
+  - name: mock-plugin-policies-1
+    kind: policies
+    depends_on: [mock-agent]
+    release: true
+
+  - name: mock-plugin-policies-2
+    kind: policies
+    depends_on: [mock-agent]
+    release: true
+
+  - name: mock-helm-charts
+    kind: helm
+    depends_on: [mock-api, mock-ui, mock-agent]
+    release: true
+    charts: [mock-agent, mock-app]

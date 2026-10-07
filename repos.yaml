@@ -1,0 +1,42 @@
+# Manifest of the CCF repos that the shared workflows and tools (ccf-bump, train,
+# plugin-probe, repo-settings) operate on. Schema: internal/manifest/manifest.go.
+# The mock repos used to develop and test the workflows live in repos.mock.yaml.
+
+# ISO dates (YYYY-MM-DD) that are not working days; see manifest.NextWorkingWeekday.
+holidays:
+  - "2026-12-25"
+  - "2027-01-01"
+
+# Repo name globs and explicit exclusions; used from workstream 3 (plugins).
+include_patterns: []
+exclude: []
+
+repos:
+  - name: api
+    kind: go-service
+    release: true
+
+  - name: gooci
+    kind: go-lib
+    release: true
+
+  - name: agent
+    kind: go-service
+    depends_on: [api, gooci]
+    release: true
+
+  - name: ui
+    kind: ui
+    depends_on: [api]
+    release: true
+
+  - name: agent-action
+    kind: action
+    depends_on: [agent]
+    release: true
+
+  - name: helm-charts
+    kind: helm
+    depends_on: [api, ui, agent]
+    release: true
+    charts: [ccf-agent, ccf-app]
