@@ -1,0 +1,2 @@
+lisa-addressed:
+pass 1: [89558c47b0ad CORE-TEST-001] TestPlanRepoDiff now adds a hand-made `creation` rule to ccf-review and asserts the diff shows `rules.creation: "on" -> (unset)`.
