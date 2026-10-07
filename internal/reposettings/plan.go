@@ -78,8 +78,8 @@ const warningHint = "warning: an enforced org code security configuration sets a
 type Plan struct {
 	Repo    string
 	Changes []Change
-	// Unknown are merge settings the token can't read, so whether they differ isn't known. They
-	// are not counted as changes, but Apply writes them.
+	// Unknown are settings the token can't read (merge settings, Dependabot security updates), so
+	// whether they differ isn't known. They are not counted as changes, but Apply writes them.
 	Unknown []Change
 	// Managed are security settings an enforced org code security configuration already sets to
 	// the desired value. They are skipped.
@@ -180,8 +180,8 @@ func PlanRepo(ctx context.Context, r Reader, repo string, d Desired) (*Plan, err
 	return p, nil
 }
 
-// enabled names a bool security setting as GitHub does.
-var enabled = map[bool]string{true: "enabled", false: "disabled"}
+// stateName names a bool security setting as GitHub does.
+var stateName = map[bool]string{true: "enabled", false: "disabled"}
 
 // orgManaged reports whether an enforced org configuration sets key (to orgValue, "enabled" or
 // "disabled"), and records it as managed or, if orgValue isn't the desired value, as a warning.
@@ -189,11 +189,11 @@ func (p *Plan) orgManaged(key string, cfg *SecurityConfiguration, orgValue strin
 	if cfg == nil || !cfg.Enforced || (orgValue != "enabled" && orgValue != "disabled") {
 		return false
 	}
-	if orgValue == enabled[want] {
+	if orgValue == stateName[want] {
 		p.Managed = append(p.Managed, fmt.Sprintf("%s: managed by org configuration %q (%s)", key, cfg.Name, orgValue))
 	} else {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("%s: managed by org configuration %q: wants %s, org enforces %s — change it in the org configuration",
-			key, cfg.Name, enabled[want], orgValue))
+			key, cfg.Name, stateName[want], orgValue))
 	}
 	return true
 }
@@ -203,9 +203,9 @@ func (p *Plan) orgManaged(key string, cfg *SecurityConfiguration, orgValue strin
 func (p *Plan) compareSecurity(key string, current *bool, want bool) *bool {
 	switch {
 	case current == nil:
-		p.Unknown = append(p.Unknown, Change{Key: key, Current: unknownSecurity, Desired: enabled[want]})
+		p.Unknown = append(p.Unknown, Change{Key: key, Current: unknownSecurity, Desired: stateName[want]})
 	case *current != want:
-		p.Changes = append(p.Changes, Change{Key: key, Current: enabled[*current], Desired: enabled[want]})
+		p.Changes = append(p.Changes, Change{Key: key, Current: stateName[*current], Desired: stateName[want]})
 	default:
 		return nil
 	}
@@ -270,8 +270,8 @@ type Options struct {
 	CheckTokenScope bool
 }
 
-// Run prints each repo's diff to out and, with o.Apply, writes the changes. A failure on one repo
-// doesn't stop the others; Run returns every error.
+// Run prints each repo's diff to out and, with o.Apply, writes the changes. A failure on one repo,
+// or on one step of a repo's apply, doesn't stop the others; Run returns every error.
 func Run(ctx context.Context, gh Client, o Options, out io.Writer) error {
 	if len(o.Repos) == 0 {
 		return errors.New("no repos to process")

@@ -200,7 +200,7 @@ func ptrString(b *bool) string {
 	if b == nil {
 		return "unknown"
 	}
-	return enabled[*b]
+	return stateName[*b]
 }
 
 // baselineJSON is GET /repos/{o}/{r}/code-security-configuration on the CCF repos (abridged).
