@@ -6,3 +6,7 @@ lisa-design:
 - Plugin previews use `goreleaser release --snapshot --clean` (not `goreleaser build`): gooci upload reads dist/'s archives and metadata, which `build` doesn't produce.
 - release-policies.yml no longer attaches bundle.tar.gz to the GitHub release (the legacy per-repo workflow did via softprops); the spec asks only for opa build + gooci upload-single, so contents: read suffices.
 - preview.yml rejects an unknown kind in the tags job instead of silently publishing nothing.
+
+lisa-selfreview:
+pass 1 (strict):
+- [nit CORE-DOC-001] README preview section: "Plugins and policies set on-main: false to publish PR previews only" reads as a requirement; on-main is an opt-out they may use.
