@@ -1,0 +1,292 @@
+package reposettings
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// fakeRepo is one repo's state in fakeGitHub.
+type fakeRepo struct {
+	merge           MergeSettings
+	alerts, updates bool
+	rulesets        map[int64]Ruleset
+}
+
+// fakeGitHub keeps repo state in memory, records every call and applies writes to the state. Rulesets
+// are stored as GitHub returns them: JSON round-tripped, with an unmanaged parameter added.
+type fakeGitHub struct {
+	repos         map[string]*fakeRepo
+	installation  []string
+	nextID        int64
+	reads, writes []string
+}
+
+func (f *fakeGitHub) repo(op, repo string, write bool) (*fakeRepo, error) {
+	if write {
+		f.writes = append(f.writes, op+" "+repo)
+	} else {
+		f.reads = append(f.reads, op+" "+repo)
+	}
+	r, ok := f.repos[repo]
+	if !ok {
+		return nil, fmt.Errorf("%s: not found", repo)
+	}
+	return r, nil
+}
+
+func (f *fakeGitHub) InstallationRepos(context.Context) ([]string, error) {
+	f.reads = append(f.reads, "installation")
+	return f.installation, nil
+}
+
+func (f *fakeGitHub) MergeSettings(_ context.Context, repo string) (MergeSettings, error) {
+	r, err := f.repo("merge", repo, false)
+	if err != nil {
+		return MergeSettings{}, err
+	}
+	return r.merge, nil
+}
+
+func (f *fakeGitHub) VulnerabilityAlerts(_ context.Context, repo string) (bool, error) {
+	r, err := f.repo("alerts", repo, false)
+	return err == nil && r.alerts, err
+}
+
+func (f *fakeGitHub) SecurityUpdates(_ context.Context, repo string) (bool, error) {
+	r, err := f.repo("updates", repo, false)
+	return err == nil && r.updates, err
+}
+
+func (f *fakeGitHub) Rulesets(_ context.Context, repo string) (map[int64]Ruleset, error) {
+	r, err := f.repo("rulesets", repo, false)
+	if err != nil {
+		return nil, err
+	}
+	out := map[int64]Ruleset{}
+	for id, rs := range r.rulesets {
+		out[id] = rs
+	}
+	return out, nil
+}
+
+func (f *fakeGitHub) UpdateMergeSettings(_ context.Context, repo string, s MergeSettings) error {
+	r, err := f.repo("PATCH repo", repo, true)
+	if err == nil {
+		r.merge = s
+	}
+	return err
+}
+
+func (f *fakeGitHub) SetVulnerabilityAlerts(_ context.Context, repo string, on bool) error {
+	r, err := f.repo(fmt.Sprintf("alerts=%t", on), repo, true)
+	if err == nil {
+		r.alerts = on
+	}
+	return err
+}
+
+func (f *fakeGitHub) SetSecurityUpdates(_ context.Context, repo string, on bool) error {
+	r, err := f.repo(fmt.Sprintf("updates=%t", on), repo, true)
+	if err == nil {
+		r.updates = on
+	}
+	return err
+}
+
+func (f *fakeGitHub) CreateRuleset(_ context.Context, repo string, rs Ruleset) error {
+	r, err := f.repo("create "+rs.Name, repo, true)
+	if err == nil {
+		f.nextID++
+		r.rulesets[f.nextID] = asReturned(rs)
+	}
+	return err
+}
+
+func (f *fakeGitHub) UpdateRuleset(_ context.Context, repo string, id int64, rs Ruleset) error {
+	r, err := f.repo(fmt.Sprintf("update %d %s", id, rs.Name), repo, true)
+	if err == nil {
+		r.rulesets[id] = asReturned(rs)
+	}
+	return err
+}
+
+// asReturned is rs as a GET returns it: numbers as float64 and a preview parameter added.
+func asReturned(rs Ruleset) Ruleset {
+	var out Ruleset
+	b, _ := json.Marshal(rs)
+	_ = json.Unmarshal(b, &out)
+	for _, rule := range out.Rules {
+		if rule.Type == "pull_request" {
+			rule.Parameters["required_reviewers"] = []any{}
+		}
+	}
+	return out
+}
+
+// githubDefaults is a new repo's state: every merge method, alerts off, security updates on, an
+// old ccf-review ruleset without bypass and an unrelated ruleset.
+func githubDefaults() *fakeRepo {
+	return &fakeRepo{
+		merge: MergeSettings{
+			AllowSquashMerge: true, AllowMergeCommit: true, AllowRebaseMerge: true,
+			SquashMergeCommitTitle: "COMMIT_OR_PR_TITLE", SquashMergeCommitMessage: "COMMIT_MESSAGES",
+		},
+		updates: true,
+		rulesets: map[int64]Ruleset{
+			7: asReturned(defaultBranchRuleset(ReviewRuleset, nil, Rule{Type: "pull_request", Parameters: pullRequestParams(0)})),
+			8: asReturned(defaultBranchRuleset("other", nil, Rule{Type: "deletion"})),
+		},
+	}
+}
+
+func newFake(names ...string) *fakeGitHub {
+	f := &fakeGitHub{repos: map[string]*fakeRepo{}, nextID: 100}
+	for _, n := range names {
+		f.repos["o/"+n] = githubDefaults()
+		f.installation = append(f.installation, "o/"+n)
+	}
+	return f
+}
+
+func desired(t *testing.T) Desired {
+	t.Helper()
+	d, err := DesiredState(Config{RequiredCheck: DefaultRequiredCheck, RequiredCheckAppID: GitHubActionsAppID, BypassAppID: 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func TestDesiredStateErrors(t *testing.T) {
+	for _, c := range []Config{{BypassAppID: 42}, {RequiredCheck: "x"}, {RequiredCheck: "x", BypassAppID: 1, RequiredCheckAppID: -1}} {
+		if _, err := DesiredState(c); err == nil {
+			t.Errorf("DesiredState(%+v): want an error", c)
+		}
+	}
+}
+
+func TestPlanRepoDiff(t *testing.T) {
+	f := newFake("a")
+	review := f.repos["o/a"].rulesets[7]
+	review.Rules = append(review.Rules, Rule{Type: "creation"}) // added by hand; the write drops it
+	f.repos["o/a"].rulesets[7] = review
+	p, err := PlanRepo(context.Background(), f, "o/a", desired(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range p.Changes {
+		got = append(got, c.String())
+	}
+	for _, want := range []string{
+		`repo.allow_merge_commit: true -> false`,
+		`repo.allow_rebase_merge: true -> false`,
+		`repo.squash_merge_commit_title: "COMMIT_OR_PR_TITLE" -> "PR_TITLE"`,
+		`repo.squash_merge_commit_message: "COMMIT_MESSAGES" -> "PR_BODY"`,
+		`repo.allow_auto_merge: false -> true`,
+		`repo.delete_branch_on_merge: false -> true`,
+		`security.vulnerability_alerts: disabled -> enabled`,
+		`security.dependabot_security_updates: enabled -> disabled`,
+		`ruleset[ccf-required]: missing -> create`,
+		`ruleset[ccf-required].rules.required_status_checks.required_status_checks: (unset) -> [{"context":"ci / required","integration_id":15368}]`,
+		`ruleset[ccf-required].rules.non_fast_forward: (unset) -> "on"`,
+		`ruleset[ccf-review].bypass: "none" -> (unset)`,
+		`ruleset[ccf-review].bypass.Integration:42: (unset) -> "always"`,
+		`ruleset[ccf-review].rules.pull_request.required_approving_review_count: 0 -> 1`,
+		`ruleset[ccf-review].rules.creation: "on" -> (unset)`,
+	} {
+		if !slices.Contains(got, want) {
+			t.Errorf("missing change %s", want)
+		}
+	}
+	for _, c := range got {
+		if strings.Contains(c, "other") || strings.Contains(c, "required_reviewers") || strings.HasPrefix(c, "repo.allow_squash_merge") {
+			t.Errorf("unexpected change %s", c)
+		}
+	}
+	if len(f.writes) > 0 {
+		t.Errorf("PlanRepo wrote: %v", f.writes)
+	}
+}
+
+func TestPlanRepoDuplicateRuleset(t *testing.T) {
+	f := newFake("a")
+	f.repos["o/a"].rulesets[9] = f.repos["o/a"].rulesets[7]
+	if _, err := PlanRepo(context.Background(), f, "o/a", desired(t)); err == nil || !strings.Contains(err.Error(), "more than one ruleset") {
+		t.Fatalf("err = %v, want a duplicate ruleset error", err)
+	}
+}
+
+func TestRunDryRunMakesNoWrites(t *testing.T) {
+	f := newFake("a", "b")
+	var out bytes.Buffer
+	if err := Run(context.Background(), f, Options{Owner: "o", Repos: []string{"a", "b"}, Desired: desired(t), CheckTokenScope: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writes) > 0 {
+		t.Fatalf("dry run wrote: %v", f.writes)
+	}
+	if len(f.reads) == 0 {
+		t.Fatal("dry run read nothing")
+	}
+	for _, want := range []string{"o/a: 28 change(s)", "o/b: 28 change(s)", "  repo.allow_merge_commit: true -> false", "56 change(s) in 2 of 2 repo(s) (dry run"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestRunApplyIsIdempotent(t *testing.T) {
+	f := newFake("a")
+	opts := Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}
+	if err := Run(context.Background(), f, opts, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"PATCH repo o/a", "alerts=true o/a", "updates=false o/a", "create ccf-required o/a", "update 7 ccf-review o/a"}
+	if !slices.Equal(f.writes, want) {
+		t.Fatalf("writes = %v, want %v", f.writes, want)
+	}
+	if _, ok := f.repos["o/a"].rulesets[8]; !ok {
+		t.Error("the unrelated ruleset was removed")
+	}
+
+	f.writes = nil
+	var out bytes.Buffer
+	if err := Run(context.Background(), f, opts, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writes) > 0 {
+		t.Errorf("second apply wrote: %v", f.writes)
+	}
+	if !strings.Contains(out.String(), "o/a: up to date") {
+		t.Errorf("second apply output:\n%s", out.String())
+	}
+}
+
+func TestRunTokenScope(t *testing.T) {
+	f := newFake("a", "b")
+	err := Run(context.Background(), f, Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), CheckTokenScope: true}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "o/b") {
+		t.Fatalf("err = %v, want the extra repo o/b named", err)
+	}
+	if !slices.Equal(f.reads, []string{"installation"}) {
+		t.Errorf("reads = %v, want only the installation check", f.reads)
+	}
+}
+
+func TestRunContinuesAfterRepoError(t *testing.T) {
+	f := newFake("a")
+	var out bytes.Buffer
+	err := Run(context.Background(), f, Options{Owner: "o", Repos: []string{"missing", "a"}, Desired: desired(t), Apply: true}, &out)
+	if err == nil || !strings.Contains(err.Error(), "o/missing") {
+		t.Fatalf("err = %v, want o/missing named", err)
+	}
+	if !strings.Contains(out.String(), "o/a: applied") {
+		t.Errorf("o/a was not applied:\n%s", out.String())
+	}
+}
