@@ -1,0 +1,7 @@
+lisa-design:
+- Split: T03b ships ci-go-service.yml and ci-go-lib.yml; ci-ui.yml, ci-helm.yml and ci-action.yml go in a stacked follow-up PR (ra/w1-s1-t03c-ci-ui-helm-action), because all five plus tests and README exceeded the 1000-changed-line limit (CORE-SIZE-001).
+- The lint job of ci-go-service.yml and ci-go-lib.yml is a byte-for-byte copy of ci-go-plugin.yml's (TestSharedCopies pins it), not a nested reusable workflow: keeps T03a's convention and check names; a shared ci-go-lint.yml would have meant editing T03a's file. Likewise the gofmt and go mod tidy steps, and ci-go-lib's goreleaser setup + check (ci-go-plugin's goreleaser job minus the build step).
+- The required job is identical in every kind workflow (TestRequired), and TestRequiredNeedsEveryJob checks it needs every other job with if: always().
+- ci-go-service: extra make targets run in their own `make` job (api's test-integration is slow, and api's current CI runs it as a separate job); the job is unconditional and no-ops with no targets, because `required` treats a skipped job as a failure.
+- ci-go-service: `prepare-command` (not "pre-test-command") runs before go vet/test/build and before the make targets, since go vet also compiles the tests. It is not run in the lint job, which must stay identical across Go kinds (api commits its swag docs, so lint compiles without it).
+- ci-go-lib: exactly the spec's checks (golangci-lint, gofmt, go test ./..., goreleaser check); no go vet / go mod tidy / -race, which the spec reserves for services.
