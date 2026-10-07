@@ -1,0 +1,20 @@
+# Shared golangci-lint base config (golangci-lint v2). The CI workflows use it when the
+# calling repo has no golangci-lint config of its own; this repo lints with it too.
+version: "2"
+
+run:
+  # Exclusion paths are relative to go.mod, not to this file: CI copies it outside the repo.
+  relative-path-mode: gomod
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - errorlint
+    - misspell
+    - unconvert
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - std-error-handling
