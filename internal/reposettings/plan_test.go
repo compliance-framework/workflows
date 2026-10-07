@@ -337,6 +337,9 @@ func TestPlanRepoUnknownMergeSettings(t *testing.T) {
 			rest = append(rest, c)
 		}
 	}
+	if len(rest) == 0 {
+		t.Fatal("the fixture produces no security or ruleset changes to compare")
+	}
 	if got := changeStrings(ph.Changes); !slices.Equal(got, rest) {
 		t.Errorf("changes with hidden merge settings = %v, want %v", got, rest)
 	}

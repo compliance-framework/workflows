@@ -708,7 +708,7 @@ compliance-framework/mock-ui: up to date
 GitHub leaves the merge settings out of `GET /repos/{owner}/{repo}` for a token with
 Administration **read**, so a dry run can't see them. They print as
 `repo.allow_merge_commit: unknown (not readable with Administration read) -> false`, count as
-`N unknown` next to the changes (`<repo>: N change(s), 7 unknown`), and a line under the
+`N unknown` next to the changes (`<repo>: <n> change(s), 7 unknown`), and a line under the
 totals says apply writes them. Apply PATCHes the full desired merge settings whenever any of them
 is unknown or differs; the PATCH is idempotent.
 
@@ -719,10 +719,10 @@ How to run it:
    Administration **read** only, so a dry run can't change anything. Review the diff.
 2. **Apply** (a human, never an agent): in the `ccf-repo-admin` app settings, temporarily grant
    **Administration: Read and write** and accept the new permission on the org installation. Run
-   the workflow from `main` with the same inputs and `apply` on. Re-run the dry run while the app
-   still has write: every repo should be `up to date` (the sync is idempotent). Then set
-   Administration back to **read**; dry runs then show `0 change(s), 7 unknown` per repo, since
-   the merge settings are hidden again.
+   the workflow from `main` with the same inputs and `apply` on. Run it again with `apply` on:
+   every repo should be `up to date` and nothing is written (the sync is idempotent). A dry run
+   can't show this, since its token is always read-only: a repo that is otherwise in sync shows
+   `0 change(s), 7 unknown`. Then set Administration back to **read**.
    Do the mocks first.
 
 The workflow calls `go run ./cmd/repo-settings sync`. Flags it doesn't expose: `--owner`
