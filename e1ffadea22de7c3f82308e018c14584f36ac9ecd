@@ -11,3 +11,7 @@ lisa-selfreview:
 - pass 1: [must-fix] releasePR waited for behind_by==0, which never happens after ci:/chore: commits. Fixed (gate on release-please's run for the head).
 - pass 1: [must-fix CORE-TEST-001] bump PR without auto-merge, closed bump PR and release-please failure had no tests. Fixed (TestHolds).
 - pass 2: approve. Deferred nit: Engine.Members is unused until the commands PR (#next in the stack).
+
+lisa-addressed:
+- release PR gate now uses release-please's run on the default branch head; BehindBy removed from interface, fake and adapter.
+- TestHolds covers the needs-human and blocked holds of bumping and release-pr.
