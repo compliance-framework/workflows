@@ -1,0 +1,14 @@
+lisa-design:
+- Split: T04a is two stacked PRs to stay under lisa's 1000-line limit. This one: release-please.yml, release-please/defaults.json, release-checks.yml, internal/release checks, cmd/release check subcommands. The next (ra/w1-s1-t04a2-preview-prerelease): preview.yml, publish-image.yml, cut-prerelease.yml, NextRC and PreviewTags.
+- Defaults are copied, not merged: release-please-action reads release-please-config.json through the GitHub API from the target branch, so a runtime-merged file would be ignored. release-please.yml warns (not fails) per top-level key of defaults.json whose value differs in the caller config, so a repo can still deliberately override.
+- Token scope: both release apps are installed org-wide; create-github-app-token with owner and empty repositories mints an org-wide token. A guard step fails unless github.event.repository.name is non-empty and github.repository == compliance-framework/<name>. Uses app-id (deprecated in v3 in favour of client-id) because the org secret is RELEASE_BOT_APP_ID.
+- version-guard compares every package of .release-please-manifest.json (base via the contents API at the base SHA, 404 = empty; any other API error fails) against the PR head; a package missing at the base counts as 0.0.0, so a first release at 1.0.0 needs the label. Labels come from the event payload; callers listen for labeled/unlabeled.
+- go-module-path uses x/mod module.CheckPathMajor on the root package (".") version for every version, not only >= 1.0: a /vN suffix on a v0/v1 module is also wrong.
+- internal-deps-final also flags any replace directive of a compliance-framework module (a replace bypasses the required version). Uses modfile.Parse (strict), since ParseLax drops replace directives.
+- release-checks is one job skipped (not failed) outside release-please-- branches, so callers can make it a required check from their CI workflow.
+
+lisa-selfreview:
+pass 1 (strict): must-fix CORE-TEST-001 release-checks.yml base-manifest 404/other-error handling untested; should-fix GO-ERR-001 cmd/release readManifest errors lack the file path; nit replace message trailing space in NonFinalDeps.
+
+lisa-selfreview:
+- pass 1 (strict): must-fix CORE-TEST-001 release-checks.yml base-manifest 404/other-error handling untested; should-fix GO-ERR-001 cmd/release readManifest errors lack the file path; nit NonFinalDeps replace message trailing space.
