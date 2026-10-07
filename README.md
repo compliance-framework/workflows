@@ -25,7 +25,7 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
 | `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`. |
-| `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, `ci-go-plugin.yml`, `ci-policies.yml`). |
+| `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml` and the `ci-<kind>.yml` kind CI workflows). |
 | `.golangci.yml`, `.regal/config.yaml` | Shared lint base configs, used by the CI workflows when the calling repo has none. |
 
 ### The manifest
@@ -100,8 +100,8 @@ jobs:
     secrets: inherit
 ```
 
-Each `kind` gets its own CI workflow (`ci-go-plugin.yml` and `ci-policies.yml` so far; the
-others follow), plus release workflows later. The mock repos adopt each one before the
+Each `kind` gets its own CI workflow (`ci-<kind>.yml`, see [Kind CI workflows](#kind-ci-workflows);
+ui, helm and action follow), plus release workflows later. The mock repos adopt each one before the
 product repos do. Consumers pin a major tag (`@v1`) or a full commit SHA, never `@main`.
 The `permissions` above are the ones `ci-common.yml` and `notify-failure.yml` need (see
 below).
@@ -152,10 +152,10 @@ Each calls `ci-common.yml` and ends in a job named `required`, the one status ch
 needs to require (branch protection shows it as `<caller job> / required`). `required` runs
 with `if: always()`, needs every other job, and fails unless all of them succeeded. None of
 those jobs is conditional, so a skipped job also fails it; the `pull_request`-only jobs inside
-`ci-common.yml` don't count, because `common` still succeeds when they skip. In the `go` and
-`opa` jobs every check runs even if an earlier one failed, so one run reports every problem.
-Callers grant the permissions `ci-common.yml` needs (see the example above); neither workflow
-takes secrets.
+`ci-common.yml` don't count, because `common` still succeeds when they skip. Within a job,
+every check runs even if an earlier one failed, so one run reports every problem. Callers
+grant the permissions `ci-common.yml` needs (see the example above); none takes secrets.
+Tool versions are pinned in the workflows.
 
 `ci-common.yml` is called as `./.github/workflows/ci-common.yml`. In a called workflow, a
 local reference means this repo at the same commit as the calling workflow file, not the
@@ -206,6 +206,38 @@ A caller is the example above with the kind's workflow in `uses:`, for example:
       pull-requests: read
       security-events: write
 ```
+
+The snippets below show only the `uses:` and `with:` keys of that `ci` job.
+
+#### `ci-go-service.yml` (kind `go-service`)
+
+| Job | Checks |
+| --- | --- |
+| `golangci-lint` | As in `ci-go-plugin.yml` (same job and `lint-new-from-merge-base` input). |
+| `go` | `gofmt -l .`, then the prepare command, `go vet ./...`, `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test -race ./...`, `go build ./...`. |
+| `make` | The prepare command, then each of `make-targets` (all run even if one fails). With no targets it does nothing and succeeds. |
+
+| Input | Default | What |
+| --- | --- | --- |
+| `make-targets` | `""` | Extra `make` targets, space-separated. |
+| `prepare-command` | `""` | Shell command run first in `go` (after gofmt) and `make`. If it fails, the later checks are skipped. |
+
+```yaml
+    uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@v1
+    with:  # api; agent passes make-targets: check-opa-version
+      prepare-command: make swag
+      make-targets: test-integration check-diff
+```
+
+#### `ci-go-lib.yml` (kind `go-lib`)
+
+| Job | Checks |
+| --- | --- |
+| `golangci-lint` | As in `ci-go-plugin.yml` (same job and `lint-new-from-merge-base` input). |
+| `go` | `gofmt -l .`, `go test ./...`. |
+| `goreleaser` | `goreleaser check` (deprecated properties only warn). |
+
+Caller: `uses: compliance-framework/workflows/.github/workflows/ci-go-lib.yml@v1`.
 
 ## Development
 

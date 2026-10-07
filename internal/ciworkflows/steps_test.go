@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,12 +16,19 @@ import (
 )
 
 const (
-	goPlugin = "ci-go-plugin.yml"
-	policies = "ci-policies.yml"
+	goPlugin  = "ci-go-plugin.yml"
+	policies  = "ci-policies.yml"
+	goService = "ci-go-service.yml"
+	goLib     = "ci-go-lib.yml"
 )
+
+// kinds are the kind CI workflows; each ends in the same `required` job.
+var kinds = []string{goPlugin, policies, goService, goLib}
 
 type workflow struct {
 	Jobs map[string]struct {
+		Needs []string `yaml:"needs"`
+		If    string   `yaml:"if"`
 		Steps []struct {
 			Name string `yaml:"name"`
 			Run  string `yaml:"run"`
@@ -27,17 +36,22 @@ type workflow struct {
 	} `yaml:"jobs"`
 }
 
-// script returns the run script of the named step of a job.
-func script(t *testing.T, file, job, step string) string {
+func read(t *testing.T, file string, v any) {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", file))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var wf workflow
-	if err := yaml.Unmarshal(b, &wf); err != nil {
+	if err := yaml.Unmarshal(b, v); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// script returns the run script of the named step of a job.
+func script(t *testing.T, file, job, step string) string {
+	t.Helper()
+	var wf workflow
+	read(t, file, &wf)
 	for _, s := range wf.Jobs[job].Steps {
 		if s.Name == step && s.Run != "" {
 			return s.Run
@@ -106,8 +120,10 @@ func git(t *testing.T, dir string, args ...string) string {
 func TestRequired(t *testing.T) {
 	need(t, "jq")
 	src := script(t, goPlugin, "required", "Check the results")
-	if other := script(t, policies, "required", "Check the results"); other != src {
-		t.Fatal("the required check differs between ci-go-plugin.yml and ci-policies.yml")
+	for _, file := range kinds[1:] {
+		if other := script(t, file, "required", "Check the results"); other != src {
+			t.Fatalf("the required check differs between %s and %s", goPlugin, file)
+		}
 	}
 	for _, tc := range []struct {
 		name, needs, want string
@@ -122,6 +138,86 @@ func TestRequired(t *testing.T) {
 			r := run(t, t.TempDir(), src, "NEEDS="+tc.needs)
 			if r.failed != tc.failed || !strings.Contains(r.out, tc.want) {
 				t.Fatalf("failed=%v, want %v; output:\n%s", r.failed, tc.failed, r.out)
+			}
+		})
+	}
+}
+
+func TestRequiredNeedsEveryJob(t *testing.T) {
+	for _, file := range kinds {
+		var wf workflow
+		read(t, file, &wf)
+		var others []string
+		for name := range wf.Jobs {
+			if name != "required" {
+				others = append(others, name)
+			}
+		}
+		req := wf.Jobs["required"]
+		slices.Sort(others)
+		if got := slices.Sorted(slices.Values(req.Needs)); !slices.Equal(got, others) || req.If != "always()" {
+			t.Errorf("%s: required needs %v if %q, want %v if always()", file, got, req.If, others)
+		}
+	}
+}
+
+// TestSharedCopies pins the jobs and steps the kind workflows repeat to one copy.
+func TestSharedCopies(t *testing.T) {
+	jobs := func(file string) map[string]any {
+		var wf struct {
+			Jobs map[string]any `yaml:"jobs"`
+		}
+		read(t, file, &wf)
+		return wf.Jobs
+	}
+	for _, file := range []string{goService, goLib} {
+		if !reflect.DeepEqual(jobs(file)["lint"], jobs(goPlugin)["lint"]) {
+			t.Errorf("the lint job differs between %s and %s", goPlugin, file)
+		}
+	}
+	// ci-go-lib.yml's goreleaser job is ci-go-plugin.yml's without the build step.
+	steps := func(file string) []any { return jobs(file)["goreleaser"].(map[string]any)["steps"].([]any) }
+	if plugin := steps(goPlugin); !reflect.DeepEqual(steps(goLib), plugin[:len(plugin)-1]) {
+		t.Errorf("the goreleaser setup and check differ between %s and %s", goPlugin, goLib)
+	}
+	for _, c := range []struct{ file, job, step, otherFile, otherJob string }{
+		{goPlugin, "go", "gofmt", goService, "go"},
+		{goPlugin, "go", "gofmt", goLib, "go"},
+		{goPlugin, "go", "go mod tidy", goService, "go"},
+		{goService, "go", "Prepare", goService, "make"},
+	} {
+		if script(t, c.file, c.job, c.step) != script(t, c.otherFile, c.otherJob, c.step) {
+			t.Errorf("step %q differs between %s (%s) and %s (%s)", c.step, c.file, c.job, c.otherFile, c.otherJob)
+		}
+	}
+}
+
+func TestMakeTargets(t *testing.T) {
+	src := script(t, goService, "make", "make")
+	bin := t.TempDir()
+	fake := "#!/bin/sh\necho \"ran $1\"\n[ \"$1\" != bad ]\n"
+	if err := os.WriteFile(filepath.Join(bin, "make"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := "PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH")
+	for _, tc := range []struct {
+		targets string
+		failed  bool
+		want    []string
+	}{
+		{"", false, []string{"No make targets."}},
+		{"one two", false, []string{"ran one", "ran two"}},
+		{"bad two", true, []string{"ran bad", "ran two", "make targets failed: bad"}},
+	} {
+		t.Run(tc.targets, func(t *testing.T) {
+			r := run(t, t.TempDir(), src, path, "TARGETS="+tc.targets)
+			for _, w := range tc.want {
+				if !strings.Contains(r.out, w) {
+					t.Fatalf("output lacks %q:\n%s", w, r.out)
+				}
+			}
+			if r.failed != tc.failed {
+				t.Fatalf("failed=%v, want %v:\n%s", r.failed, tc.failed, r.out)
 			}
 		})
 	}

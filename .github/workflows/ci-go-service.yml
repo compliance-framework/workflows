@@ -1,0 +1,217 @@
+# CI for Go services (kind go-service: api, agent). Calls ci-common.yml and ends in the
+# `required` job, the one status check to require. Callers grant the permissions ci-common.yml
+# needs (actions: read, contents: read, pull-requests: read, security-events: write); see README.
+name: ci-go-service
+
+on:
+  workflow_call:
+    inputs:
+      lint-new-from-merge-base:
+        description: "Report only lint issues the change adds (vs the PR's merge base, or the pushed range); false lints everything"
+        type: boolean
+        default: true
+      make-targets:
+        description: "Extra make targets to run, space-separated, each in turn (agent: check-opa-version; api: test-integration check-diff)"
+        type: string
+        default: ""
+      prepare-command:
+        description: "Shell command run before go vet, the tests, the build and the make targets (api: make swag)"
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  common:
+    name: common
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/ci-common.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the merge base / pushed range must be in the clone
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Find the repo's golangci-lint config
+        id: config
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          for f in .golangci.yml .golangci.yaml .golangci.toml .golangci.json; do
+            if [ -f "$f" ]; then
+              echo "Using the repo's $f."
+              echo "shared=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "No golangci-lint config in the repo; using the shared base config."
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so the shared config can't be fetched"
+            exit 1
+          fi
+          echo "shared=true" >> "$GITHUB_OUTPUT"
+      - name: Check out the shared config
+        if: steps.config.outputs.shared == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ccf-workflows
+          sparse-checkout: .golangci.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Choose the lint arguments
+        id: args
+        env:
+          SHARED: ${{ steps.config.outputs.shared }}
+          NEW_ONLY: ${{ inputs.lint-new-from-merge-base }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          args=""
+          if [ "$SHARED" = "true" ]; then
+            # Moved out of the tree so neither golangci-lint nor git status sees the clone.
+            mv .ccf-workflows/.golangci.yml "$RUNNER_TEMP/ccf-golangci.yml"
+            rm -rf .ccf-workflows
+            args="--config=$RUNNER_TEMP/ccf-golangci.yml"
+          fi
+          if [ "$NEW_ONLY" = "true" ]; then
+            if [ -n "$BASE_REF" ]; then
+              args="$args --new-from-merge-base=origin/$BASE_REF"
+            elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              args="$args --new-from-rev=$BEFORE"
+            else
+              echo "No merge base or pushed range for this event; linting everything."
+            fi
+          fi
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.11.4
+          args: ${{ steps.args.outputs.args }}
+
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: setup
+        with:
+          go-version-file: go.mod
+      # Each check runs even when an earlier one failed, so one run reports all of them.
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)" # a parse error fails the step here
+          if [ -n "$unformatted" ]; then
+            echo "::error::files need gofmt (run gofmt -w .):"
+            gofmt -d .
+            exit 1
+          fi
+      - name: Prepare
+        id: prepare
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          PREPARE: ${{ inputs.prepare-command }}
+        run: |
+          if [ -n "$PREPARE" ]; then
+            bash -e -c "$PREPARE"
+          fi
+      - name: go vet
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: go vet ./...
+      - name: go mod tidy
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain -- go.mod go.sum)" ]; then
+            echo "::error::go.mod/go.sum are not tidy (run go mod tidy):"
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+      - name: go test
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: go test -race ./...
+      - name: go build
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: go build ./...
+
+  make:
+    name: make
+    # Runs (and succeeds) with no targets too: `required` treats a skipped job as a failure.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Prepare
+        env:
+          PREPARE: ${{ inputs.prepare-command }}
+        run: |
+          if [ -n "$PREPARE" ]; then
+            bash -e -c "$PREPARE"
+          fi
+      - name: make
+        env:
+          TARGETS: ${{ inputs.make-targets }}
+        run: |
+          # Every target runs even when an earlier one failed.
+          failed=""
+          for target in $TARGETS; do
+            echo "::group::make $target"
+            make "$target" || failed="$failed $target"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::make targets failed:$failed"
+            exit 1
+          fi
+          [ -n "$TARGETS" ] || echo "No make targets."
+
+  required:
+    name: required
+    needs: [common, lint, go, make]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # No job above is conditional, so anything but success fails (jobs ci-common skips
+      # on push events are inside `common`, whose result is still success).
+      - name: Check the results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::required jobs did not succeed:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All required jobs succeeded."
