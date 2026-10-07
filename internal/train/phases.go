@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/compliance-framework/workflows/internal/release"
@@ -75,42 +74,36 @@ func (e *Engine) mergeGreen(ctx context.Context, r *RepoState, pr *PR) (bool, er
 	return true, nil
 }
 
-// releasePR waits for release-please's PR to contain the default branch, or for
-// release-please to find nothing to release.
+// releasePR waits for release-please's run on the default branch's head, then takes its
+// release PR, or finds nothing to release. The run is the signal, not the PR's base: for
+// commits that release nothing (ci:, chore:) release-please leaves its PR behind the branch.
 func (e *Engine) releasePR(ctx context.Context, r *RepoState) error {
 	branch, sha, err := e.Repos.DefaultBranch(ctx, r.Name)
 	if err != nil {
 		return err
 	}
+	run, err := e.releasePleaseRun(ctx, r.Name, sha)
+	switch {
+	case err != nil:
+		return err
+	case run == nil || run.Status != "completed":
+		r.wait("waiting for release-please on %s", short(sha))
+		return nil
+	case run.Conclusion != "success":
+		r.hold(Blocked, false, "release-please failed on %s: %s", short(sha), run.URL)
+		return nil
+	}
 	pr, err := e.Repos.OpenPR(ctx, r.Name, ReleaseBranchPrefix+branch)
-	if err != nil {
+	switch {
+	case err != nil:
 		return err
+	case pr == nil:
+		r.next(Released)
+		r.Detail = "nothing to release"
+	default:
+		r.ReleasePR = pr.Number
+		r.next(Merging)
 	}
-	if pr == nil {
-		run, err := e.releasePleaseRun(ctx, r.Name, sha)
-		switch {
-		case err != nil:
-			return err
-		case run == nil || run.Status != "completed":
-			r.wait("waiting for release-please on %s", short(sha))
-		case run.Conclusion != "success":
-			r.hold(Blocked, false, "release-please failed on %s: %s", short(sha), run.URL)
-		default:
-			r.next(Released)
-			r.Detail = "nothing to release"
-		}
-		return nil
-	}
-	r.ReleasePR = pr.Number
-	behind, err := e.Repos.BehindBy(ctx, r.Name, sha, pr.HeadSHA)
-	if err != nil {
-		return err
-	}
-	if behind > 0 {
-		r.wait("waiting for release-please to update #%d to %s", pr.Number, short(sha))
-		return nil
-	}
-	r.next(Merging)
 	return nil
 }
 
@@ -256,17 +249,4 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 	r.FailedRun = 0
 	r.next(Released)
 	return nil
-}
-
-// nextPatch returns X.Y.(Z+1), or v unchanged if it is not X.Y.Z.
-func nextPatch(v string) string {
-	parts := strings.Split(v, ".")
-	if len(parts) != 3 {
-		return v
-	}
-	z, err := strconv.Atoi(parts[2])
-	if err != nil {
-		return v
-	}
-	return fmt.Sprintf("%s.%s.%d", parts[0], parts[1], z+1)
 }

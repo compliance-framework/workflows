@@ -24,6 +24,8 @@ type world struct {
 	merges   []string // "repo#n"
 	releases []string // repos, in the order their release PRs merged
 	id       int64
+	// manualBumps: ccf-bump leaves auto-merge off; closedBumps: someone closes the bump PRs.
+	manualBumps, closedBumps bool
 }
 
 type fakeRepo struct {
@@ -39,6 +41,7 @@ type fakeRepo struct {
 	next string
 	// failChecks fails the checks of the release PR's head; failRelease the release run.
 	failChecks, failRelease bool
+	failReleasePlease       bool
 	bumped                  bool // ccf-bump finds pins to move
 }
 
@@ -91,9 +94,13 @@ func (w *world) tick() {
 	for _, r := range w.repos {
 		if r.rpDone != r.main {
 			r.rpDone = r.main
-			r.runs["push"+r.main] = append(r.runs["push"+r.main], Run{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: "success"})
+			c := "success"
+			if r.failReleasePlease {
+				c = "failure"
+			}
+			r.runs["push"+r.main] = append(r.runs["push"+r.main], Run{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: c})
 			if r.next == "" {
-				r.next = nextPatch(r.manifests[r.main][RootPackage])
+				r.next = "0.1.1" // a patch: the repos the tests bump start at 0.1.0
 			}
 			head := r.name + "-rp-" + r.main
 			r.manifests[head] = map[string]string{RootPackage: r.next}
@@ -148,13 +155,6 @@ func (w *world) PR(_ context.Context, repo string, n int) (*PR, error) {
 	}
 	c := *pr
 	return &c, nil
-}
-
-func (w *world) BehindBy(_ context.Context, repo, base, head string) (int, error) {
-	if strings.HasSuffix(head, "-rp-"+base) {
-		return 0, nil
-	}
-	return 1, nil
 }
 
 func (w *world) Checks(_ context.Context, repo, sha string) ([]Check, error) {
@@ -216,7 +216,7 @@ func (w *world) Bump(_ context.Context, path, repo string, sets map[string]strin
 	}
 	pr := r.openPR("ccf-bump/")
 	if pr == nil {
-		pr = &PR{Number: int(w.nextID()), URL: "ccf-bump/train-x", Open: true, AutoMerge: true, HeadSHA: fmt.Sprintf("%s-bump%d", repo, w.id)}
+		pr = &PR{Number: int(w.nextID()), URL: "ccf-bump/train-x", Open: !w.closedBumps, AutoMerge: !w.manualBumps, HeadSHA: fmt.Sprintf("%s-bump%d", repo, w.id)}
 		r.prs[pr.Number] = pr
 		w.green(r, pr.HeadSHA, true)
 	}

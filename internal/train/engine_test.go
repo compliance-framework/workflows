@@ -173,3 +173,29 @@ func TestMajorNeedsApproval(t *testing.T) {
 		t.Errorf("after approval: %s", w.issues[0].Body)
 	}
 }
+
+func TestHolds(t *testing.T) {
+	tests := []struct {
+		name   string
+		setup  func(w *world)
+		repo   string
+		hold   Hold
+		detail string
+	}{
+		{"bump PR without auto-merge", func(w *world) { w.manualBumps = true }, "mock-agent", NeedsHuman, "left auto-merge off on #"},
+		{"bump PR closed", func(w *world) { w.closedBumps = true }, "mock-agent", NeedsHuman, "was closed without merging; `/retry mock-agent`"},
+		{"release-please failed", func(w *world) { w.get("mock-api").failReleasePlease = true }, "mock-api", Blocked, "release-please failed on mock-ap"},
+	}
+	for _, tt := range tests {
+		w := newWorld(t)
+		w.repo("mock-api", "0.1.0").pending("0.2.0")
+		w.repo("mock-agent", "0.1.0").bumped = true
+		tt.setup(w)
+		e := w.engine(trainDay)
+		open(t, w, e, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api", "mock-agent"}})
+		drive(t, w, e, 4)
+		if r := w.state(1).Repo(tt.repo); r.Hold != tt.hold || !strings.Contains(r.Detail, tt.detail) || !w.issues[0].Open {
+			t.Errorf("%s: %s = %s %q", tt.name, tt.repo, r.Status(), r.Detail)
+		}
+	}
+}

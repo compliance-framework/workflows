@@ -195,16 +195,6 @@ func (s *State) released(stage int) map[string]string {
 	return sets
 }
 
-func (s *State) stage(n int) []string {
-	var out []string
-	for _, r := range s.Repos {
-		if r.Stage == n {
-			out = append(out, r.Name)
-		}
-	}
-	return out
-}
-
 // post posts text to the train's thread (or a new message when threadTS is ""), and logs it.
 func (e *Engine) post(ctx context.Context, st *State, threadTS, text string) (string, error) {
 	e.logf("slack: %s", text)
