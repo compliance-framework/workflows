@@ -1,0 +1,4 @@
+lisa-addressed:
+self-review pass 1:
+- a79572325c5c: docs name both the manifest input default and the MANIFEST fallback (the schedule's); workflow comments say to keep them equal.
+- f0afba36489a: trade-off table's org-endpoint Token row reworded around coverage (returns only repos the token reaches).
