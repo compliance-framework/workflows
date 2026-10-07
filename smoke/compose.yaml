@@ -1,0 +1,59 @@
+# Stack smoke test: postgres, the API, the UI and one agent, from the published images
+# (docs/stack-smoke.md). Run it through smoke/run.sh, which generates the JWT secret, registers
+# the agent and passes its key in; `docker compose up` on this file alone starts an anonymous
+# agent that the checks would reject.
+#
+# Nothing here is a real credential: the postgres password is a throwaway default for a
+# database that lives only as long as the run, and is not published on the host.
+
+name: ccf-smoke
+
+services:
+  postgres:
+    image: postgres:17.5
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ccf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ccf"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  api:
+    image: ghcr.io/compliance-framework/api:${SMOKE_API_TAG:?set SMOKE_API_TAG (or use smoke/run.sh)}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${SMOKE_API_PORT:-18080}:8080"
+    environment:
+      APP_PORT: "8080"
+      CCF_DB_DRIVER: postgres
+      CCF_DB_CONNECTION: host=postgres user=postgres password=postgres dbname=ccf port=5432 sslmode=disable
+      # Generated per run by smoke/run.sh. No CCF_JWT_PRIVATE_KEY/CCF_JWT_PUBLIC_KEY: the API
+      # then generates its RSA key pair in memory at startup.
+      CCF_JWT_SECRET: ${SMOKE_JWT_SECRET:-}
+      CCF_API_ALLOWED_ORIGINS: http://localhost:${SMOKE_UI_PORT:-18000}
+      CCF_USE_DEV_LOGGER: "true"
+
+  ui:
+    image: ghcr.io/compliance-framework/ui:${SMOKE_UI_TAG:?set SMOKE_UI_TAG (or use smoke/run.sh)}
+    ports:
+      - "127.0.0.1:${SMOKE_UI_PORT:-18000}:80"
+    volumes:
+      - ./ui-config.json:/app/config.json:ro
+
+  agent:
+    image: ghcr.io/compliance-framework/agent:${SMOKE_AGENT_TAG:?set SMOKE_AGENT_TAG (or use smoke/run.sh)}
+    depends_on:
+      - api
+    command: ["/app/concom", "agent", "-c", "/etc/ccf-agent/config.yml"]
+    volumes:
+      - ./agent-config.yml:/etc/ccf-agent/config.yml:ro
+    environment:
+      # A key smoke/run.sh creates in the API for this run (empty: the agent is anonymous).
+      CCF_API_AUTH_CLIENT_ID: ${SMOKE_AGENT_CLIENT_ID:-}
+      CCF_API_AUTH_CLIENT_SECRET: ${SMOKE_AGENT_CLIENT_SECRET:-}
+      CCF_STATE_DIR: /tmp/ccf-agent-state

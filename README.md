@@ -735,6 +735,12 @@ non-majors grouped and auto-merged). See [docs/renovate.md](docs/renovate.md).
 severity, to Slack every Monday (and on `workflow_dispatch`). See
 [docs/vuln-summary.md](docs/vuln-summary.md).
 
+## Stack smoke test
+
+`stack-smoke.yml` (reusable and `workflow_dispatch`) runs postgres, the API, the UI and one agent
+from their published images at given tags and checks they work together (`smoke/run.sh`). See
+[docs/stack-smoke.md](docs/stack-smoke.md).
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,
