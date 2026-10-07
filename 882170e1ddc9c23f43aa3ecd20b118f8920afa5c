@@ -1,0 +1,10 @@
+lisa-design:
+- Current merge settings decode into a separate CurrentMergeSettings (pointer fields, omitempty) rather than turning MergeSettings into pointers: MergeSettings stays the concrete desired state and PATCH body, so the write always sends all seven fields.
+- An absent OR null field is "unknown"; compare only readable fields; unknowns go in Plan.Unknown, not Plan.Changes, and are counted separately ("N unknown") with one hint line under the totals.
+- Any unknown or differing merge field makes Apply PATCH the full desired merge object (idempotent). Consequence (documented): with a read token, a repo never reads "up to date" (shows "0 change(s), 7 unknown"), and an apply whose read can't see the fields re-PATCHes every run. With a write token the fields are readable and a second apply makes zero writes (tested).
+- Docs stay in the README "Repo settings" section (where the tool's docs already live) with minimal edits; no docs/repo-settings.md split, to avoid conflicting with parallel README work.
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- [must-fix CORE-TEST-002 bcba43b93083] plan_test.go TestPlanRepoUnknownMergeSettings: non-merge changes comparison passes vacuously if both empty -> fail when rest is empty.
+- [should-fix CORE-DOC-001 c4ea37ce3da2] README: example reuses N for two counts; step 2 overstates "0 change(s), 7 unknown" for every repo -> use <n>, say "repos otherwise in sync".
