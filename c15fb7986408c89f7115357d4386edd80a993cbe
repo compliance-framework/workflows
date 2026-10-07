@@ -7,3 +7,10 @@ lisa-design:
 - Dry runs mint a read-only token (no workflows permission); live runs get contents/PRs/issues/workflows write. dry_run and manifest fallbacks in job env cover scheduled runs (no inputs).
 - Grouped PR commit type: Renovate picks the highest type among a group's upgrades (fix > chore), so a group with any runtime dep is fix(deps). Runtime = require/dependencies + Dockerfile final stage + Go toolchain directive.
 - Renovate pinned to 44.145.1 via renovate-version (action default is the floating '44').
+
+lisa-selfreview:
+Pass 1 (strict), verdict request_changes:
+- [should-fix CORE-DUP-001 1a7343b88942] docs/renovate.md repeats the pinned Renovate version from renovate.yml.
+- [should-fix CORE-DUP-001 c77fdfefaea9] internal/renovate SelectRepos mirrors cmd/repo-settings selectRepos (without the release filter).
+- [nit vuln-pr-shape-undocumented 1a963a769f95] docs don't say vulnerability fixes get their own [SECURITY] PRs outside the group and limits.
+- [question automerge-vs-ccf-review afff65f87bf4] platformAutomerge vs the ccf-review approval ruleset (bot bypass may not apply to auto-merge) -> PR body open question.
