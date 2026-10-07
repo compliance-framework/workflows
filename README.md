@@ -726,6 +726,12 @@ runs against a token in `GH_TOKEN` (a personal token isn't an installation token
 go run ./cmd/repo-settings sync --manifest repos.mock.yaml --repos mock-api --bypass-app-id <id> --check-token-scope=false
 ```
 
+## Vulnerability summary
+
+`vuln-summary.yml` posts the open Dependabot alerts of the manifest's repos, per repo and
+severity, to Slack every Monday (and on `workflow_dispatch`). See
+[docs/vuln-summary.md](docs/vuln-summary.md).
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,
