@@ -9,3 +9,6 @@ lisa-design:
 
 lisa-selfreview:
 pass 1 (strict): must-fix CORE-TEST-001 release-checks.yml base-manifest 404/other-error handling untested; should-fix GO-ERR-001 cmd/release readManifest errors lack the file path; nit replace message trailing space in NonFinalDeps.
+
+lisa-selfreview:
+- pass 1 (strict): must-fix CORE-TEST-001 release-checks.yml base-manifest 404/other-error handling untested; should-fix GO-ERR-001 cmd/release readManifest errors lack the file path; nit NonFinalDeps replace message trailing space.
