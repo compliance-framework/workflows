@@ -91,8 +91,10 @@ jobs:
         run: |
           set -o pipefail # a failed gh api must not look like "no tags yet"
           go build -o "$RUNNER_TEMP/release" ./cmd/release
-          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base "$DEFAULT_BRANCH" --json headRefName \
-            --jq '[.[].headRefName | select(startswith("release-please--branches--"))] | join(" ")')"
+          # Same-repo PRs only: a fork can name its branch release-please--branches--*.
+          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base "$DEFAULT_BRANCH" --limit 1000 \
+            --json headRefName,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository | not) | .headRefName | select(startswith("release-please--branches--"))] | join(" ")')"
           read -r -a heads <<< "$prs"
           if [ "${#heads[@]}" -ne 1 ]; then
             echo "::error::want exactly one open release-please PR into $DEFAULT_BRANCH, found ${#heads[@]}: $prs"

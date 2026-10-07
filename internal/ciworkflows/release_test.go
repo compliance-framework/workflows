@@ -96,3 +96,49 @@ func TestTokenScopeGuard(t *testing.T) {
 		})
 	}
 }
+
+func TestCutPrerelease(t *testing.T) {
+	need(t, "go", "jq")
+	src := script(t, "cut-prerelease.yml", "cut", "Tag and create the prerelease")
+	bin := t.TempDir()
+	// Prints what the real gh would after --jq, and records `gh release create`.
+	fake := `#!/bin/sh
+case "$1 $2" in
+"pr list") echo "$FAKE_PRS" ;;
+"release create") echo "$@" > "$RUNNER_TEMP/release-create" ;;
+*) case "$*" in
+  *contents/.release-please-manifest.json*) echo '{".": "1.3.0", "charts/a": "0.2.0"}' ;;
+  *matching-refs*) printf '%s\n' $FAKE_TAGS ;;
+  *commits/main*) echo 0123abc ;;
+  esac ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, prs, tags, pkg, want string
+		failed                     bool
+	}{
+		{"first rc", "release-please--branches--main", "v1.2.0", ".", "release create v1.3.0-rc1 --repo o/r --target 0123abc --prerelease --latest=false", false},
+		{"third rc", "release-please--branches--main", "v1.3.0-rc1 v1.3.0-rc2", ".", "release create v1.3.0-rc3 ", false},
+		{"no release PR", "", "", ".", "found 0", true},
+		{"two release PRs", "release-please--branches--main release-please--branches--main--components--a", "", ".", "found 2", true},
+		{"unknown package", "release-please--branches--main", "", "charts/b", "no version for package 'charts/b'", true},
+		{"already released", "release-please--branches--main", "v1.3.0-rc1 v1.3.0", ".", "v1.3.0 is already released", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := run(t, filepath.Join("..", ".."), src, "PATH="+bin+":"+os.Getenv("PATH"), "FAKE_PRS="+tc.prs, "FAKE_TAGS="+tc.tags,
+				"GITHUB_REPOSITORY=o/r", "DEFAULT_BRANCH=main", "PKG="+tc.pkg, "PREFIX=v", "GITHUB_STEP_SUMMARY=/dev/null")
+			got := r.out
+			if b, err := os.ReadFile(filepath.Join(r.temp, "release-create")); err == nil {
+				got = string(b)
+			} else if !tc.failed {
+				t.Fatalf("no release created; output:\n%s", r.out)
+			}
+			if r.failed != tc.failed || !strings.Contains(got, tc.want) {
+				t.Fatalf("failed=%v, want %v; got:\n%s", r.failed, tc.failed, got)
+			}
+		})
+	}
+}
