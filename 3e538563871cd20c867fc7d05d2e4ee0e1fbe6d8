@@ -1,9 +1,0 @@
-lisa-design:
-- Helm repos release last: in Stages() a repo of kind helm implicitly depends on every non-helm repo. Plain topological levels from the spec's depends_on put helm-charts in stage 3 next to agent-action, but the spec's done-when ([[api gooci] [agent ui] [agent-action] [helm-charts]]) and W3-S1-T01 (helm-charts in stage 4, plugins in 3) need it alone in the final stage. Validate() rejects a non-helm repo depending on a helm repo.
-- NextWorkingWeekday is on-or-after: a date that is already a working weekday is returned unchanged (train uses NextWorkingWeekday(1st)). Days compared in the input's location; time of day kept. Method on *Manifest because holidays come from the manifest.
-- `release` is required in YAML (decoded via *bool) so a forgotten key never silently disables releasing. Unknown fields are rejected (KnownFields) so typos fail; W3 adds `wave` to the struct.
-- Holidays kept as validated ISO strings ([]string), not time.Time, so the file round-trips and comparisons are by local date.
-- YAML lib: go.yaml.in/yaml/v3 (maintained successor of gopkg.in/yaml.v3).
-- cmd/manifest is the first tool: validates a manifest and prints stages (text or --json for fromJSON); shows the --manifest convention (manifest.DefaultPath).
-- Cycle errors list every repo that cannot be ordered (the cycle plus repos downstream of it), sorted.
-- CI runs actionlint via `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` (no third-party action to pin). The legacy plugin-release.yml has a shellcheck SC2086 finding; it is silenced for that one path in .github/actionlint.yaml because the legacy files must not be edited in this task.
