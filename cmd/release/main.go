@@ -6,7 +6,8 @@
 //	release next-rc --version X.Y.Z [--prefix v]    (existing tags on stdin, one per line)
 //	release preview-tags [--on-main=true|false]     (appends tags=... to $GITHUB_OUTPUT)
 //	release release-tags --tag T [--prefix v] [--style image|artifact]
-//	                                               (appends tags=... and final=... to $GITHUB_OUTPUT)
+//	                                               (appends tags=..., final=... and major=vX to $GITHUB_OUTPUT)
+//	release chart --tag T [--charts-dir charts]    (appends path=..., name=... and version=... to $GITHUB_OUTPUT)
 //
 // version-guard and preview-tags read the PR from $GITHUB_EVENT_PATH.
 package main
@@ -19,8 +20,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
+	"golang.org/x/mod/semver"
 
 	"github.com/compliance-framework/workflows/internal/release"
 )
@@ -32,7 +37,7 @@ func main() {
 	}
 }
 
-const usage = "usage: release check internal-deps|module-path|version-guard [flags] | next-rc [flags] | preview-tags [flags] | release-tags [flags]"
+const usage = "usage: release check internal-deps|module-path|version-guard [flags] | next-rc [flags] | preview-tags [flags] | release-tags [flags] | chart [flags]"
 
 func run(args []string, getenv func(string) string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 0 {
@@ -63,6 +68,14 @@ func run(args []string, getenv func(string) string, stdin io.Reader, stdout io.W
 			return err
 		}
 		return releaseTags(*tag, *prefix, *style, getenv, stdout)
+	case "chart":
+		fs := flag.NewFlagSet("release chart", flag.ContinueOnError)
+		tag := fs.String("tag", "", "the release's git tag, [<chart>-]vX.Y.Z (required)")
+		dir := fs.String("charts-dir", "charts", "directory holding one directory per chart")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return chart(*tag, *dir, getenv, stdout)
 	}
 	if len(args) < 2 || args[0] != "check" {
 		return errors.New(usage)
@@ -209,7 +222,40 @@ func releaseTags(tag, prefix, style string, getenv func(string) string, stdout i
 		kind = "final release"
 	}
 	fmt.Fprintf(stdout, "Release tags for %s (%s): %s\n", tag, kind, strings.Join(tags, " "))
-	return writeOutputs(getenv, "tags="+strings.Join(tags, " "), fmt.Sprintf("final=%t", final))
+	major := semver.Major("v" + strings.TrimPrefix(tag, prefix))
+	return writeOutputs(getenv, "tags="+strings.Join(tags, " "), fmt.Sprintf("final=%t", final), "major="+major)
+}
+
+func chart(tag, dir string, getenv func(string) string, stdout io.Writer) error {
+	component, version, err := release.ComponentTag(tag)
+	if err != nil {
+		return err
+	}
+	files, err := filepath.Glob(filepath.Join(dir, "*", "Chart.yaml"))
+	if err != nil {
+		return err
+	}
+	var charts []release.Chart
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return err
+		}
+		var c struct {
+			Name string `yaml:"name"`
+		}
+		if err := yaml.Unmarshal(b, &c); err != nil {
+			return fmt.Errorf("%s: %w", f, err)
+		}
+		charts = append(charts, release.Chart{Dir: filepath.Base(filepath.Dir(f)), Name: c.Name})
+	}
+	c, err := release.PickChart(charts, component)
+	if err != nil {
+		return fmt.Errorf("tag %s in %s: %w", tag, dir, err)
+	}
+	path := filepath.Join(dir, c.Dir)
+	fmt.Fprintf(stdout, "Tag %s releases chart %s (%s) at version %s.\n", tag, c.Name, path, version)
+	return writeOutputs(getenv, "path="+path, "name="+c.Name, "version="+version)
 }
 
 // writeOutputs appends name=value lines to $GITHUB_OUTPUT.

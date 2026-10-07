@@ -93,7 +93,7 @@ const (
 func ReleaseTags(tag, prefix, style string) (tags []string, final bool, err error) {
 	version, ok := strings.CutPrefix(tag, prefix)
 	v := "v" + version
-	if !ok || !semver.IsValid(v) || semver.Canonical(v) != v {
+	if !ok || !valid(version) {
 		return nil, false, fmt.Errorf("tag %q is not %sX.Y.Z or %sX.Y.Z-<pre-release>", tag, prefix, prefix)
 	}
 	final = semver.Prerelease(v) == ""

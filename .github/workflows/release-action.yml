@@ -1,0 +1,100 @@
+# Releases a GitHub Action (kind action) when the caller's release is published: for a final
+# tag vX.Y.Z, moves the major tag v<X> (v0 today) to the release commit, so `uses: <repo>@v0`
+# gets the release; a pre-release moves nothing. release-finished.yml reports the result.
+# Call it on `release: published` with `secrets: inherit`; see README. Rules: internal/release.
+name: release-action
+
+on:
+  workflow_call:
+    inputs:
+      tag-prefix:
+        description: "Prefix of the release tags"
+        type: string
+        default: v
+    secrets:
+      RELEASE_BOT_APP_ID:
+        description: "ccf-release-bot App ID"
+        required: true
+      RELEASE_BOT_PRIVATE_KEY:
+        description: "ccf-release-bot private key"
+        required: true
+
+permissions: {}
+
+jobs:
+  tags:
+    name: tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      final: ${{ steps.tags.outputs.final }}
+      major: ${{ steps.tags.outputs.major }}
+    steps:
+      - name: Check the tools ref
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so cmd/release can't be fetched"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Only the final and major outputs are used: an action publishes no image tags.
+      - name: Choose the tags
+        id: tags
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          PREFIX: ${{ inputs.tag-prefix }}
+        run: go run ./cmd/release release-tags --tag "$TAG" --prefix "$PREFIX" --style image
+
+  move:
+    name: move major tag
+    needs: [tags]
+    if: needs.tags.outputs.final == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Move the major tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          MAJOR: ${{ needs.tags.outputs.major }}
+        run: |
+          set -o pipefail
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$MAJOR" > /dev/null 2> "$RUNNER_TEMP/gh.err"; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$MAJOR" -f sha="$sha" -F force=true > /dev/null
+          elif grep -q 'HTTP 404' "$RUNNER_TEMP/gh.err"; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$MAJOR" -f sha="$sha" > /dev/null
+          else
+            cat "$RUNNER_TEMP/gh.err" >&2
+            exit 1
+          fi
+          echo "Moved $MAJOR to $TAG ($sha)." | tee -a "$GITHUB_STEP_SUMMARY"
+
+  finished:
+    name: finished
+    needs: [tags, move]
+    if: always()
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/release-finished.yml
+    with:
+      needs: ${{ toJSON(needs) }}
+    permissions:
+      packages: write
+    secrets:
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}

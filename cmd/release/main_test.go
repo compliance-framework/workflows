@@ -101,9 +101,9 @@ func TestReleaseTags(t *testing.T) {
 		want string
 		fail bool
 	}{
-		{[]string{"--tag", "v1.2.3"}, "tags=1.2.3 1.2 1 latest\nfinal=true", false},
-		{[]string{"--tag", "v1.2.3-rc1", "--style", "artifact"}, "tags=v1.2.3-rc1\nfinal=false", false},
-		{[]string{"--tag", "chart-v0.2.0", "--prefix", "chart-v", "--style", "artifact"}, "tags=v0.2.0 latest\nfinal=true", false},
+		{[]string{"--tag", "v1.2.3"}, "tags=1.2.3 1.2 1 latest\nfinal=true\nmajor=v1", false},
+		{[]string{"--tag", "v1.2.3-rc1", "--style", "artifact"}, "tags=v1.2.3-rc1\nfinal=false\nmajor=v1", false},
+		{[]string{"--tag", "chart-v0.2.0", "--prefix", "chart-v", "--style", "artifact"}, "tags=v0.2.0 latest\nfinal=true\nmajor=v0", false},
 		{[]string{"--tag", ""}, "", true},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
@@ -115,6 +115,38 @@ func TestReleaseTags(t *testing.T) {
 			}
 			if b, _ := os.ReadFile(ghOut); strings.TrimSpace(string(b)) != tc.want {
 				t.Fatalf("GITHUB_OUTPUT = %q, want %q (output %q)", b, tc.want, out.String())
+			}
+		})
+	}
+}
+
+func TestChart(t *testing.T) {
+	dir := t.TempDir()
+	for chart, name := range map[string]string{"ccf-agent": "ccf-agent", "ccf-app": `"ccf"`} {
+		if err := os.MkdirAll(filepath.Join(dir, chart), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(dir, chart), "Chart.yaml", "apiVersion: v2\nname: "+name+"\nversion: 0.1.0\n")
+	}
+	for _, tc := range []struct{ tag, want, err string }{
+		{"ccf-agent-v0.3.0", "path=" + filepath.Join(dir, "ccf-agent") + "\nname=ccf-agent\nversion=0.3.0", ""},
+		{"ccf-v0.9.0-rc1", "path=" + filepath.Join(dir, "ccf-app") + "\nname=ccf\nversion=0.9.0-rc1", ""},
+		{"v0.3.0", "", "has 2 charts"},
+		{"nope-v1.0.0", "", "found 0"},
+		{"ccf-agent", "", "is not"},
+	} {
+		t.Run(tc.tag, func(t *testing.T) {
+			ghOut := filepath.Join(t.TempDir(), "out")
+			var out strings.Builder
+			err := run([]string{"chart", "--tag", tc.tag, "--charts-dir", dir}, func(k string) string { return map[string]string{"GITHUB_OUTPUT": ghOut}[k] }, strings.NewReader(""), &out)
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Fatalf("err = %v, want %q", err, tc.err)
+				}
+				return
+			}
+			if b, _ := os.ReadFile(ghOut); err != nil || strings.TrimSpace(string(b)) != tc.want {
+				t.Fatalf("GITHUB_OUTPUT = %q, %v; want %q", b, err, tc.want)
 			}
 		})
 	}

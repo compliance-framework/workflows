@@ -24,7 +24,7 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
-| `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag, the preview tags and the release tags. |
+| `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag, the preview tags, the release tags and the chart a helm release tag is for. |
 | `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`; `cmd/release` runs the `internal/release` rules for the release workflows. |
 | `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, the `ci-<kind>.yml` kind CI workflows and the [release workflows](#release-workflows)). |
 | `release-please/defaults.json` | The release-please settings every repo's `release-please-config.json` copies. |
@@ -502,6 +502,8 @@ release-bot secrets.
 | `release-ui.yml` | `ui` | The same as `release-go-image.yml` (it calls it), with the ui's single image. |
 | `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release; the config needs `release.prerelease: auto`), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`. |
 | `release-policies.yml` | `policies` | `opa build` of `directory` at `opa-version`, then `gooci upload-single` of the bundle. |
+| `release-helm.yml` | `helm` | `helm package` of the released chart at the tag's version, then `helm push` to `registry`. |
+| `release-action.yml` | `action` | Nothing: it moves the major tag (`v0` today) to the release commit. |
 
 Image tags, for the tag `v1.2.3` (prefix `tag-prefix`, default `v`): `1.2.3`, `1.2`, `1` and
 `latest`. A tag with a pre-release part (`v1.2.3-rc1`) publishes `1.2.3-rc1` only: a release
@@ -521,8 +523,25 @@ github.com/compliance-framework/gooci@v0.0.7`) and reads the registry login from
 | `protocol-version` | `2` | `release-go-plugin.yml`: the agent plugin protocol the plugin implements. |
 | `directory`, `opa-version` | `policies`, `1.14.1` | `release-policies.yml`: the bundle root and OPA version. |
 
+| `charts-dir`, `registry` | `charts`, `oci://ghcr.io/compliance-framework/helm-charts` | `release-helm.yml`: the directory holding one directory per chart, and where charts are pushed. |
+
 `release-go-plugin.yml` needs `contents: write` (goreleaser attaches the archives to the
-release) and `packages: write`; the others need `contents: read` and `packages: write`.
+release) and `packages: write`, `release-action.yml` `contents: write` (the tag) and
+`packages: write` (the prune); the others need `contents: read` and `packages: write`.
+
+**Charts.** In a multi-chart repo release-please tags each chart's release
+`<component>-vX.Y.Z` (`ccf-agent-v0.3.0`); `release-helm.yml` releases the chart whose
+directory, or failing that whose `Chart.yaml` name, is the component (`ccf` finds
+`charts/ccf-app`), and a repo with a single chart may use plain `vX.Y.Z` tags. Rules in
+`internal/release` (`ComponentTag`, `PickChart`). The chart is packaged with `--version` set
+to the tag's version, because a release candidate is tagged on the default branch, where
+`Chart.yaml` still has the previous version until the release PR merges; so
+`ccf-agent-v0.4.0-rc1` pushes `helm-charts/ccf-agent:0.4.0-rc1`. Charts have no `latest`.
+The repo calls `cut-prerelease.yml` with the chart's `path` and `tag-prefix: <chart>-v`.
+
+**Actions.** For a final tag `vX.Y.Z`, `release-action.yml` points `vX` at the release
+commit (creating it the first time) with `GITHUB_TOKEN`, so callers pinned to `@v0` get the
+release; a release candidate moves nothing.
 
 **goreleaser config.** release-please (or `cut-prerelease.yml`) has already created the
 GitHub release, so `goreleaser release` finds it by tag and updates it: it uploads the
@@ -576,6 +595,17 @@ jobs:
     uses: compliance-framework/workflows/.github/workflows/release-go-plugin.yml@v1  # or release-policies.yml
     permissions:
       contents: write  # release-policies.yml: read
+      packages: write
+    secrets: inherit
+```
+
+```yaml
+# the same, in a chart or action repo
+jobs:
+  release:
+    uses: compliance-framework/workflows/.github/workflows/release-helm.yml@v1  # or release-action.yml
+    permissions:
+      contents: read  # release-action.yml: write
       packages: write
     secrets: inherit
 ```
