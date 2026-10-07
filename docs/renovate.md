@@ -11,7 +11,7 @@ public repos.
 | Rule | Setting |
 | --- | --- |
 | Schedule | `* * 8,22 * *` (UTC): normal updates only on the 8th and 22nd, away from the monthly train, so each one spends at least a week on `main` before the next release. |
-| Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. Each fix gets its own `[SECURITY]` PR, outside the group and the PR limits, and auto-merges unless it is a major. |
+| Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. Each fix gets its own `[SECURITY]` PR, outside the group and the concurrent-PR limit, and auto-merges unless it is a major. |
 | Waiting period | `minimumReleaseAge: "7 days"` with `internalChecksFilter: "strict"`: no branch or PR before a release is a week old. An update with no release timestamp waits too (Renovate's default `minimumReleaseAgeBehaviour`). |
 | Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain and the `golang` image are in it. Majors get their own PRs. |
 | Auto-merge | The non-major group auto-merges with `platformAutomerge`: GitHub merges it once the `ci / required` check passes (needs the repo's "allow auto-merge" setting, which `repo-settings.yml` turns on). Majors wait for a human. |
