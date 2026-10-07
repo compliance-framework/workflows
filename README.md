@@ -24,8 +24,10 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
-| `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`. |
-| `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml` and the `ci-<kind>.yml` kind CI workflows). |
+| `internal/release` | The release rules: the release-please PR checks. |
+| `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`; `cmd/release` runs the `internal/release` rules for the release workflows. |
+| `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, the `ci-<kind>.yml` kind CI workflows and the [release workflows](#release-workflows)). |
+| `release-please/defaults.json` | The release-please settings every repo's `release-please-config.json` copies. |
 | `.golangci.yml`, `.regal/config.yaml` | Shared lint base configs, used by the CI workflows when the calling repo has none. |
 
 ### The manifest
@@ -286,6 +288,87 @@ One `node` job: Node from the repo's `.nvmrc` (else `node-version`), `npm ci`, t
 
 actionlint runs in `ci-common.yml`. Inputs: `dockerfile` (default `Dockerfile`) and `context`
 (default `.`). Caller: `uses: compliance-framework/workflows/.github/workflows/ci-action.yml@v1`.
+
+### Release workflows
+
+Releases are driven by [release-please](https://github.com/googleapis/release-please) in
+manifest mode: each repo has a `release-please-config.json` and a
+`.release-please-manifest.json` (package path to current version) at its root.
+
+#### `release-please.yml`
+
+Runs `googleapis/release-please-action`, which opens or updates the release PR
+(`release-please--branches--<branch>`) and, once it merges, tags the release and creates the
+GitHub release. It runs as ccf-release-bot, so the PR and the release trigger the caller's
+other workflows (GitHub doesn't start workflows for `GITHUB_TOKEN` events). The token comes
+from `actions/create-github-app-token` with `owner: compliance-framework` and
+`repositories: <the caller repo>`, and only `contents`, `pull-requests` and `issues` write.
+The bot is installed on every org repo, so the job refuses to mint a token when the repo name
+is empty or `github.repository` isn't `compliance-framework/<that name>`: a token minted with
+an owner and no repositories would reach the whole org.
+
+Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, via `secrets: inherit`. Outputs:
+`releases-created` and `paths-released` (JSON list of package paths), from the action.
+
+**Shared defaults.** `release-please/defaults.json` holds the settings every repo uses:
+`bump-minor-pre-major: true` (breaking changes bump the minor before 1.0), and changelog
+sections where `feat`, `fix`, `perf`, `revert` and `deps` are shown and `chore`, `ci`,
+`docs`, `test`, `refactor` and `build` are hidden. release-please has no remote `extends`,
+and it reads its config through the API from the target branch, so the workflow can't merge
+the defaults in at runtime. Callers copy every key of `defaults.json` into their
+`release-please-config.json` and add `packages` (and any other keys); on each run the
+workflow compares the caller's config with the defaults at the same commit as the workflow
+and prints a warning for each key that differs.
+
+```json
+{
+  "$schema": "...", "bump-minor-pre-major": true, "changelog-sections": ["... from defaults.json ..."],
+  "packages": { ".": { "release-type": "go" } }
+}
+```
+
+```yaml
+# .github/workflows/release-please.yml in a consuming repo
+name: release-please
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: release-please
+jobs:
+  release-please:
+    uses: compliance-framework/workflows/.github/workflows/release-please.yml@v1
+    permissions:
+      contents: read
+    secrets: inherit
+```
+
+#### `release-checks.yml`
+
+One `release-checks` job that runs only on PRs whose head branch starts with
+`release-please--`; on any other PR it is skipped, which a required status check counts as
+passing, so repos can call it from their CI workflow and require it. Each check runs even if
+an earlier one failed (rules in `internal/release`):
+
+| Check | Fails when |
+| --- | --- |
+| `internal-deps-final` | A `github.com/compliance-framework/*` requirement in `go.mod` (the `mock-*` repos included) isn't a final semver (a pre-release or pseudo-version), or `go.mod` replaces one. |
+| `version-guard` | A package's major version is higher in the PR's `.release-please-manifest.json` than at the base (0.x to 1.0 included; a new package counts from 0.0.0), and the PR lacks the `release:major-approved` label. |
+| `go-module-path` | The module path's major suffix doesn't match the root package's (`.`) new version: none for v0 and v1, `/vN` for vN with N >= 2. |
+
+Repos without a root `go.mod` skip the two Go checks. The labels come from the event, so
+the caller listens for `labeled` and `unlabeled` to re-check after adding the label. The job
+needs `contents: read`; no inputs or secrets.
+
+```yaml
+# in the consuming repo's ci.yml (on: pull_request types include labeled, unlabeled)
+  release-checks:
+    uses: compliance-framework/workflows/.github/workflows/release-checks.yml@v1
+    permissions:
+      contents: read
+```
 
 ## Development
 
