@@ -50,6 +50,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      # Only the final and major outputs are used: an action publishes no image tags.
       - name: Choose the tags
         id: tags
         env:
