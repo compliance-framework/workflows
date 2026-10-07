@@ -1,0 +1,6 @@
+lisa-addressed:
+pass 1:
+- CORE-SIZE-001: compacted test tables and README; diff now ~900 lines.
+- CORE-INPUT-001: Parse rejects a manifest with more than one YAML document (test "second document").
+- CORE-DOC-001: README lists the non-helm -> helm dependency rejection.
+- Also: location test now discriminates local vs UTC date.
