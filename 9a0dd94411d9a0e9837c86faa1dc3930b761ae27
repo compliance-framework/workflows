@@ -4,3 +4,7 @@ pass 1:
 - CORE-INPUT-001: Parse rejects a manifest with more than one YAML document (test "second document").
 - CORE-DOC-001: README lists the non-helm -> helm dependency rejection.
 - Also: location test now discriminates local vs UTC date.
+
+lisa-selfreview:
+pass 2 (strict): request_changes
+- [should-fix] CORE-DUP-001 README.md: actionlint version v1.7.12 repeated from ci.yml; will drift when CI bumps it.
