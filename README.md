@@ -501,7 +501,7 @@ release-bot secrets.
 | `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`. |
 | `release-ui.yml` | `ui` | The same as `release-go-image.yml` (it calls it), with the ui's single image. |
 | `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release; the config needs `release.prerelease: auto`), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`. |
-| `release-go-lib.yml` | `go-lib` | `goreleaser release --clean` of the release tag: the binaries and archives go on the GitHub release. |
+| `release-go-lib.yml` | `go-lib` | `goreleaser release --clean` of the release tag: the binaries and archives go on the GitHub release (the config needs `release.prerelease: auto`). |
 | `release-policies.yml` | `policies` | `opa build` of `directory` at `opa-version`, then `gooci upload-single` of the bundle. |
 | `release-helm.yml` | `helm` | `helm package` of the released chart at the tag's version, then `helm push` to `registry`. |
 | `release-action.yml` | `action` | Nothing: it moves the major tag (`v0` today) to the release commit. |
@@ -544,39 +544,18 @@ The repo calls `cut-prerelease.yml` with the chart's `path` and `tag-prefix: <ch
 **Go libraries.** `release-go-lib.yml` (no inputs) checks out the release tag, sets up Go
 from the repo's `go.mod` and runs `goreleaser release --clean` (goreleaser-action and
 goreleaser at the versions `ci-go-lib.yml` pins) with `GITHUB_TOKEN` and
-`GORELEASER_CURRENT_TAG` set to the release tag. release-please (or `cut-prerelease.yml`)
-has already created the GitHub release, so goreleaser finds it by tag and updates it rather
-than failing: it uploads the archives and the checksums, keeps the release published, and
-with the default `release.mode` (`keep-existing`) keeps the notes release-please wrote
-(`append`, `prepend` or `replace` would add goreleaser's changelog to them or replace them,
-so leave `mode` unset). It does reset the release's name to `release.name_template` (the
-tag by default) and its pre-release flag to what the config says, so the job first checks
-the repo's goreleaser config, found the way goreleaser finds it (`.config/goreleaser.y[a]ml`,
-`.goreleaser.y[a]ml`, `goreleaser.y[a]ml`):
-
-- `release.prerelease` must be `auto`, so the flag comes from the tag (`v1.2.3-rc1` stays
-  a pre-release and is not marked latest); anything else fails the release before the build.
-- `release.mode` other than `keep-existing` warns.
-- `release.replace_existing_artifacts` not `true` warns: without it a re-run after a
-  partial upload fails on the archives already attached.
-
-The repo must not turn on immutable releases: goreleaser can't add assets to an immutable
-release, and release-please publishes the release before this workflow runs.
-
-```yaml
-# .goreleaser.yaml in a library repo: the release settings this workflow expects
-version: 2
-release:
-  prerelease: auto
-  replace_existing_artifacts: true
-```
+`GORELEASER_CURRENT_TAG` set to the release tag, so two release candidates on one commit
+can't make it release the other tag. Before the build it runs the same goreleaser config
+check as `release-go-plugin.yml` (see **goreleaser config** below). goreleaser also resets
+the release's name to `release.name_template` (the tag by default).
 
 **Actions.** For a final tag `vX.Y.Z`, `release-action.yml` points `vX` at the release
 commit (creating it the first time) with `GITHUB_TOKEN`, so callers pinned to `@v0` get the
 release; a release candidate moves nothing.
 
-**goreleaser config.** release-please (or `cut-prerelease.yml`) has already created the
-GitHub release, so `goreleaser release` finds it by tag and updates it: it uploads the
+**goreleaser config.** `release-go-plugin.yml` and `release-go-lib.yml` run
+`goreleaser release` after release-please (or `cut-prerelease.yml`) has created the
+GitHub release, so goreleaser finds it by tag and updates it: it uploads the
 archives and checksums and, with the default `release.mode` (`keep-existing`), keeps the
 notes release-please wrote. It also resets the release's pre-release flag to what the config
 says, `false` unless `release.prerelease` is `auto` or `true`, which would turn a release
@@ -591,8 +570,11 @@ checks the repo's goreleaser config, found the way goreleaser finds it
 - `release.replace_existing_artifacts` not `true` warns: without it a re-run after a
   partial upload fails on the archives already attached.
 
+The repo must not turn on immutable releases: goreleaser can't add assets to an immutable
+release, and release-please publishes the release before these workflows run.
+
 ```yaml
-# .goreleaser.yaml in a plugin repo: the release settings this workflow expects
+# .goreleaser.yaml in a plugin or library repo: the release settings these workflows expect
 version: 2
 release:
   prerelease: auto

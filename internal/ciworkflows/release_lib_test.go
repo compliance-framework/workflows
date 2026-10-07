@@ -2,7 +2,6 @@ package ciworkflows_test
 
 import (
 	"maps"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -107,38 +106,5 @@ func TestReleaseTagGuard(t *testing.T) {
 	}
 	if r := run(t, t.TempDir(), src, "TAG="); !r.failed || !strings.Contains(r.out, "release: published") {
 		t.Fatalf("no tag must fail; output:\n%s", r.out)
-	}
-}
-
-func TestGoreleaserReleaseConfig(t *testing.T) {
-	need(t, "yq")
-	src := script(t, "release-go-lib.yml", "publish", "Check the goreleaser config")
-	const recommended = "release:\n  prerelease: auto\n  replace_existing_artifacts: true\n"
-	for _, tc := range []struct {
-		name, file, config, want, notWant string
-		failed                            bool
-	}{
-		{"recommended", ".goreleaser.yaml", "version: 2\n" + recommended, "Using .goreleaser.yaml.", "::warning", false},
-		{"config dir", ".config/goreleaser.yml", recommended, "Using .config/goreleaser.yml.", "::warning", false},
-		{"no replace", ".goreleaser.yml", "release:\n  prerelease: auto\n", "replace_existing_artifacts is not true", "::error", false},
-		{"keep-existing", ".goreleaser.yaml", recommended + "  mode: keep-existing\n", "Using", "::warning", false},
-		{"append", ".goreleaser.yaml", recommended + "  mode: append\n", "::warning file=.goreleaser.yaml::release.mode is append", "::error", false},
-		{"no prerelease", ".goreleaser.yaml", "version: 2\n", "release.prerelease must be auto (it is '')", "Using", true},
-		{"prerelease true", ".goreleaser.yaml", "release:\n  prerelease: true\n", "(it is 'true')", "Using", true},
-		{"no config", ".gorelreaser.yml", recommended, "no goreleaser config", "Using", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(tc.file)), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, tc.file), []byte(tc.config), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			r := run(t, dir, src)
-			if r.failed != tc.failed || !strings.Contains(r.out, tc.want) || strings.Contains(r.out, tc.notWant) {
-				t.Fatalf("failed=%v, want %v; output:\n%s", r.failed, tc.failed, r.out)
-			}
-		})
 	}
 }
