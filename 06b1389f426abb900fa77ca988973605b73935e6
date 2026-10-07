@@ -2,3 +2,8 @@ lisa-addressed:
 pass 1: CORE-SIZE-001 trimmed to <1000 counted lines (dropped ci-common inputs vulns-scan-args/vulns-upload-sarif and the ci.yml dogfooding of ci-common; condensed code, tests, README).
 pass 1: vulns scan-args add --allow-no-lockfiles (osv-scanner otherwise exits before writing results in repos without lockfiles, failing the reusable workflow's completion check).
 pass 1: CORE-ID-001 DedupeKey(Run) keys on the workflow file path (GITHUB_WORKFLOW_REF minus owner/repo/ and @ref), falling back to the name; golden key re-pinned.
+
+lisa-design:
+- SUPERSEDES the earlier note: this repo's ci.yml does NOT dogfood ci-common (dropped to stay under the 1000-line PR limit); its standalone actionlint job stays. ci-common has no inputs (scan-args fixed to -r --allow-no-lockfiles ./; upload-sarif = head repo is this repo).
+- Dedupe key = sha256(repo \0 sha \0 workflow file path), name only as fallback: two workflow files can share a name.
+- Known limit of cache-scoped dedupe: markers are scoped to the ref that saved them, so a push run on renovate/x and a pull_request run for the same commit don't see each other's marker. Callers push-trigger on main only (README example), so this doesn't arise in practice.
