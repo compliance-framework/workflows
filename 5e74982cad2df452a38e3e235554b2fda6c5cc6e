@@ -2,3 +2,6 @@ lisa-addressed:
 - CORE-TEST-002 bcba43b93083: TestPlanRepoUnknownMergeSettings fails if the fixture yields no security/ruleset changes.
 - CORE-DOC-001 c4ea37ce3da2: README example uses <n>; "0 change(s), 7 unknown" only for repos otherwise in sync.
 - Also found: repo-settings.yml always mints a read token for dry runs, so README step 2 now verifies idempotency with a second apply run (write token, "up to date", no writes) instead of a dry run.
+
+lisa-selfreview:
+pass 2 (strict): approve, no findings
