@@ -1,2 +1,5 @@
 lisa-addressed:
 pass 1: CORE-INPUT-001 (03cfae7e4aad) SMOKE_TIMEOUT/SMOKE_API_PORT/SMOKE_UI_PORT validated in check_settings + tests; CORE-ERR-001 teardown failure warns; CORE-TEST-001 TestSmokeRunPasses with fakeStack curl; CORE-DUP-001 docs note on ui-config API_URL; CORE-STYLE-001 strings.Cut in composeCalls.
+
+lisa-selfreview:
+pass 2 (strict): re-read run.sh, compose.yaml, stack-smoke.yml, tests and docs after the pass-1 fixes; gate green (go test -race incl. golang:1.26 container, vet, gofmt, actionlint, shellcheck, manifests) and a real run against api 0.21.0/ui 2.12.1/agent 0.9.0 passed. No new findings: approve.
