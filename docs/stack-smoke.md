@@ -10,7 +10,7 @@ together?" before a release, without local-dev and without any secret. The stack
 | `smoke/compose.yaml` | postgres 17.5, `ghcr.io/compliance-framework/{api,ui,agent}` at `SMOKE_API_TAG`, `SMOKE_UI_TAG`, `SMOKE_AGENT_TAG`. |
 | `smoke/run.sh` | Starts the stack, runs the checks, prints the container logs on failure, tears the stack down. |
 | `smoke/agent-config.yml` | The agent's config: no plugins, `remote_config.mode: report`. |
-| `smoke/ui-config.json` | The UI's `config.json`. |
+| `smoke/ui-config.json` | The UI's `config.json`. Its `API_URL` is for a browser on the default API port; the checks do not use it. |
 
 ## The checks
 

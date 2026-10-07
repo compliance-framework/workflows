@@ -73,7 +73,9 @@ cleanup() {
             log "SMOKE_KEEP=1: leaving the stack up (docker compose -p $PROJECT -f $SMOKE_DIR/compose.yaml down -v)"
         else
             log "Tearing the stack down"
-            compose down -v --remove-orphans >/dev/null 2>&1 || true
+            # A failed teardown does not change the result, but say what is left behind.
+            compose down -v --remove-orphans >/dev/null 2>&1 ||
+                echo "WARNING: could not tear the stack down; run: docker compose -p $PROJECT -f $SMOKE_DIR/compose.yaml down -v" >&2
         fi
     fi
     if [ "$status" -eq 0 ]; then
@@ -107,9 +109,15 @@ api() {
 }
 
 check_settings() {
-    local tool name tag
+    local tool name tag value
     for tool in docker curl jq openssl; do
         command -v "$tool" >/dev/null 2>&1 || fail "$tool is not installed"
+    done
+    for name in SMOKE_TIMEOUT SMOKE_API_PORT SMOKE_UI_PORT; do
+        case "$name" in SMOKE_TIMEOUT) value="$TIMEOUT" ;; *) value="${!name}" ;; esac
+        case "$value" in
+            '' | *[!0-9]*) fail "$name '$value' is not a whole number" ;;
+        esac
     done
     for name in SMOKE_API_TAG SMOKE_UI_TAG SMOKE_AGENT_TAG; do
         tag="${!name:-}"
