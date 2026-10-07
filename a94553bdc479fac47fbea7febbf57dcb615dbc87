@@ -1,2 +1,5 @@
 lisa-addressed:
 pass 2: README reflowed to the 100-column wrap; added a concrete ci-policies.yml caller snippet (with: directory, permissions).
+
+lisa-selfreview:
+pass 3 (strict): approve, no findings. Checked golangci-lint-action v9.3.0 passes --config from args to `config verify`; `golangci-lint config verify` accepts the shared .golangci.yml; committed .regal/config.yaml keeps mock-plugin-policies-1 at 0 errors. Gate green: gofmt, go vet, go test -race ./..., actionlint v1.7.12, golangci-lint (shared config) 0 issues. Diff vs base ~690 lines.
