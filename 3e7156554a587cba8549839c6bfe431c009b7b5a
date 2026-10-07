@@ -1,0 +1,5 @@
+lisa-design:
+- Concurrency is at the job level so skipped runs (comments that aren't commands) don't take the single pending slot.
+- --watch 30m keeps reconciling every minute while a repo waits on GitHub (release-please, CI, release workflows) and stops when only human holds are left.
+- The members token is minted separately with continue-on-error: the app may lack org Members read; without it commands are refused, the run still works.
+- Scheduled starts are dry runs until TRAIN_LIVE=true; the hourly reconcile always runs but only acts on an open train, and live trains only exist when someone dispatched one.
