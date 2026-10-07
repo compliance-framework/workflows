@@ -22,8 +22,9 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `repos.yaml` | Manifest of the product repos: `name`, `kind`, `depends_on`, `release`, `charts`, plus top-level `holidays`, `include_patterns` and `exclude`. |
 | `repos.mock.yaml` | The same schema for the `mock-*` repos, used to develop and test changes without touching product repos. |
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
-| `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages. |
-| `.github/workflows/` | This repo's own CI (`ci.yml`) and, from later tasks, the reusable workflows. |
+| `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
+| `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`. |
+| `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`). |
 
 ### The manifest
 
@@ -73,17 +74,74 @@ A repo calls a reusable workflow from a thin workflow of its own, pinned to a ta
 name: ci
 on:
   pull_request:
+    types: [opened, edited, synchronize, reopened]
   push:
     branches: [main]
+permissions:
+  contents: read
 jobs:
   ci:
-    uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@v1  # calls ci-common.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
+    secrets: inherit
+  notify:
+    needs: [ci]
+    if: failure()
+    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@v1
+    permissions:
+      actions: read
+      contents: read
     secrets: inherit
 ```
 
-The next tasks add the reusable workflows: one CI workflow per `kind`, plus release and
-notification workflows. The mock repos adopt each one before the product repos do. Consumers
-pin a major tag (`@v1`) or a full commit SHA, never `@main`.
+The next tasks add one CI workflow per `kind`, plus release workflows; the building blocks
+below are in place. The mock repos adopt each one before the product repos do. Consumers
+pin a major tag (`@v1`) or a full commit SHA, never `@main`. The `permissions` above are the
+ones `ci-common.yml` and `notify-failure.yml` need (see below).
+
+## Reusable workflows
+
+### `ci-common.yml`
+
+The checks every repo runs, whatever its kind; the kind-specific CI workflows call it.
+
+| Job | Events | What |
+| --- | --- | --- |
+| `pr-title` | `pull_request` | [`amannn/action-semantic-pull-request`](https://github.com/amannn/action-semantic-pull-request): the title is a conventional commit (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`). |
+| `vulns` | `pull_request` | osv-scanner's reusable PR workflow, nested as a job: it scans the base branch and the PR head, and fails only on vulnerabilities the PR adds. Findings show as annotations and, except for PRs from forks, in code scanning. |
+| `actionlint` | all | [actionlint](https://github.com/rhysd/actionlint) at the version pinned there, with the caller's `.github/actionlint.yaml` if any. |
+
+No inputs or secrets. A called workflow gets only the token permissions its caller grants,
+and the nested osv-scanner job asks for `security-events: write`, so the calling job must
+grant `actions: read`, `contents: read`, `pull-requests: read` and `security-events: write`
+(see the example). To re-check edited titles, the caller also listens for `edited`.
+
+### `notify-failure.yml`
+
+Posts a failed run to Slack (`chat.postMessage`) when:
+
+- (a) it's for a pull request opened by `ccf-release-bot[bot]`, or for a branch starting with
+  `renovate/` or `ccf-bump/`;
+- (b) it's for a push to the default branch, and the previous completed push run of the same
+  workflow there passed, or there is none (cancelled and skipped runs are stepped over). A
+  broken `main` posts when it breaks, not on every later push.
+
+It posts once per repo + commit (the PR head for pull requests) + workflow: after posting it
+saves an Actions cache entry with that key, and skips the post when the entry exists. Without
+`SLACK_BOT_TOKEN` (forks, repos outside the secret's scope) it does nothing and succeeds. The
+logic is `cmd/notify` (rules in `internal/notify`), built from this repo at `workflows-ref`.
+
+| Input | Default | What |
+| --- | --- | --- |
+| `channel` | `""` | Slack channel ID; empty means the `SLACK_CHANNEL_CI_FAILURES` variable. |
+| `workflows-ref` | `v1` | Ref of this repo to build `cmd/notify` from. A reusable workflow can't see the ref it was called at, so pass the same ref when calling it at anything but `@v1`. |
+
+Secret: `SLACK_BOT_TOKEN` (optional, `chat:write`), via `secrets: inherit`. The calling job
+runs `if: failure()` after the CI jobs and grants `actions: read` and `contents: read`.
 
 ## Development
 

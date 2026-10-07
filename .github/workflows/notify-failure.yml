@@ -1,0 +1,98 @@
+# Posts a failed CI run to Slack once per repo + commit + workflow (rules: internal/notify).
+# Call it from a job with `needs: <CI jobs>`, `if: failure()`, `secrets: inherit` and
+# `permissions: {actions: read, contents: read}`; see README.
+name: notify-failure
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: "Slack channel ID; empty means the SLACK_CHANNEL_CI_FAILURES variable"
+        type: string
+        default: ""
+      workflows-ref:
+        description: "Ref of compliance-framework/workflows to run cmd/notify from; keep it equal to the ref this workflow is called at"
+        type: string
+        default: v1
+    secrets:
+      SLACK_BOT_TOKEN:
+        description: "Slack bot token (chat:write). Without it the job does nothing, so forks don't fail."
+        required: false
+
+permissions: {}
+
+jobs:
+  notify:
+    name: notify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read # look up the previous run on the default branch
+      contents: read # check out cmd/notify
+    env:
+      TOOLS_DIR: ${{ github.workspace }}/.ccf-workflows
+      MARKER: .ccf-notify-failure
+    steps:
+      - name: Check for the Slack token
+        id: token
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          if [ -n "${SLACK_BOT_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No SLACK_BOT_TOKEN (e.g. a fork); not notifying."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out cmd/notify
+        if: steps.token.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: compliance-framework/workflows
+          ref: ${{ inputs.workflows-ref }}
+          path: .ccf-workflows
+          persist-credentials: false
+
+      - if: steps.token.outputs.enabled == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .ccf-workflows/go.mod
+          cache: false
+
+      - name: Decide
+        id: plan
+        if: steps.token.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          go -C "$TOOLS_DIR" build -o "$RUNNER_TEMP/notify" ./cmd/notify
+          "$RUNNER_TEMP/notify" plan
+
+      - name: Look up the dedupe marker
+        id: marker
+        if: steps.plan.outputs.notify == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MARKER }}
+          key: ${{ steps.plan.outputs.key }}
+          lookup-only: true
+
+      - name: Post to Slack
+        id: post
+        if: steps.plan.outputs.notify == 'true' && steps.marker.outputs.cache-hit != 'true'
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ inputs.channel || vars.SLACK_CHANNEL_CI_FAILURES }}
+          REASON: ${{ steps.plan.outputs.reason }}
+          KEY: ${{ steps.plan.outputs.key }}
+        run: |
+          "$RUNNER_TEMP/notify" post --reason "$REASON"
+          echo "$KEY" > "$MARKER"
+
+      - name: Save the dedupe marker
+        if: steps.post.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MARKER }}
+          key: ${{ steps.plan.outputs.key }}
