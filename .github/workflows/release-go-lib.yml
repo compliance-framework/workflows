@@ -1,0 +1,95 @@
+# Publishes a Go library or CLI release (kind go-lib: gooci) when the caller's release is
+# published: goreleaser builds the release tag and attaches the archives to the GitHub release
+# that release-please (or cut-prerelease.yml) already created; it updates that release instead
+# of creating one. release-finished.yml reports the result. Call it on `release: published`
+# with `secrets: inherit`; the caller's goreleaser config needs `release.prerelease: auto`
+# (checked here). See README.
+name: release-go-lib
+
+on:
+  workflow_call:
+    secrets:
+      RELEASE_BOT_APP_ID:
+        description: "ccf-release-bot App ID"
+        required: true
+      RELEASE_BOT_PRIVATE_KEY:
+        description: "ccf-release-bot private key"
+        required: true
+
+permissions: {}
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # goreleaser attaches the archives to the release
+    steps:
+      - name: Check the release tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [ -z "$TAG" ]; then
+            echo "::error::no release tag: call this workflow on release: published"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name }}
+          fetch-depth: 0 # goreleaser reads the tags for its changelog
+          persist-credentials: false
+      # goreleaser updates the existing release with `prerelease` from its config, so anything
+      # but auto (decided from the tag) would turn a release candidate into a full release.
+      - name: Check the goreleaser config
+        run: |
+          config=""
+          # goreleaser's own search order.
+          for f in .config/goreleaser.yml .config/goreleaser.yaml .goreleaser.yml .goreleaser.yaml goreleaser.yml goreleaser.yaml; do
+            if [ -f "$f" ]; then
+              config="$f"
+              break
+            fi
+          done
+          if [ -z "$config" ]; then
+            echo "::error::no goreleaser config (.goreleaser.yaml) in the repo"
+            exit 1
+          fi
+          prerelease="$(yq -r '.release.prerelease // ""' "$config")"
+          if [ "$prerelease" != "auto" ]; then
+            echo "::error file=$config::release.prerelease must be auto (it is '$prerelease'), so a release candidate stays a pre-release"
+            exit 1
+          fi
+          mode="$(yq -r '.release.mode // ""' "$config")"
+          if [ -n "$mode" ] && [ "$mode" != "keep-existing" ]; then
+            echo "::warning file=$config::release.mode is $mode: goreleaser changes the release notes release-please wrote"
+          fi
+          if [ "$(yq -r '.release.replace_existing_artifacts // false' "$config")" != "true" ]; then
+            echo "::warning file=$config::release.replace_existing_artifacts is not true: re-running a release that uploaded some archives fails"
+          fi
+          echo "Using $config."
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: v2.18.2
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # The released tag, even when another tag points at the same commit (two rcs).
+          GORELEASER_CURRENT_TAG: ${{ github.event.release.tag_name }}
+
+  finished:
+    name: finished
+    needs: [publish]
+    if: always()
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/release-finished.yml
+    with:
+      needs: ${{ toJSON(needs) }}
+    permissions:
+      packages: write
+    secrets:
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}

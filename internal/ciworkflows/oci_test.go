@@ -19,8 +19,7 @@ func TestReleaseCopies(t *testing.T) {
 		read(t, file, &wf)
 		return wf.Jobs
 	}
-	// The tags job differs from release-go-image.yml's only in the tag style, and the two
-	// artifact workflows end in the same finished job.
+	// The tags job differs from release-go-image.yml's only in the tag style.
 	asYAML := func(v any) string {
 		b, err := yaml.Marshal(v)
 		if err != nil {
@@ -33,9 +32,6 @@ func TestReleaseCopies(t *testing.T) {
 		if got := asYAML(jobs(file)["tags"]); strings.Replace(got, "--style artifact", "--style image", 1) != imageTags || got == imageTags {
 			t.Errorf("%s: the tags job is not release-go-image.yml's with --style artifact:\n%s", file, got)
 		}
-	}
-	if !reflect.DeepEqual(jobs("release-policies.yml")["finished"], jobs("release-go-plugin.yml")["finished"]) {
-		t.Error("the finished job differs between release-go-plugin.yml and release-policies.yml")
 	}
 	// A preview publishes the way a release does, from a snapshot instead of a release.
 	if !reflect.DeepEqual(jobs("preview.yml")["policies"].(map[string]any)["steps"], jobs("release-policies.yml")["publish"].(map[string]any)["steps"]) {

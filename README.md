@@ -501,6 +501,7 @@ release-bot secrets.
 | `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`. |
 | `release-ui.yml` | `ui` | The same as `release-go-image.yml` (it calls it), with the ui's single image. |
 | `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release; the config needs `release.prerelease: auto`), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`. |
+| `release-go-lib.yml` | `go-lib` | `goreleaser release --clean` of the release tag: the binaries and archives go on the GitHub release. |
 | `release-policies.yml` | `policies` | `opa build` of `directory` at `opa-version`, then `gooci upload-single` of the bundle. |
 | `release-helm.yml` | `helm` | `helm package` of the released chart at the tag's version, then `helm push` to `registry`. |
 | `release-action.yml` | `action` | Nothing: it moves the major tag (`v0` today) to the release commit. |
@@ -522,12 +523,13 @@ github.com/compliance-framework/gooci@v0.0.7`) and reads the registry login from
 | `tag-prefix` | `v` | Prefix of the release tags. |
 | `protocol-version` | `2` | `release-go-plugin.yml`: the agent plugin protocol the plugin implements. |
 | `directory`, `opa-version` | `policies`, `1.14.1` | `release-policies.yml`: the bundle root and OPA version. |
-
 | `charts-dir`, `registry` | `charts`, `oci://ghcr.io/compliance-framework/helm-charts` | `release-helm.yml`: the directory holding one directory per chart, and where charts are pushed. |
 
-`release-go-plugin.yml` needs `contents: write` (goreleaser attaches the archives to the
-release) and `packages: write`, `release-action.yml` `contents: write` (the tag) and
-`packages: write` (the prune); the others need `contents: read` and `packages: write`.
+`release-go-plugin.yml` and `release-go-lib.yml` need `contents: write` (goreleaser attaches
+the archives to the release) and `packages: write`, `release-action.yml` `contents: write`
+(the tag) and `packages: write` (the prune); the others need `contents: read` and
+`packages: write`. `release-go-lib.yml` publishes no package, but `release-finished.yml`'s
+prune needs `packages: write` (it finds no package and prunes nothing).
 
 **Charts.** In a multi-chart repo release-please tags each chart's release
 `<component>-vX.Y.Z` (`ccf-agent-v0.3.0`); `release-helm.yml` releases the chart whose
@@ -538,6 +540,36 @@ to the tag's version, because a release candidate is tagged on the default branc
 `Chart.yaml` still has the previous version until the release PR merges; so
 `ccf-agent-v0.4.0-rc1` pushes `helm-charts/ccf-agent:0.4.0-rc1`. Charts have no `latest`.
 The repo calls `cut-prerelease.yml` with the chart's `path` and `tag-prefix: <chart>-v`.
+
+**Go libraries.** `release-go-lib.yml` (no inputs) checks out the release tag, sets up Go
+from the repo's `go.mod` and runs `goreleaser release --clean` (goreleaser-action and
+goreleaser at the versions `ci-go-lib.yml` pins) with `GITHUB_TOKEN` and
+`GORELEASER_CURRENT_TAG` set to the release tag. release-please (or `cut-prerelease.yml`)
+has already created the GitHub release, so goreleaser finds it by tag and updates it rather
+than failing: it uploads the archives and the checksums, keeps the release published, and
+with the default `release.mode` (`keep-existing`) keeps the notes release-please wrote
+(`append`, `prepend` or `replace` would add goreleaser's changelog to them or replace them,
+so leave `mode` unset). It does reset the release's name to `release.name_template` (the
+tag by default) and its pre-release flag to what the config says, so the job first checks
+the repo's goreleaser config, found the way goreleaser finds it (`.config/goreleaser.y[a]ml`,
+`.goreleaser.y[a]ml`, `goreleaser.y[a]ml`):
+
+- `release.prerelease` must be `auto`, so the flag comes from the tag (`v1.2.3-rc1` stays
+  a pre-release and is not marked latest); anything else fails the release before the build.
+- `release.mode` other than `keep-existing` warns.
+- `release.replace_existing_artifacts` not `true` warns: without it a re-run after a
+  partial upload fails on the archives already attached.
+
+The repo must not turn on immutable releases: goreleaser can't add assets to an immutable
+release, and release-please publishes the release before this workflow runs.
+
+```yaml
+# .goreleaser.yaml in a library repo: the release settings this workflow expects
+version: 2
+release:
+  prerelease: auto
+  replace_existing_artifacts: true
+```
 
 **Actions.** For a final tag `vX.Y.Z`, `release-action.yml` points `vX` at the release
 commit (creating it the first time) with `GITHUB_TOKEN`, so callers pinned to `@v0` get the
@@ -595,6 +627,17 @@ jobs:
     uses: compliance-framework/workflows/.github/workflows/release-go-plugin.yml@v1  # or release-policies.yml
     permissions:
       contents: write  # release-policies.yml: read
+      packages: write
+    secrets: inherit
+```
+
+```yaml
+# the same, in a library repo (gooci)
+jobs:
+  release:
+    uses: compliance-framework/workflows/.github/workflows/release-go-lib.yml@v1
+    permissions:
+      contents: write
       packages: write
     secrets: inherit
 ```
