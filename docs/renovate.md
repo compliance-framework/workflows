@@ -11,7 +11,7 @@ public repos.
 | Rule | Setting |
 | --- | --- |
 | Schedule | `* * 8,22 * *` (UTC): normal updates only on the 8th and 22nd, away from the monthly train, so each one spends at least a week on `main` before the next release. |
-| Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. |
+| Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. Each fix gets its own `[SECURITY]` PR, outside the group and the PR limits, and auto-merges unless it is a major. |
 | Waiting period | `minimumReleaseAge: "7 days"` with `internalChecksFilter: "strict"`: no branch or PR before a release is a week old. An update with no release timestamp waits too (Renovate's default `minimumReleaseAgeBehaviour`). |
 | Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain and the `golang` image are in it. Majors get their own PRs. |
 | Auto-merge | The non-major group auto-merges with `platformAutomerge`: GitHub merges it once the `ci / required` check passes (needs the repo's "allow auto-merge" setting, which `repo-settings.yml` turns on). Majors wait for a human. |
@@ -50,7 +50,7 @@ Runs daily at 06:17 UTC and on `workflow_dispatch`, as one job:
    reach all of them). A dry run gets read-only permissions; a live run gets Contents, Pull requests
    and Issues write, Workflows write (to update actions in `.github/workflows`), and Checks and
    Dependabot alerts read.
-4. `renovatebot/github-action` runs Renovate (pinned to `44.145.1`) with that config and token.
+4. `renovatebot/github-action` runs Renovate, pinned with its `renovate-version` input, with that config and token.
    This repo is not in Renovate's list, so bump `renovate-version` and the action by hand.
 
 | Input | Default | What |
