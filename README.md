@@ -88,9 +88,8 @@ pin a major tag (`@v1`) or a full commit SHA, never `@main`.
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,
-`go run ./cmd/manifest` on both manifests, and
-`go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`. Third-party actions are pinned by
-full commit SHA, with the version in a comment.
+`go run ./cmd/manifest` on both manifests, and actionlint (at the version pinned in `ci.yml`).
+Third-party actions are pinned by full commit SHA, with the version in a comment.
 
 ## Legacy files
 
