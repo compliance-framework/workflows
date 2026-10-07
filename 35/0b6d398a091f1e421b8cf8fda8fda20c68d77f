@@ -1,0 +1,6 @@
+lisa-addressed:
+- self-review pass 1: Plan.Unknown and Run doc comments cover security settings and failed steps; package map `enabled` renamed to stateName (no shadowing by `enabled bool` params).
+
+lisa-selfreview:
+pass 2 (strict): request_changes
+- CORE-STYLE-001 nit github_test.go TestGitHubSecurityConfiguration "unenforced" case builds an unrealistic payload (enforcement "attached"); use status "attached" + enforcement "unenforced" -> fix

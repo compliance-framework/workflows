@@ -1,0 +1,5 @@
+lisa-addressed:
+- self-review pass 2: unenforced-configuration test uses a realistic payload (status attached, enforcement unenforced).
+
+lisa-selfreview:
+pass 3: approve, no findings
