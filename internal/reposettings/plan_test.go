@@ -172,6 +172,9 @@ func TestDesiredStateErrors(t *testing.T) {
 
 func TestPlanRepoDiff(t *testing.T) {
 	f := newFake("a")
+	review := f.repos["o/a"].rulesets[7]
+	review.Rules = append(review.Rules, Rule{Type: "creation"}) // added by hand; the write drops it
+	f.repos["o/a"].rulesets[7] = review
 	p, err := PlanRepo(context.Background(), f, "o/a", desired(t))
 	if err != nil {
 		t.Fatal(err)
@@ -195,6 +198,7 @@ func TestPlanRepoDiff(t *testing.T) {
 		`ruleset[ccf-review].bypass: "none" -> (unset)`,
 		`ruleset[ccf-review].bypass.Integration:42: (unset) -> "always"`,
 		`ruleset[ccf-review].rules.pull_request.required_approving_review_count: 0 -> 1`,
+		`ruleset[ccf-review].rules.creation: "on" -> (unset)`,
 	} {
 		if !slices.Contains(got, want) {
 			t.Errorf("missing change %s", want)
