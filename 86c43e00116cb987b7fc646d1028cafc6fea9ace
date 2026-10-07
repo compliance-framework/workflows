@@ -1,0 +1,2 @@
+lisa-addressed:
+- PRRT_kwDOKQL6as6qEQNt (#11, companion on #13): release_lib_test.go drops its TestGoreleaserReleaseConfig (moved to goreleaser_test.go on #11); TestGoreleaserReleaseGuard requires both release-go-plugin.yml and release-go-lib.yml and pins their "Check the goreleaser config" steps identical (mutation-checked). README: the "goreleaser config" section covers both workflows (plus the immutable-releases caveat); the Go libraries paragraph references it; the go-lib table row notes prerelease: auto.
