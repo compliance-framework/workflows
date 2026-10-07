@@ -310,6 +310,29 @@ func TestKubeconform(t *testing.T) {
 	}
 }
 
+// TestCtLint pins that the repo's ct.yaml reaches ct only through --config:
+// chart-testing-action points ct's own config search at the action's install dir.
+func TestCtLint(t *testing.T) {
+	src := script(t, helm, "ct", "ct lint")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ct"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := "PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH")
+	lint := []string{"lint", "--all", "--chart-dirs", "charts", "--check-version-increment=false"}
+	dir := t.TempDir()
+	if r := run(t, dir, src, path, "CHARTS_DIR=charts"); r.failed || !slices.Equal(strings.Fields(r.out), lint) {
+		t.Fatalf("without ct.yaml: ran ct %v (failed=%v)", strings.Fields(r.out), r.failed)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ct.yaml"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := append([]string{"lint", "--config", "ct.yaml"}, lint[1:]...)
+	if r := run(t, dir, src, path, "CHARTS_DIR=charts"); r.failed || !slices.Equal(strings.Fields(r.out), want) {
+		t.Fatalf("with ct.yaml: ran ct %v (failed=%v), want %v", strings.Fields(r.out), r.failed, want)
+	}
+}
+
 func TestFindConfig(t *testing.T) {
 	for _, tc := range []struct{ file, job, step, repoConfig string }{
 		{goPlugin, "lint", "Find the repo's golangci-lint config", ".golangci.yaml"},

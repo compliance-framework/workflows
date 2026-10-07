@@ -264,7 +264,7 @@ One `node` job: Node from the repo's `.nvmrc` (else `node-version`), `npm ci`, t
 | Job | Checks |
 | --- | --- |
 | `helm` | `helm lint` on every chart; [kubeconform](https://github.com/yannh/kubeconform) `-strict` on each chart rendered with its default values; each of `make-targets` (the chart unit tests). |
-| `ct` | `ct lint --all --check-version-increment=false`, with the repo's `ct.yaml` if any. release-please owns chart versions, and `ccf-bump` PRs change only `appVersion` and image tags, so no version bump is required. |
+| `ct` | `ct lint --all --check-version-increment=false`, plus `--config ct.yaml` when the repo has a `ct.yaml` (chart-testing-action points ct's config search at its own install dir, so ct would not find the repo's file otherwise). release-please owns chart versions, and `ccf-bump` PRs change only `appVersion` and image tags, so no version bump is required. |
 
 | Input | Default | What |
 | --- | --- | --- |

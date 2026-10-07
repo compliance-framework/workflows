@@ -110,10 +110,15 @@ jobs:
       - name: ct lint
         env:
           CHARTS_DIR: ${{ inputs.charts-dir }}
-        # Every chart, not only the changed ones; ct also reads the repo's ct.yaml, if any.
-        # release-please owns chart versions and ccf-bump PRs change only appVersion and image
-        # tags, so no version increment is required.
-        run: ct lint --all --chart-dirs "$CHARTS_DIR" --check-version-increment=false
+        # Every chart, not only the changed ones. chart-testing-action sets CT_CONFIG_DIR to its
+        # install dir, where ct then looks for its config, so the repo's ct.yaml (if any) is read
+        # only when passed with --config. release-please owns chart versions and ccf-bump PRs
+        # change only appVersion and image tags, so no version increment is required; the flag
+        # stays on the command line, which takes precedence over ct.yaml.
+        run: |
+          cfg=()
+          [ ! -f ct.yaml ] || cfg=(--config ct.yaml)
+          ct lint "${cfg[@]}" --all --chart-dirs "$CHARTS_DIR" --check-version-increment=false
 
   required:
     name: required
