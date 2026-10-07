@@ -64,8 +64,6 @@ type Repos interface {
 	// OpenPR returns the open PR whose head branch starts with headPrefix, or nil.
 	OpenPR(ctx context.Context, repo, headPrefix string) (*PR, error)
 	PR(ctx context.Context, repo string, number int) (*PR, error)
-	// BehindBy returns how many commits base has that head lacks.
-	BehindBy(ctx context.Context, repo, base, head string) (int, error)
 	Checks(ctx context.Context, repo, sha string) ([]Check, error)
 	// Merge squash-merges the PR if its head is still sha.
 	Merge(ctx context.Context, repo string, number int, sha string) error
