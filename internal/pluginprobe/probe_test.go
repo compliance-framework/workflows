@@ -140,6 +140,11 @@ func TestProbePluginPaths(t *testing.T) {
 	if got.Error != "" || got.Protocol != 2 || got.LibVersion != "" || len(got.Warnings) != 1 {
 		t.Errorf("ProbePlugin(dir) = %+v", got)
 	}
+	// A bare relative name is a file in the working directory, not a command in PATH.
+	t.Chdir(dir)
+	if got := p.ProbePlugin(context.Background(), "plugin", t.TempDir()); got.Error != "" || got.Protocol != 2 {
+		t.Errorf("ProbePlugin(\"plugin\") = %+v", got)
+	}
 	for src, want := range map[string]string{
 		t.TempDir():         "no plugin executable",
 		"no/such/plugin":    "neither a local path nor an OCI tag",

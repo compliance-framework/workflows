@@ -28,13 +28,18 @@ type artifact struct {
 
 // fetch resolves src the way the agent does: an existing file is used as is, an existing directory
 // must hold entry (`plugin`), and anything else must be an OCI tag, which gooci downloads and
-// extracts into outDir. platform ("os/arch") selects the image of a multi-platform index.
+// extracts into outDir. platform ("os/arch") selects the image of a multi-platform index. Local
+// paths are made absolute, so a bare name like "plugin" is never looked up in PATH.
 func (p *Prober) fetch(ctx context.Context, src, outDir, entry, platform string) (artifact, error) {
 	if info, err := os.Stat(src); err == nil {
-		if info.IsDir() {
-			return artifact{path: filepath.Join(src, entry)}, nil
+		abs, err := filepath.Abs(src)
+		if err != nil {
+			return artifact{}, err
 		}
-		return artifact{path: src}, nil
+		if info.IsDir() {
+			return artifact{path: filepath.Join(abs, entry)}, nil
+		}
+		return artifact{path: abs}, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return artifact{}, err
 	}
@@ -56,7 +61,7 @@ func (p *Prober) fetch(ctx context.Context, src, outDir, entry, platform string)
 	if platform != "" {
 		plat, err := v1.ParsePlatform(platform)
 		if err != nil {
-			return artifact{}, err
+			return artifact{}, fmt.Errorf("platform %q: %w", platform, err)
 		}
 		opts = append(opts, remote.WithPlatform(*plat))
 	}
