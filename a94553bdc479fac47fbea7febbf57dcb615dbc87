@@ -1,0 +1,2 @@
+lisa-addressed:
+pass 2: README reflowed to the 100-column wrap; added a concrete ci-policies.yml caller snippet (with: directory, permissions).
