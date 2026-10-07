@@ -139,3 +139,17 @@ func TestDryRunPlansTheW1Stages(t *testing.T) {
 		t.Errorf("reconcile: %v, %d issues", err, len(w.issues))
 	}
 }
+
+func TestClipAndNextPatch(t *testing.T) {
+	if got := clip("héllo", 2); got != "h\n... (cut; the full output is in the run log)" {
+		t.Errorf("clip = %q", got)
+	}
+	if got := clip("short", 10); got != "short" {
+		t.Errorf("clip = %q", got)
+	}
+	for in, want := range map[string]string{"0.1.9": "0.1.10", "1.2": "1.2", "1.2.x": "1.2.x"} {
+		if got := nextPatch(in); got != want {
+			t.Errorf("nextPatch(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

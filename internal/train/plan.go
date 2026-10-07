@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -59,7 +60,7 @@ func (e *Engine) planRepo(ctx context.Context, st *State, r *RepoState, details 
 		case bumped:
 			notes = append(notes, "ccf-bump would open a PR")
 			fmt.Fprintf(details, "<details><summary>%s: ccf-bump --dry-run</summary>\n\n```text\n%s\n```\n</details>\n\n",
-				r.Name, strings.ReplaceAll(strings.TrimSpace(res.Output), "```", "'''"))
+				r.Name, strings.ReplaceAll(clip(strings.TrimSpace(res.Output), maxBumpOutput), "```", "'''"))
 		default:
 			notes = append(notes, "nothing to bump")
 		}
@@ -114,4 +115,29 @@ func (e *Engine) planRepo(ctx context.Context, st *State, r *RepoState, details 
 	}
 	r.Detail = strings.Join(notes, "; ")
 	return nil
+}
+
+// maxBumpOutput bounds each repo's ccf-bump output in the plan comment: it ends with the diff,
+// go.sum included, and a comment holds at most 65536 characters.
+const maxBumpOutput = 4000
+
+// clip cuts s to n bytes, on a rune boundary, and says so.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "") + "\n... (cut; the full output is in the run log)"
+}
+
+// nextPatch returns X.Y.(Z+1), or v unchanged if it is not X.Y.Z.
+func nextPatch(v string) string {
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return v
+	}
+	z, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return v
+	}
+	return fmt.Sprintf("%s.%s.%d", parts[0], parts[1], z+1)
 }

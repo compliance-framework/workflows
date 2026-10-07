@@ -90,3 +90,14 @@ func (e *Engine) escalate(ctx context.Context, is Issue, st *State) {
 		st.MarkNotified("escalate|" + now)
 	}
 }
+
+// stage returns the repos of stage n.
+func (s *State) stage(n int) []string {
+	var out []string
+	for _, r := range s.Repos {
+		if r.Stage == n {
+			out = append(out, r.Name)
+		}
+	}
+	return out
+}

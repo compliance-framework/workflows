@@ -56,7 +56,7 @@ func (e *Engine) chartIssues(ctx context.Context, st *State, dryRun bool) ([]str
 		var lines []string
 		for _, d := range h.DependsOn {
 			if r := st.Repo(d); r != nil && MinorUp(r.From[RootPackage], r.Version()) {
-				lines = append(lines, fmt.Sprintf("- [ ] %s: v%s → v%s ([release](https://github.com/compliance-framework/%s/releases/tag/v%s))", d, r.From[RootPackage], r.Version(), d, r.Version()))
+				lines = append(lines, fmt.Sprintf("- [ ] %s: v%s → v%s", d, r.From[RootPackage], r.Version()))
 			}
 		}
 		if len(lines) == 0 {
@@ -67,8 +67,9 @@ func (e *Engine) chartIssues(ctx context.Context, st *State, dryRun bool) ([]str
 			out = append(out, fmt.Sprintf("%s: %q (%d repos)", h.Name, title, len(lines)))
 			continue
 		}
-		body := "The release train released new minor versions of repos these charts deploy. Check their release notes " +
-			"for new settings, defaults and migrations, and update the charts' values and templates:\n\n" + strings.Join(lines, "\n") + "\n"
+		body := fmt.Sprintf("Release train %s released new minor versions of repos these charts deploy (release notes: "+
+			"[digest draft](%s)). Check them for new settings, defaults and migrations, and update the charts' values "+
+			"and templates:\n\n%s\n", st.Month, st.Digest, strings.Join(lines, "\n"))
 		url, err := e.Repos.EnsureIssue(ctx, h.Name, title, body)
 		if err != nil {
 			return nil, fmt.Errorf("%s issue: %w", h.Name, err)
