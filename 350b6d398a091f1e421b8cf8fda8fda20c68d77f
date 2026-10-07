@@ -1,0 +1,2 @@
+lisa-addressed:
+- self-review pass 1: Plan.Unknown and Run doc comments cover security settings and failed steps; package map `enabled` renamed to stateName (no shadowing by `enabled bool` params).
