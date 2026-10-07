@@ -3,15 +3,3 @@ pass 2: CORE-DUP-001 README no longer repeats the actionlint version; it points 
 
 lisa-selfreview:
 pass 3 (strict): approve, no findings. Gate green: go test -race, go vet, gofmt, golangci-lint 0 issues, actionlint clean.
-
-lisa-design:
-- vulns nests osv-scanner-reusable-pr.yml as a job (nesting works: caller -> ci-<kind> -> ci-common -> osv = 4 levels). Its job declares actions:read, contents:read, security-events:write, so every caller of ci-common must grant those (plus pull-requests:read for pr-title). Documented in README.
-- vulns upload-sarif is disabled for PRs whose head repo != github.repository (fork tokens are read-only, upload would fail).
-- pr-title and vulns run on pull_request only (spec); actionlint runs on every event. actionlint uses setup-go `stable` (callers may not be Go repos) and the same pinned go run actionlint@v1.7.12 as this repo.
-- Dedupe uses an Actions cache entry (key = ccf-notify-failure-sha256(repo\0sha\0workflow)), lookup-only before posting and saved after a successful post. Chosen over Slack conversations.history (needs channels:history, scope not known to be granted) and over "an earlier run failed" heuristics (would skip when the earlier post never happened). The key is pinned by a golden test: changing it re-posts already-reported failures.
-- For pull_request events the commit is pull_request.head.sha, not GITHUB_SHA (the merge commit changes whenever base moves).
-- Rule (b): previous run = latest completed push run of the same workflow_id on the default branch with lower run_number and a decisive conclusion (success/failure/timed_out/startup_failure); cancelled/skipped/neutral/stale are stepped over; no previous run counts as passing. Default branch comes from the event payload, falling back to main.
-- notify-failure cannot know the ref it was called at (no job.workflow_sha context), so it checks out compliance-framework/workflows at input workflows-ref (default v1) to build cmd/notify. Callers pinning a SHA/branch must pass the same ref. Alternative (OIDC job_workflow_sha claim) needs id-token: write; rejected.
-- The caller decides failure (`if: failure()` on the notify job); the reusable workflow does not re-check the run's result.
-- Token gate is a shell step (secrets can't be used in if:); notify post also no-ops on an empty token. A post error or a missing channel fails the notify job (visible), and the marker is not saved, so a re-run retries.
-- This repo's ci.yml dogfoods ./.github/workflows/ci-common.yml (replaces its standalone actionlint job), so pr-title/vulns/actionlint run on this PR.
