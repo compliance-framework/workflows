@@ -86,3 +86,29 @@ func TestPostMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestPostInThread(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body = nil
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"channel":"C123","ts":"1700000000.000200"}`))
+	}))
+	defer srv.Close()
+	slack := &Slack{BaseURL: srv.URL, Token: "xoxb-test"}
+	channel, ts, err := slack.Post(context.Background(), "C123", "reply", "1700000000.000100")
+	if err != nil || channel != "C123" || ts != "1700000000.000200" {
+		t.Errorf("Post = %q, %q, %v", channel, ts, err)
+	}
+	if body["thread_ts"] != "1700000000.000100" || body["text"] != "reply" {
+		t.Errorf("body = %v", body)
+	}
+	if _, _, err := slack.Post(context.Background(), "C123", "top", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["thread_ts"]; ok {
+		t.Errorf("a top-level message has a thread_ts: %v", body)
+	}
+}

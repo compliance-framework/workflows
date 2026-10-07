@@ -74,27 +74,40 @@ type Slack struct {
 
 // PostMessage posts text to channel with chat.postMessage.
 func (s *Slack) PostMessage(ctx context.Context, channel, text string) error {
-	payload, err := json.Marshal(map[string]any{"channel": channel, "text": text, "unfurl_links": false, "unfurl_media": false})
+	_, _, err := s.Post(ctx, channel, text, "")
+	return err
+}
+
+// Post posts text to channel with chat.postMessage, as a reply in the thread threadTS
+// unless it is empty, and returns the channel ID and ts of the posted message.
+func (s *Slack) Post(ctx context.Context, channel, text, threadTS string) (postedChannel, ts string, err error) {
+	msg := map[string]any{"channel": channel, "text": text, "unfurl_links": false, "unfurl_media": false}
+	if threadTS != "" {
+		msg["thread_ts"] = threadTS
+	}
+	payload, err := json.Marshal(msg)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(s.BaseURL, "/")+"/chat.postMessage", bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("Authorization", "Bearer "+s.Token)
 	var result struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
+		OK      bool   `json:"ok"`
+		Error   string `json:"error"`
+		Channel string `json:"channel"`
+		TS      string `json:"ts"`
 	}
 	if err := doJSON(s.HTTP, req, &result); err != nil {
-		return fmt.Errorf("chat.postMessage: %w", err)
+		return "", "", fmt.Errorf("chat.postMessage: %w", err)
 	}
 	if !result.OK {
-		return fmt.Errorf("chat.postMessage: %s", result.Error)
+		return "", "", fmt.Errorf("chat.postMessage: %s", result.Error)
 	}
-	return nil
+	return result.Channel, result.TS, nil
 }
 
 // doJSON sends req and decodes a 200 response's JSON body into out. Errors never include
