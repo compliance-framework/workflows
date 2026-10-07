@@ -94,6 +94,7 @@ jobs:
     uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@v1
     permissions:
       actions: read
+      contents: read
     secrets: inherit
 ```
 
@@ -140,7 +141,7 @@ logic is `cmd/notify` (rules in `internal/notify`), built from this repo at `wor
 | `workflows-ref` | `v1` | Ref of this repo to build `cmd/notify` from. A reusable workflow can't see the ref it was called at, so pass the same ref when calling it at anything but `@v1`. |
 
 Secret: `SLACK_BOT_TOKEN` (optional, `chat:write`), via `secrets: inherit`. The calling job
-runs `if: failure()` after the CI jobs and grants `actions: read`.
+runs `if: failure()` after the CI jobs and grants `actions: read` and `contents: read`.
 
 ## Development
 
