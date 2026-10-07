@@ -1,0 +1,68 @@
+# Checks every CCF repo runs, whatever its kind. The kind-specific CI workflows call this one.
+# Callers must grant: contents: read, pull-requests: read, actions: read, security-events: write
+# (see README).
+name: ci-common
+
+on:
+  workflow_call:
+    inputs:
+      vulns-scan-args:
+        description: "osv-scanner arguments (newline-separated); the default scans the whole repo recursively"
+        type: string
+        default: |-
+          -r
+          ./
+      vulns-upload-sarif:
+        description: "Upload the osv-scanner SARIF to code scanning (always skipped for pull requests from forks)"
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  pr-title:
+    name: pr-title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read # the action re-reads the PR to see its current title
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  vulns:
+    name: vulns
+    # Scans the base branch and the PR head, and fails only on vulnerabilities the PR adds.
+    if: github.event_name == 'pull_request'
+    permissions:
+      # Required by the called workflow's job, so callers must grant them too.
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+    with:
+      scan-args: ${{ inputs.vulns-scan-args }}
+      # PRs from forks get a read-only token, so the code-scanning upload would fail there.
+      upload-sarif: ${{ inputs.vulns-upload-sarif && github.event.pull_request.head.repo.full_name == github.repository }}
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Callers need not be Go repos, so this takes the latest stable Go, not go.mod.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false
+      - name: actionlint
+        # Built from source at a pinned version; shellcheck is preinstalled on the runner.
+        # Reads the caller's .github/actionlint.yaml, if any.
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
