@@ -1,0 +1,2 @@
+lisa-addressed:
+- docs/plugin-probe.md: the probe executes plugins and gooci's untar doesn't confine paths, so probe only trusted artifacts.
