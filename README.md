@@ -101,9 +101,10 @@ jobs:
 ```
 
 Each `kind` gets its own CI workflow (`ci-go-plugin.yml` and `ci-policies.yml` so far; the
-others follow), plus release workflows later. The mock repos adopt each one before the product repos do. Consumers
-pin a major tag (`@v1`) or a full commit SHA, never `@main`. The `permissions` above are the
-ones `ci-common.yml` and `notify-failure.yml` need (see below).
+others follow), plus release workflows later. The mock repos adopt each one before the
+product repos do. Consumers pin a major tag (`@v1`) or a full commit SHA, never `@main`.
+The `permissions` above are the ones `ci-common.yml` and `notify-failure.yml` need (see
+below).
 
 ## Reusable workflows
 
@@ -152,8 +153,9 @@ needs to require (branch protection shows it as `<caller job> / required`). `req
 with `if: always()`, needs every other job, and fails unless all of them succeeded. None of
 those jobs is conditional, so a skipped job also fails it; the `pull_request`-only jobs inside
 `ci-common.yml` don't count, because `common` still succeeds when they skip. In the `go` and
-`opa` jobs every check runs even if an earlier one failed, so one run reports every problem. Callers grant the
-permissions `ci-common.yml` needs (see the example above); neither workflow takes secrets.
+`opa` jobs every check runs even if an earlier one failed, so one run reports every problem.
+Callers grant the permissions `ci-common.yml` needs (see the example above); neither workflow
+takes secrets.
 
 `ci-common.yml` is called as `./.github/workflows/ci-common.yml`. In a called workflow, a
 local reference means this repo at the same commit as the calling workflow file, not the
@@ -191,8 +193,19 @@ Go comes from the caller's `go.mod`.
 | `opa-version` | `1.14.1` | OPA version. |
 | `regal-version` | `0.43.0` | Regal version. |
 
-A caller is the example above with `ci-go-plugin.yml` or `ci-policies.yml` in `uses:` (and
-`with:` for any input).
+A caller is the example above with the kind's workflow in `uses:`, for example:
+
+```yaml
+  ci:
+    uses: compliance-framework/workflows/.github/workflows/ci-policies.yml@v1
+    with:
+      directory: policies  # the default; inputs are optional
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
+```
 
 ## Development
 
