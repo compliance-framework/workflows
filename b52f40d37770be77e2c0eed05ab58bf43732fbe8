@@ -1,0 +1,3 @@
+lisa-addressed:
+- PRRT_kwDOKQL6as6qEQK2 (#8 defaults.json): added "initial-version": "0.1.0" after bump-minor-pre-major in release-please/defaults.json; README Shared defaults paragraph and JSON example mention it (a repo with no release would otherwise get a 1.0.0 proposal that version-guard blocks). TestReleasePleaseDefaultsDrift reads defaults.json dynamically, no change needed.
+- PRRT_kwDOKQL6as6qEQLD (#8 README): documented that node packages need "include-component-in-tag": false in their package entry (release-please tags <package.json name>-vX.Y.Z by default; release-ui.yml and cut-prerelease.yml accept only vX.Y.Z); per package so the top-level defaults drift check doesn't warn; added a node example next to the go one.
