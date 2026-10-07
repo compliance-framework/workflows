@@ -1,0 +1,10 @@
+lisa-design:
+- Incident key = repo + caller workflow FILE + (PR number | pushed branch). The workflow file is added beyond the spec's repo+PR/branch so two workflows of one repo (each calling notify) don't close or reply into each other's incidents. Pinned in TestIncidentKey.
+- State = one JSON file in the Actions cache under ccf-notify-incident-<sha256[:16] of key>-<run_id>-<run_attempt>; restored with the prefix as restore-keys (newest entry wins). Saved only when something was posted. Cache scoping (PR merge ref / branch) gives the PR-vs-main separation; no new permissions.
+- Rule (b) for the default branch no longer looks up the previous run's conclusion: the open incident replaces that dedupe (first failure opens, later failing commits reply, first pass closes). The GitHub client (PreviousConclusion) and actions: read were removed as unused; the old ccf-notify-failure-* marker cache is no longer read.
+- Dedupe = open incident with the same head SHA and the same sorted failed-job set -> post nothing. A new commit or a different failed set replies.
+- Result from the `needs` input (named like release-finished.yml's input, not needs-json): any failure -> failure; else any cancelled or nothing ran -> leave the incident alone; else success. Empty input = legacy if: failure() caller -> failure with unknown jobs (so un-migrated callers keep working; they just never post recoveries).
+- Replies (failure and recovery) go to the incident's stored channel; the channel input/var only picks where new incidents start.
+- A state file that can't be parsed or is for another key is logged and treated as no incident, so a corrupt newest cache entry can't block notifications forever.
+- Slack.PostMessage kept (signature unchanged) as a wrapper around the new Slack.Post(channel, text, threadTS) -> (channel, ts), so other users of internal/notify are unaffected.
+- No job-level concurrency group: queued notify jobs would get cancelled and show as cancelled checks; the double-thread race (two runs of one incident finishing together) is documented instead.
