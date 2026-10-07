@@ -1,0 +1,118 @@
+# Publishes a plugin release (kind go-plugin) when the caller's release is published:
+# goreleaser builds the archives and attaches them to the GitHub release, then gooci uploads
+# them to ghcr.io/<owner>/<repo>:vX.Y.Z, and to :latest for a final tag (decided from the tag
+# name, never from the release's prerelease flag), annotated with the plugin protocol version.
+# release-finished.yml reports the result. Call it on `release: published` with
+# `secrets: inherit`; see README. Tag rules: internal/release (ReleaseTags).
+name: release-go-plugin
+
+on:
+  workflow_call:
+    inputs:
+      tag-prefix:
+        description: "Prefix of the release tags"
+        type: string
+        default: v
+      protocol-version:
+        description: "The agent plugin protocol version the plugin implements (org.ccf.plugin.protocol.version)"
+        type: string
+        default: "2"
+    secrets:
+      RELEASE_BOT_APP_ID:
+        description: "ccf-release-bot App ID"
+        required: true
+      RELEASE_BOT_PRIVATE_KEY:
+        description: "ccf-release-bot private key"
+        required: true
+
+permissions: {}
+
+jobs:
+  tags:
+    name: tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tags: ${{ steps.tags.outputs.tags }}
+    steps:
+      - name: Check the tools ref
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so cmd/release can't be fetched"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Choose the tags
+        id: tags
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          PREFIX: ${{ inputs.tag-prefix }}
+        run: go run ./cmd/release release-tags --tag "$TAG" --prefix "$PREFIX" --style artifact
+
+  publish:
+    name: publish
+    needs: [tags]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # goreleaser attaches the archives to the release
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # goreleaser reads the tags for its changelog
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: v2.18.2
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Install gooci
+        run: go install github.com/compliance-framework/gooci@v0.0.7
+      # gooci reads the Docker credentials (the default keychain).
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Upload the plugin
+        env:
+          TAGS: ${{ needs.tags.outputs.tags }}
+          PROTOCOL_VERSION: ${{ inputs.protocol-version }}
+        run: |
+          [ -n "$TAGS" ] || { echo "::error::no tags to publish"; exit 1; }
+          for tag in $TAGS; do
+            echo "Uploading dist/ to ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
+            gooci upload --annotate="org.ccf.plugin.protocol.version=$PROTOCOL_VERSION" dist/ "ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
+          done
+
+  finished:
+    name: finished
+    needs: [tags, publish]
+    if: always()
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/release-finished.yml
+    with:
+      needs: ${{ toJSON(needs) }}
+    permissions:
+      packages: write
+    secrets:
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}

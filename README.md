@@ -389,23 +389,34 @@ needs `contents: read`; no inputs or secrets.
 
 #### `preview.yml`
 
-Publishes preview images to `ghcr.io/compliance-framework/<name>` with `GITHUB_TOKEN`
-(rules in `internal/release`, `PreviewTags`):
+Publishes previews to `ghcr.io/compliance-framework/<name>` with `GITHUB_TOKEN` (rules in
+`internal/release`, `PreviewTags`):
 
 | Event | Tags |
 | --- | --- |
 | push to the default branch | `main` and `sha-<first 7 of the commit>`, unless `on-main` is `false` |
 | `pull_request` with the `preview` label (not from a fork) | `pr-<number>` |
-| anything else | none; the image job is skipped |
+| anything else | none; the publishing job is skipped |
 
-It never publishes `latest`, which only final releases move. For now it builds container
-images only (kinds `go-service`, `ui`, `action`), for `linux/amd64` and `linux/arm64`; plugin
-and policy OCI artifacts (gooci) come in a later PR of this stack.
+It never publishes `latest`, which only final releases move. What it publishes depends on
+`kind`, each the same way as the kind's release workflow:
+
+| `kind` | Kinds | Publishes |
+| --- | --- | --- |
+| `image` | `go-service`, `ui`, `action` | Container images, `linux/amd64` and `linux/arm64` (`publish-image.yml`). |
+| `go-plugin` | `go-plugin` | `goreleaser release --snapshot --clean` (nothing is released), then `gooci upload` of `dist/` with the `org.ccf.plugin.protocol.version` annotation. |
+| `policies` | `policies` | `opa build` of `directory`, then `gooci upload-single` of the bundle. |
+
+Plugins and policies set `on-main: false` to publish PR previews only.
 
 | Input | Default | What |
 | --- | --- | --- |
 | `on-main` | `true` | Publish `:main` and `:sha-<7>` on pushes to the default branch. |
 | `images` | `[{}]` | JSON list of `{"name", "dockerfile", "context"}`, one image each; `name` defaults to the repo name, `dockerfile` to `Dockerfile`, `context` to `.`. |
+| `kind` | `image` | `image`, `go-plugin` or `policies`; anything else fails. |
+| `protocol-version` | `2` | `go-plugin`: the agent plugin protocol the plugin implements. |
+| `directory` | `policies` | `policies`: the bundle root. |
+| `opa-version` | `1.14.1` | `policies`: OPA version, without the leading `v`. |
 
 ```yaml
 # .github/workflows/preview.yml in a consuming repo
@@ -431,6 +442,9 @@ jobs:
       contents: read
       packages: write
 ```
+
+A plugin repo calls it with `with: {kind: go-plugin, on-main: false}` (a policy repo with
+`kind: policies`), and the same permissions.
 
 The image build is a separate reusable workflow, `publish-image.yml`, that `preview.yml`
 and `release-go-image.yml` call as `./.github/workflows/publish-image.yml`: inputs `images`
@@ -486,16 +500,29 @@ release-bot secrets.
 | --- | --- | --- |
 | `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`. |
 | `release-ui.yml` | `ui` | The same as `release-go-image.yml` (it calls it), with the ui's single image. |
+| `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`. |
+| `release-policies.yml` | `policies` | `opa build` of `directory` at `opa-version`, then `gooci upload-single` of the bundle. |
 
 Image tags, for the tag `v1.2.3` (prefix `tag-prefix`, default `v`): `1.2.3`, `1.2`, `1` and
 `latest`. A tag with a pre-release part (`v1.2.3-rc1`) publishes `1.2.3-rc1` only: a release
 candidate never moves `latest` or the floating `X.Y` and `X` that users follow. A tag that is
 not `<prefix>X.Y.Z[-pre-release]` fails the release.
 
+Plugin and policy (gooci) tags keep the `v`, as the agent configs reference them
+(`plugin-x:v0.4.0`): `v1.2.3` and `latest` for a final tag, `v1.2.3-rc1` only for a
+pre-release. gooci is built from source at the pinned version (`go install
+github.com/compliance-framework/gooci@v0.0.7`) and reads the registry login from
+`docker/login-action`.
+
 | Input | Default | What |
 | --- | --- | --- |
 | `images` | `[{}]` | As for `preview.yml`: one entry per image (agent has three). |
 | `tag-prefix` | `v` | Prefix of the release tags. |
+| `protocol-version` | `2` | `release-go-plugin.yml`: the agent plugin protocol the plugin implements. |
+| `directory`, `opa-version` | `policies`, `1.14.1` | `release-policies.yml`: the bundle root and OPA version. |
+
+`release-go-plugin.yml` needs `contents: write` (goreleaser attaches the archives to the
+release) and `packages: write`; the others need `contents: read` and `packages: write`.
 
 ```yaml
 # .github/workflows/release.yml in a consuming repo
@@ -514,6 +541,17 @@ jobs:
          {"name": "agent-custodian", "dockerfile": "Dockerfile-custodian"}]
     permissions:
       contents: read
+      packages: write
+    secrets: inherit
+```
+
+```yaml
+# the same, in a plugin repo
+jobs:
+  release:
+    uses: compliance-framework/workflows/.github/workflows/release-go-plugin.yml@v1  # or release-policies.yml
+    permissions:
+      contents: write  # release-policies.yml: read
       packages: write
     secrets: inherit
 ```
