@@ -3,3 +3,8 @@ lisa-design:
 - --watch 30m keeps reconciling every minute while a repo waits on GitHub (release-please, CI, release workflows) and stops when only human holds are left.
 - The members token is minted separately with continue-on-error: the app may lack org Members read; without it commands are refused, the run still works.
 - Scheduled starts are dry runs until TRAIN_LIVE=true; the hourly reconcile always runs but only acts on an open train, and live trains only exist when someone dispatched one.
+
+lisa-selfreview:
+- pass 1: [must-fix CORE-ERR-001] the plan step piped `train select` into tee without pipefail, so a failed select left empty outputs. Fixed.
+- pass 1: [must-fix] workflow-level concurrency let skipped comment runs cancel a pending reconcile. Fixed (job-level).
+- pass 2: approve.
