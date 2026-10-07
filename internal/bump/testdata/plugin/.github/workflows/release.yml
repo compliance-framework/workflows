@@ -1,0 +1,14 @@
+name: release
+on:
+  release:
+    types: [published]
+jobs:
+  release:
+    uses: compliance-framework/workflows/.github/workflows/release-go-plugin.yml@ra/some-branch
+    secrets: inherit
+  extra:
+    runs-on: ubuntu-latest
+    steps:
+      - run: go install github.com/compliance-framework/mock-gooci/cmd/mock-gooci@v0.1.0
+      - run: go install github.com/compliance-framework/gooci@v0.0.7 && gooci version
+      - run: go install github.com/other-org/tool@v1.0.0

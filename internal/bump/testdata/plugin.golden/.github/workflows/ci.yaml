@@ -1,0 +1,7 @@
+name: ci
+on: pull_request
+jobs:
+  ci:
+    uses: compliance-framework/workflows/.github/workflows/ci-go-plugin.yml@v1 # pinned
+  checks:
+    uses: compliance-framework/workflows/.github/workflows/release-checks.yml@v1

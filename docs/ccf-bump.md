@@ -1,0 +1,76 @@
+# ccf-bump
+
+`ccf-bump` (`cmd/ccf-bump`, logic in `internal/bump`) moves the pinned versions of internal
+dependencies in the manifest's repos and opens one PR per repo, titled `fix(deps): bump <list>`.
+
+```text
+ccf-bump --repo NAME [--set dep=version]... [--mode sync|train] [--pr] [--dry-run] [flags]
+ccf-bump sync --all|--repos a,b [--batch 10] [--pr] [--dry-run] [flags]
+ccf-bump list [--repos a,b]
+```
+
+- **sync** mode (the default; `ccf-bump sync`) targets each dependency's latest **final** release:
+  the highest `vX.Y.Z` release that is neither a draft nor a prerelease, read from the GitHub API.
+- **train** mode targets only the `--set` versions (the release train passes what it released).
+- `--set dep=version`: `dep` is a repo name, a `github.com/<owner>/...` module path, `opa` or
+  `workflows`; it overrides the resolved target in either mode. Versions must be semver
+  (`v1.2.3` or `1.2.3`); a `workflows` ref can be any ref.
+- `--workflows-ref REF` (same as `--set workflows=REF`): shared-workflow refs move only when given.
+- Without `--pr`, ccf-bump prints the plan and the diff. `--pr` pushes branch
+  `ccf-bump/<mode>-<YYYY-MM-DD>` (forced, so a rerun the same day updates it) and opens the PR, or
+  updates the open one. `--pr --dry-run` prints the PR instead.
+- `--batch N` (sync): at most N PRs per hour; it waits for the hour to pass.
+- A repo that fails is reported (`::error::`) and the others still run; the exit code is non-zero.
+- A ccf-bump PR from an earlier date is not closed by a later run; close it by hand.
+- `--manifest` (default `repos.yaml`; `repos.mock.yaml` for the mocks) gives the repos, their kinds
+  and the dependency edges. `sync --all` takes every repo with `release: true`, in stage order.
+- `--clones DIR` reads `DIR/<repo>` (its committed `HEAD`) instead of cloning from GitHub, for dry
+  runs against local clones.
+- `list` prints the selected repos comma-separated, to scope the token.
+- Environment: `GH_TOKEN` (API, clone and push), `GITHUB_API_URL`, and the git identity in
+  `GIT_AUTHOR_*`/`GIT_COMMITTER_*`.
+
+## Updaters
+
+Each repo is scanned for the pins below; the Dockerfile, OPA and ui pins only in repos of that kind
+(`action`, `policies`, `ui`). A dependency is internal when it lives under
+`github.com/compliance-framework/`, inside or outside the manifest (the mock plugins also pin the
+product `agent` module; its releases are only read).
+
+| Pin | Where | Target |
+| --- | --- | --- |
+| Go modules | direct `require`s in the root `go.mod`; `go get <mod>@<ver>`, then `go mod tidy` | the module's repo |
+| `go install github.com/<owner>/<repo>[/cmd/x]@<ver>` | `.github/workflows/*.y*ml` | the repo |
+| `FROM <image> AS source` | `Dockerfile` of an `action` repo; any image is replaced by `ghcr.io/<owner>/<dep>:<ver>` (no `v`) | the action's one `depends_on` |
+| `opa-version:` inputs | workflow files of a `policies` repo; expressions are left alone | the OPA version in the go.mod of its `go-service` dependency (else `agent`) at that repo's target tag |
+| ui sync script | `scripts/sync-agentconfig-conformance.sh <tag>` (ui) or `scripts/sync-mock-api-version.sh <tag>` (mock-ui) | the ui's `go-service` dependency |
+| helm | `charts/*/values.yaml` image tags next to `repository: ghcr.io/<owner>/<repo>` (empty tags follow appVersion and stay empty); `Chart.yaml` `appVersion` | the image's repo; appVersion tracks the first org image whose tag is empty or equals appVersion |
+| `uses: <owner>/workflows/...@<ref>` | workflow files | `--set workflows=<ref>` only |
+
+Files are edited in place, so comments and layout stay. Chart versions are left to release-please.
+
+## Rules
+
+- **Never downgrade.** A pin newer than the target is a conflict and stays as it is, and so is a
+  pseudo-version whose commit is newer than the target tag's commit. A pin that is not a version
+  (`alpine:3.20`, a branch, a SHA, `latest`) is replaced. Conflicts are printed and listed in the PR.
+- **No target, no change**: a dependency with no final release yet is left alone.
+- **Auto-merge** (squash) is enabled when every change stays within its major version. A move from
+  a pin that is not a version, or whose current version is unknown (the ui conformance file),
+  needs a human.
+- Shared-workflow refs are replaced whenever they differ from the given ref.
+
+## The `ccf-bump-sync` workflow
+
+`ccf-bump-sync.yml` runs `ccf-bump sync --batch 10 --pr` on the 8th and 22nd at 04:00 UTC, and on
+`workflow_dispatch` with inputs `manifest` (`repos.yaml` or `repos.mock.yaml`) and `dry_run`
+(default `true`). Scheduled runs use `repos.yaml` and are dry runs until the repo variable
+`CCF_BUMP_SYNC_LIVE` is `true`. It lists the repos, then mints a `ccf-release-bot` token scoped to
+exactly those (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`): read-only for dry runs; contents,
+pull requests and workflows write otherwise (bumps edit workflow files). Commits are authored by
+the bot.
+
+```sh
+# Dry run against local clones of the mocks (DIR/mock-*):
+GH_TOKEN=$(gh auth token) go run ./cmd/ccf-bump sync --all --manifest repos.mock.yaml --clones DIR --pr --dry-run
+```
