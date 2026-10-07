@@ -735,6 +735,19 @@ non-majors grouped and auto-merged). See [docs/renovate.md](docs/renovate.md).
 severity, to Slack every Monday (and on `workflow_dispatch`). See
 [docs/vuln-summary.md](docs/vuln-summary.md).
 
+## ccf-bump
+
+`ccf-bump` moves internal dependency pins (Go modules, `go install` pins, the action's source image,
+policy OPA versions, the ui sync, helm appVersions and image tags, shared-workflow refs) to their
+latest final releases, one `fix(deps)` PR per repo; `ccf-bump-sync.yml` runs it on the 8th and 22nd.
+See [docs/ccf-bump.md](docs/ccf-bump.md).
+
+## Release train
+
+`train.yml` releases the manifest's repos once a month, stage by stage: it bumps each repo's
+internal dependencies with `ccf-bump`, merges the release PRs, waits for the releases, and tracks it
+all in a `Release train YYYY-MM` issue and a Slack thread. See [docs/train.md](docs/train.md).
+
 ## Stack smoke test
 
 `stack-smoke.yml` (reusable and `workflow_dispatch`) runs postgres, the API, the UI and one agent

@@ -1,0 +1,15 @@
+replicaCount: 1
+
+api:
+  image:
+    repository: ghcr.io/compliance-framework/mock-api
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: ""
+  containerPort: 8080
+
+ui:
+  image:
+    repository: ghcr.io/compliance-framework/mock-ui
+    # mock-ui image tag (required). ccf-bump updates it on mock-ui releases.
+    tag: "0.1.0"
+  containerPort: 80

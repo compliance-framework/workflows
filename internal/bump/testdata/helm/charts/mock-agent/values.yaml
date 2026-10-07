@@ -1,0 +1,3 @@
+image:
+  repository: ghcr.io/compliance-framework/mock-agent
+  tag: ""
