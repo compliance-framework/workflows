@@ -1,0 +1,15 @@
+lisa-design:
+- Split into a 3-PR stack (tools-probe) to stay under the 1000-line limit: (1) internal/pluginprobe plugin probing + report, (2) cmd/plugin-probe and policy-bundle checks, (3) plugin-probe.yml + docs/plugin-probe.md.
+- Plugins load through github.com/compliance-framework/agent/runner pinned in this repo's go.mod (v0.9.0; ccf-bump moves it): runner.HandshakeConfig, runner.PluginMap, dispense "runner", gRPC only, SkipHostEnv, exactly like the agent's getRunnerInstance.
+- Protocol rule: Init with an empty InitRequest; codes.Unimplemented => v1, any other answer => v2 (an application error is kept as init_error, informational). Deviation from "anything else means v2": a transport failure (codes.Unavailable, or the plugin process exited) or Init not returning within the timeout is a load failure, since nothing was learned about the protocol and the agent would fail too.
+- OCI sources: gooci's pkg/oci Downloader (the agent's downloader) with remote.WithPlatform(host os/arch); the digest and org.ccf.plugin.protocol.version annotation come from remote.Get on the tag's top-level manifest, where the agent reads it. Annotated 2 but v1 => failure (the agent refuses to start it); v2 without a valid "2" annotation => warning only.
+- Local sources resolve like the agent's Download: existing file as is, directory => dir/plugin, else must parse as a strict OCI tag.
+- Agent library version: debug/buildinfo dep github.com/compliance-framework/agent; replaced deps shown as "v => path ver" (diagnostics, unlike the agent's pluginlib which blanks them). No build info / no agent dep is a warning, not a failure.
+- Plugins get only PATH, HOME, TMPDIR (set by the CLI) so CI tokens never reach plugin binaries; noopAPIHelper drops templates sent during Init.
+- Tests use the test binary itself as a fake plugin (TestMain + PLUGIN_PROBE_FAKE) and go-containerregistry's in-memory registry; test binaries carry no dep versions, so TestLibVersion builds testdata/agentlib.
+
+lisa-selfreview:
+Self-review pass 1 (whole stack; findings land on the PR that introduced the code):
+- [must-fix, PR1 fetch.go] A local plugin given as a bare relative name ("mock-plugin-1") is run through exec.Command, which looks it up in PATH: in a linux container the probe reported "executable file not found in $PATH" for a file in the working directory. Fix: resolve local sources to absolute paths.
+- [nit, PR1 fetch.go] An invalid --platform surfaced as a bare ParsePlatform error per plugin; wrap it with the flag value.
+- [should-fix, PR3 docs] The probe executes every plugin it pulls and gooci's untar does not confine paths: say to probe only artifacts you would run.
