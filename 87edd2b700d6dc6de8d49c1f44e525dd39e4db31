@@ -6,3 +6,8 @@ lisa-design:
 - ci-helm: kubeconform is built from source at a pinned version with go install (sumdb-verified, like actionlint in ci-common), with -strict and no -ignore-missing-schemas (CCF charts render only core kinds). The step sets pipefail because the default run shell (bash -e) would let a chart that fails to render pass.
 - ci-helm: the make step is a copy of ci-go-service.yml's (TestSharedCopies pins it).
 - ci-action: actionlint is not repeated; ci-common.yml's actionlint job covers that spec row. hadolint is the release binary pinned by version and sha256 (the release asset's digest), not hadolint-action (which builds a Docker image every run). It lints every tracked Dockerfile* (git ls-files, so .dockerignore and untracked files are skipped); the failure threshold comes from the repo's .hadolint.yaml.
+
+lisa-selfreview:
+pass 1 (strict): verdict approve, no fix-worthy findings. Checked CORE-CI-001 (SHA pins verified against tags: setup-node v7.0.0, setup-helm v5.0.1, chart-testing-action v2.8.0; permissions: {}; persist-credentials: false), CORE-SEC-003 (inputs reach the shell via env only), CORE-TEST-001 (Node version choice, hadolint file discovery, kubeconform failure aggregation incl. pipefail, all with tests that fail without the logic), CORE-DUP-001 (make step and required job pinned by tests), CORE-SIZE-001 (488+3 lines).
+Question (not fixed): kubeconform validates against the schema repo's master (latest Kubernetes) fetched at run time; pinning -kubernetes-version to the oldest supported cluster version would make the check reproducible.
+Not verified locally: ct (not installed) and hadolint (not installed); both run only in CI.
