@@ -7,3 +7,6 @@ lisa-design:
 - finished job identical to the other release-* tails (incl. packages: write for the prune); callers must grant packages: write although a library has no package (prune 404 -> nothing). Kept for identity with release-finished.yml rather than changing the shared tail.
 - TestReleaseFinishedJobs replaces the release-policies/release-go-plugin-only DeepEqual: every release-*.yml with a finished job must match (modulo needs and release-go-image's images), needs must list every other job; files without a tail are an explicit allow-list.
 - TestGoreleaserPins: one goreleaser-action SHA + goreleaser version across all workflows (legacy plugin-release.yml excluded).
+
+lisa-selfreview:
+- pass 1 (core,go packs): no findings. Checked SHA pins (verified against tags), permissions {}/job-scoped, persist-credentials false, env-passed shell values, the finished-job identity test fails on a mutated tail (mutation run), yq test in golang:1.26 + bash 5.
