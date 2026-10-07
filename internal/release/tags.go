@@ -75,3 +75,41 @@ func PreviewTags(e Event, onMain bool) ([]string, string) {
 	}
 	return nil, "event " + e.Name + " publishes no preview"
 }
+
+// Registry tag styles for ReleaseTags.
+const (
+	// ImageTags is for container images: X.Y.Z, plus X.Y, X and latest for a final release.
+	ImageTags = "image"
+	// ArtifactTags is for gooci OCI artifacts (plugins, policies), which keep the field's
+	// vX.Y.Z tags: vX.Y.Z, plus latest for a final release.
+	ArtifactTags = "artifact"
+)
+
+// ReleaseTags returns the registry tags a release publishes for the git tag tag, which must
+// be prefix followed by X.Y.Z or X.Y.Z-<pre-release>. final reports whether the release is
+// final (no pre-release part), decided from the tag name alone, never from the GitHub
+// release's prerelease flag. Only a final release gets latest and the floating X.Y and X: a
+// release candidate publishes its own version tag and nothing that other users follow.
+func ReleaseTags(tag, prefix, style string) (tags []string, final bool, err error) {
+	version, ok := strings.CutPrefix(tag, prefix)
+	v := "v" + version
+	if !ok || !semver.IsValid(v) || semver.Canonical(v) != v {
+		return nil, false, fmt.Errorf("tag %q is not %sX.Y.Z or %sX.Y.Z-<pre-release>", tag, prefix, prefix)
+	}
+	final = semver.Prerelease(v) == ""
+	switch style {
+	case ImageTags:
+		tags = []string{version}
+		if final {
+			tags = append(tags, semver.MajorMinor(v)[1:], semver.Major(v)[1:])
+		}
+	case ArtifactTags:
+		tags = []string{v}
+	default:
+		return nil, false, fmt.Errorf("unknown tag style %q", style)
+	}
+	if final {
+		tags = append(tags, "latest")
+	}
+	return tags, final, nil
+}

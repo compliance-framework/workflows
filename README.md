@@ -24,7 +24,7 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
-| `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag and the preview tags. |
+| `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag, the preview tags and the release tags. |
 | `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`; `cmd/release` runs the `internal/release` rules for the release workflows. |
 | `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, the `ci-<kind>.yml` kind CI workflows and the [release workflows](#release-workflows)). |
 | `release-please/defaults.json` | The release-please settings every repo's `release-please-config.json` copies. |
@@ -399,8 +399,8 @@ Publishes preview images to `ghcr.io/compliance-framework/<name>` with `GITHUB_T
 | anything else | none; the image job is skipped |
 
 It never publishes `latest`, which only final releases move. For now it builds container
-images only (kinds `go-service`, `ui`, `action`), for `linux/amd64`; plugin and policy OCI
-artifacts (gooci) come with the release workflows (T04b).
+images only (kinds `go-service`, `ui`, `action`), for `linux/amd64` and `linux/arm64`; plugin
+and policy OCI artifacts (gooci) come in a later PR of this stack.
 
 | Input | Default | What |
 | --- | --- | --- |
@@ -433,12 +433,17 @@ jobs:
 ```
 
 The image build is a separate reusable workflow, `publish-image.yml`, that `preview.yml`
-calls as `./.github/workflows/publish-image.yml`, and that the release workflows are meant
-to call too: inputs `images` (as above) and `tags` (space-separated tag names without the
-repository, each checked against the registry's tag syntax), permissions `contents: read`
-and `packages: write`. It builds each image in a matrix and pushes
-`ghcr.io/<owner>/<name>:<tag>` for every tag, with the OCI `source` and `revision` labels.
-It publishes whatever tags it is given; the caller decides them.
+and `release-go-image.yml` call as `./.github/workflows/publish-image.yml`: inputs `images`
+(as above) and `tags` (space-separated tag names without the repository, each checked
+against the registry's tag syntax), permissions `contents: read` and `packages: write`. It
+builds each image natively, `linux/amd64` on `ubuntu-latest` and `linux/arm64` on
+`ubuntu-24.04-arm` (no QEMU), with the OCI `source` and `revision` labels, and pushes each
+build by digest only. A `merge` job per image then creates one manifest list from the two
+digests (passed between jobs as `digests-<name>-<arch>` artifacts, kept a day) and tags it
+`ghcr.io/<owner>/<name>:<tag>` for every tag, with the `source` and `revision` annotations
+on the index, which GHCR uses to link the package to the repo. It publishes whatever tags it
+is given; the caller decides them. If any build fails, no image is tagged, and two
+`images` entries with the same name (case-insensitive) fail the run before any build.
 
 #### `cut-prerelease.yml`
 
@@ -466,6 +471,73 @@ jobs:
       contents: read
     secrets: inherit
 ```
+
+#### Release workflows per kind
+
+A repo calls its kind's release workflow when a release is published: by release-please
+(`release-please.yml`) for a final release or by `cut-prerelease.yml` for a release
+candidate, both as ccf-release-bot so the event starts workflows. Each one decides its tags
+from the release's tag name (`github.event.release.tag_name`), never from the release's
+`prerelease` flag (rules in `internal/release`, `ReleaseTags`), and ends with
+[`release-finished.yml`](#release-finishedyml). They need `secrets: inherit` for the
+release-bot secrets.
+
+| Workflow | Kind | Publishes |
+| --- | --- | --- |
+| `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`. |
+| `release-ui.yml` | `ui` | The same as `release-go-image.yml` (it calls it), with the ui's single image. |
+
+Image tags, for the tag `v1.2.3` (prefix `tag-prefix`, default `v`): `1.2.3`, `1.2`, `1` and
+`latest`. A tag with a pre-release part (`v1.2.3-rc1`) publishes `1.2.3-rc1` only: a release
+candidate never moves `latest` or the floating `X.Y` and `X` that users follow. A tag that is
+not `<prefix>X.Y.Z[-pre-release]` fails the release.
+
+| Input | Default | What |
+| --- | --- | --- |
+| `images` | `[{}]` | As for `preview.yml`: one entry per image (agent has three). |
+| `tag-prefix` | `v` | Prefix of the release tags. |
+
+```yaml
+# .github/workflows/release.yml in a consuming repo
+name: release
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  release:
+    uses: compliance-framework/workflows/.github/workflows/release-go-image.yml@v1  # or release-ui.yml
+    with:  # agent's three images
+      images: >-
+        [{"name": "agent"}, {"name": "agent-ci", "dockerfile": "Dockerfile-ci"},
+         {"name": "agent-custodian", "dockerfile": "Dockerfile-custodian"}]
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+```
+
+#### `release-finished.yml`
+
+The tail of every release workflow, called as a job with `needs` on every other job and
+`if: always()`, so it runs whatever the release's result, cancellation included:
+
+1. **`dispatch`** sends `repository_dispatch` with `event_type: release-finished` and
+   `client_payload: {repo, tag, conclusion}` to `compliance-framework/workflows`, where the
+   release train listens. `conclusion` is `failure` if any job failed, else `cancelled` if
+   any was cancelled, else `success`. It runs as ccf-release-bot with a token scoped to the
+   `workflows` repo only (`contents: write`, which `repository_dispatch` needs), and, like
+   `release-please.yml`, refuses to mint one unless the scope is exactly one repo.
+2. **`prune`** then deletes the caller's GHCR package versions whose tags are all preview
+   tags (`sha-*`, `pr-*`) and that were last updated more than 30 days ago, with
+   `GITHUB_TOKEN` (`packages: write`) through the packages API. A version that also carries
+   `main`, a release tag or `latest` stays, and so do untagged versions (a multi-arch image's
+   platform manifests). A package that doesn't exist yet is skipped.
+
+Inputs: `needs` (the caller's `toJSON(needs)`) and `images` (the packages to prune, as for
+`publish-image.yml`; only `name` is read). Secrets: `RELEASE_BOT_APP_ID` and
+`RELEASE_BOT_PRIVATE_KEY`. Permissions: `packages: write`.
 
 ## Development
 

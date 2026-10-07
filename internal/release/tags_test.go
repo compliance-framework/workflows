@@ -67,3 +67,38 @@ func TestPreviewTags(t *testing.T) {
 		})
 	}
 }
+
+func TestReleaseTags(t *testing.T) {
+	for _, tc := range []struct {
+		tag, prefix, style string
+		want               []string
+		final              bool
+		err                string
+	}{
+		{"v1.2.3", "v", ImageTags, []string{"1.2.3", "1.2", "1", "latest"}, true, ""},
+		{"v0.4.0", "v", ImageTags, []string{"0.4.0", "0.4", "0", "latest"}, true, ""},
+		{"v1.2.3-rc1", "v", ImageTags, []string{"1.2.3-rc1"}, false, ""},
+		{"v1.2.3", "v", ArtifactTags, []string{"v1.2.3", "latest"}, true, ""},
+		{"v1.2.3-rc.2", "v", ArtifactTags, []string{"v1.2.3-rc.2"}, false, ""},
+		{"mock-chart-v0.2.0", "mock-chart-v", ImageTags, []string{"0.2.0", "0.2", "0", "latest"}, true, ""},
+		{"1.2.3", "v", ImageTags, nil, false, "not vX.Y.Z"},
+		{"v1.2", "v", ImageTags, nil, false, "not vX.Y.Z"},
+		{"v1.2.3+build", "v", ImageTags, nil, false, "not vX.Y.Z"},
+		{"v01.2.3", "v", ImageTags, nil, false, "not vX.Y.Z"},
+		{"", "v", ImageTags, nil, false, "not vX.Y.Z"},
+		{"v1.2.3", "v", "chart", nil, false, "unknown tag style"},
+	} {
+		t.Run(tc.tag+"/"+tc.style, func(t *testing.T) {
+			got, final, err := ReleaseTags(tc.tag, tc.prefix, tc.style)
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Fatalf("err = %v, want %q", err, tc.err)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(got, tc.want) || final != tc.final {
+				t.Fatalf("got %q final=%v, %v; want %q final=%v", got, final, err, tc.want, tc.final)
+			}
+		})
+	}
+}

@@ -94,3 +94,28 @@ func TestPreviewTags(t *testing.T) {
 		})
 	}
 }
+
+func TestReleaseTags(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+		fail bool
+	}{
+		{[]string{"--tag", "v1.2.3"}, "tags=1.2.3 1.2 1 latest\nfinal=true", false},
+		{[]string{"--tag", "v1.2.3-rc1", "--style", "artifact"}, "tags=v1.2.3-rc1\nfinal=false", false},
+		{[]string{"--tag", "chart-v0.2.0", "--prefix", "chart-v", "--style", "artifact"}, "tags=v0.2.0 latest\nfinal=true", false},
+		{[]string{"--tag", ""}, "", true},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			ghOut := filepath.Join(t.TempDir(), "out")
+			var out strings.Builder
+			err := run(append([]string{"release-tags"}, tc.args...), func(k string) string { return map[string]string{"GITHUB_OUTPUT": ghOut}[k] }, strings.NewReader(""), &out)
+			if (err != nil) != tc.fail {
+				t.Fatalf("err = %v, want fail=%v", err, tc.fail)
+			}
+			if b, _ := os.ReadFile(ghOut); strings.TrimSpace(string(b)) != tc.want {
+				t.Fatalf("GITHUB_OUTPUT = %q, want %q (output %q)", b, tc.want, out.String())
+			}
+		})
+	}
+}
