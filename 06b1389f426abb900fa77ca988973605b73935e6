@@ -7,3 +7,8 @@ lisa-design:
 - SUPERSEDES the earlier note: this repo's ci.yml does NOT dogfood ci-common (dropped to stay under the 1000-line PR limit); its standalone actionlint job stays. ci-common has no inputs (scan-args fixed to -r --allow-no-lockfiles ./; upload-sarif = head repo is this repo).
 - Dedupe key = sha256(repo \0 sha \0 workflow file path), name only as fallback: two workflow files can share a name.
 - Known limit of cache-scoped dedupe: markers are scoped to the ref that saved them, so a push run on renovate/x and a pull_request run for the same commit don't see each other's marker. Callers push-trigger on main only (README example), so this doesn't arise in practice.
+
+lisa-selfreview:
+pass 2 (strict): request_changes.
+- [must-fix] notify-failure.yml notify job granted only actions: read, so the checkout of compliance-framework/workflows ran with a contents: none token. Fix: grant contents: read (job + README example + header comment).
+- [nit, deferred] actionlint version v1.7.12 is pinned in both ci.yml and ci-common.yml; they need not move together, so left as is.
