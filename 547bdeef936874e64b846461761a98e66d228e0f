@@ -7,3 +7,8 @@ lisa-design:
 - Vulnerability alerts: GET 204 = on, 404 = off. automated-security-fixes: 404 treated as off. Rulesets: GET ?includes_parents=false, non-Repository source_type skipped, each fetched by ID; more than one page is an error rather than a silent partial read.
 - HTTP errors carry method + path + status + 200 bytes of body, never headers (the token).
 - `list` and `sync` share one flag set (unused flags harmless) to keep the CLI small.
+
+lisa-selfreview:
+pass 1 (strict): 2 findings
+- [should-fix CORE-DOC-001 80de2e12ce83] cmd/repo-settings: CLI-only flags (--required-check-app-id, --owner, --check-token-scope) not documented in the README.
+- [nit CORE-STYLE-001 72af5c00e829] internal/reposettings/github_test.go apiServer: the empty-body check skips every PUT, so a body-less ruleset PUT would pass.
