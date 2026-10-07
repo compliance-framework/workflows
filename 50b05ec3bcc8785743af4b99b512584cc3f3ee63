@@ -15,3 +15,9 @@ pass 1 (strict, whole stack) — request_changes on this layer:
 - CORE-ERR: one repo's failure aborted the remaining repos of sync --all; `git diff` errors printed as "no file changes".
 - docs: "every repo is scanned for every pin" inaccurate (kind-gated updaters).
 pass 2 (strict) — approve. Deferred: superseded ccf-bump PRs from an earlier date are not auto-closed (documented; open question for reviewers).
+
+lisa-addressed:
+- --set versions validated as semver (workflows refs exempt); --all/--repos/--batch rejected with --repo; sync --mode train rejected. Tests in TestListAndErrors.
+- run1 strips GH_TOKEN/GITHUB_TOKEN from child env (TestWithoutTokens).
+- Per-repo errors collected with errors.Join, ::error:: line per repo, others continue (TestOneRepoFailing).
+- git diff error returned, not reported as no changes. Docs wording fixed.
