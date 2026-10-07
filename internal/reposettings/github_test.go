@@ -214,7 +214,7 @@ func TestGitHubSecurityConfiguration(t *testing.T) {
 		want  *SecurityConfiguration
 	}{
 		{"enforced", reply{200, baselineJSON}, baseline()},
-		{"unenforced", reply{200, strings.ReplaceAll(baselineJSON, `"enforced"`, `"attached"`)},
+		{"unenforced", reply{200, strings.NewReplacer(`"status":"enforced"`, `"status":"attached"`, `"enforcement":"enforced"`, `"enforcement":"unenforced"`).Replace(baselineJSON)},
 			&SecurityConfiguration{Name: "Baseline Security Profile", DependabotAlerts: "enabled", DependabotSecurityUpdates: "disabled"}},
 		{"detached", reply{200, strings.Replace(baselineJSON, `"status":"enforced"`, `"status":"removed"`, 1)}, nil},
 		{"none", reply{204, ``}, nil},
