@@ -1,2 +1,5 @@
 lisa-addressed:
 pass 1: release-finished dispatch job runs on cancellation (if: always()); publish-image rejects duplicate image names before building (Check the image names, tested); "Check the tools ref" copies pinned by TestReleaseTagsStep; release-tags reports a missing tag with a release: published hint.
+
+lisa-selfreview:
+pass 2: approve, no findings (pass-1 fixes verified: actionlint clean, go vet, go test ./... incl. bash-5 run in a golang:1.26 container).
