@@ -7,3 +7,11 @@ lisa-design:
 - The agent is started only after its key exists (`up -d --no-deps agent`), so compose.yaml uses ${SMOKE_AGENT_CLIENT_ID:-} (empty allowed) while the image tags use :? (required).
 - Workflow checks out this repo at job.workflow_sha (same "Check the tools ref" guard as preview/release-helm) so callers get smoke/ from the workflow's own commit; permissions contents: read only; no app token needed (public images).
 - W3 plugin hook: check_plugin() no-op in run.sh plus TODO(W3) markers in agent-config.yml and stack-smoke.yml; the plugin check must run inside run.sh while the stack is up, not as a later workflow step.
+
+lisa-selfreview:
+pass 1 (strict):
+- [must-fix] CORE-INPUT-001 smoke/run.sh:28 SMOKE_TIMEOUT and the ports are not validated (fp 03cfae7e4aad)
+- [must-fix] CORE-ERR-001 smoke/run.sh:72 Teardown failure is silenced (fp 9c7677db64a3)
+- [must-fix] CORE-TEST-001 smoke/run.sh:150 Happy path and response parsing are untested (fp 5508999d8b27)
+- [should-fix] CORE-DUP-001 smoke/ui-config.json:2 UI API_URL hardcodes the default API port (fp 07ab7201f49a)
+- [nit] CORE-STYLE-001 internal/ciworkflows/smoke_test.go:200 strings.Index slice could panic (fp 057851083afc)
