@@ -95,8 +95,16 @@ func TestTrainReleasesStageByStage(t *testing.T) {
 			t.Errorf("not in the thread: %q", m)
 		}
 	}
-	if f := w.slack[len(w.slack)-1]; !strings.Contains(f, "finished*: mock-api v0.2.0, mock-gooci v0.1.1, mock-agent v0.1.1") {
-		t.Errorf("finish = %q", f)
+	if f := w.slack[len(w.slack)-1]; !strings.Contains(f, "finished*: mock-api v0.2.0, mock-gooci v0.1.1, mock-agent v0.1.1") || st.Digest == "" || !strings.Contains(f, st.Digest) {
+		t.Errorf("finish = %q (digest %q)", f, st.Digest)
+	}
+	if digest := w.comments[1][0].Body; !strings.Contains(digest, "### Features") || !strings.Contains(digest, "mock-api feature") {
+		t.Errorf("digest:\n%s", digest)
+	}
+	// Only mock-api went up a minor among the chart's dependencies.
+	if len(w.external) != 1 || !strings.HasPrefix(w.external[0], "mock-helm-charts: Release train 2026-12: minor releases") ||
+		!strings.Contains(w.external[0], "mock-api: v0.1.0 → v0.2.0") || strings.Contains(w.external[0], "mock-agent:") {
+		t.Errorf("chart issues = %q", w.external)
 	}
 	// Repeating a run on a finished train changes nothing.
 	n := len(w.merges)

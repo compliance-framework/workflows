@@ -108,7 +108,7 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// run reads a train's state and moves it on.
+// run reads a train's state and its new comment commands, then moves it on.
 func (e *Engine) run(ctx context.Context, is Issue) error {
 	st, err := Parse(is.Body)
 	if err != nil {
@@ -118,7 +118,12 @@ func (e *Engine) run(ctx context.Context, is Issue) error {
 		e.logf("%s is %s; closing it", is.Title, st.Status)
 		return e.save(ctx, is, st)
 	}
-	return e.step(ctx, is, st)
+	cmdErr := e.commands(ctx, is, st)
+	if st.Status != StatusOpen {
+		return errors.Join(cmdErr, e.save(ctx, is, st))
+	}
+	e.escalate(ctx, is, st)
+	return errors.Join(cmdErr, e.step(ctx, is, st))
 }
 
 // step advances the open stages, finishes the train when every repo is done, posts the new
@@ -135,7 +140,7 @@ func (e *Engine) step(ctx context.Context, is Issue, st *State) error {
 		}
 	}
 	if len(errs) == 0 && st.AllDone() {
-		e.finish(ctx, st)
+		errs = append(errs, e.finish(ctx, is, st))
 	}
 	for _, r := range st.Repos {
 		if r.Hold != NoHold {
@@ -239,12 +244,6 @@ func (e *Engine) save(ctx context.Context, is Issue, st *State) error {
 }
 
 func short(sha string) string { return sha[:min(7, len(sha))] }
-
-// finish closes a train whose repos are all done and posts the versions.
-func (e *Engine) finish(ctx context.Context, st *State) {
-	st.Status = StatusFinished
-	e.notify(ctx, st, "finished", fmt.Sprintf(":white_check_mark: *Release train %s finished*: %s.", st.Month, st.versions()))
-}
 
 // versions lists what the train released, e.g. "api v0.2.0, ui v1.0.1".
 func (s *State) versions() string {

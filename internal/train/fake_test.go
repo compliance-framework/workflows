@@ -19,10 +19,14 @@ type world struct {
 	t        *testing.T
 	repos    map[string]*fakeRepo
 	issues   []*Issue
+	comments map[int][]Comment
+	admins   []string
 	slack    []string // "thread|text"; the parent's ts is "ts-1"
 	bumps    []string // "repo sets dry"
 	merges   []string // "repo#n"
 	releases []string // repos, in the order their release PRs merged
+	reruns   []int64
+	external []string // issues opened in repos
 	id       int64
 	// manualBumps: ccf-bump leaves auto-merge off; closedBumps: someone closes the bump PRs.
 	manualBumps, closedBumps bool
@@ -36,7 +40,8 @@ type fakeRepo struct {
 	checks    map[string][]Check
 	runs      map[string][]Run // event+sha -> runs
 	tags      map[string][]string
-	rpDone    string // the main sha release-please last ran on
+	notes     map[string]string // tag -> release notes
+	rpDone    string            // the main sha release-please last ran on
 	// next is the version release-please proposes for unreleased commits (default: a patch).
 	next string
 	// failChecks fails the checks of the release PR's head; failRelease the release run.
@@ -46,7 +51,7 @@ type fakeRepo struct {
 }
 
 func newWorld(t *testing.T) *world {
-	return &world{t: t, repos: map[string]*fakeRepo{}}
+	return &world{t: t, repos: map[string]*fakeRepo{}, comments: map[int][]Comment{}, admins: []string{"owner"}}
 }
 
 func (w *world) nextID() int64 { w.id++; return w.id }
@@ -54,7 +59,7 @@ func (w *world) nextID() int64 { w.id++; return w.id }
 // repo adds a repo at version with nothing to release yet.
 func (w *world) repo(name, version string) *fakeRepo {
 	r := &fakeRepo{name: name, main: name + "-0", manifests: map[string]map[string]string{}, prs: map[int]*PR{},
-		checks: map[string][]Check{}, runs: map[string][]Run{}, tags: map[string][]string{}}
+		checks: map[string][]Check{}, runs: map[string][]Run{}, tags: map[string][]string{}, notes: map[string]string{}}
 	r.manifests[r.main] = map[string]string{RootPackage: version}
 	r.rpDone = r.main
 	r.runs["push"+r.main] = []Run{{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: "success"}}
@@ -182,6 +187,7 @@ func (w *world) Merge(_ context.Context, repo string, n int, sha string) error {
 		tag := "v" + r.manifests[r.main][RootPackage]
 		r.tags[r.main] = []string{tag}
 		w.releases = append(w.releases, repo)
+		r.notes[tag] = "### Features\n\n* " + repo + " feature\n"
 	}
 	return nil
 }
@@ -194,11 +200,27 @@ func (w *world) TagsAt(_ context.Context, repo, sha string) ([]string, error) {
 	return slices.Clone(w.get(repo).tags[sha]), nil
 }
 
-func (w *world) Release(context.Context, string, string) (string, string, error) { return "", "", nil }
+func (w *world) Release(_ context.Context, repo, tag string) (string, string, error) {
+	return w.get(repo).notes[tag], "https://github.com/o/" + repo + "/releases/tag/" + tag, nil
+}
 
-func (w *world) RerunFailed(context.Context, string, int64) error { return nil }
+// RerunFailed re-runs the run, which passes this time.
+func (w *world) RerunFailed(_ context.Context, repo string, id int64) error {
+	w.reruns = append(w.reruns, id)
+	for _, runs := range w.get(repo).runs {
+		for i := range runs {
+			if runs[i].ID == id {
+				runs[i].Conclusion = "success"
+			}
+		}
+	}
+	return nil
+}
 
-func (w *world) EnsureIssue(context.Context, string, string, string) (string, error) { return "", nil }
+func (w *world) EnsureIssue(_ context.Context, repo, title, body string) (string, error) {
+	w.external = append(w.external, repo+": "+title+"\n"+body)
+	return "https://github.com/o/" + repo + "/issues/1", nil
+}
 
 // Bump plays ccf-bump: with a repo's bumped set, it opens a green bump PR with auto-merge.
 func (w *world) Bump(_ context.Context, path, repo string, sets map[string]string, dryRun bool) (BumpResult, error) {
@@ -248,9 +270,34 @@ func (w *world) EditIssue(_ context.Context, n int, body string, labels []string
 	return nil
 }
 
-func (w *world) Comments(context.Context, int, int64) ([]Comment, error) { return nil, nil }
+func (w *world) Comments(_ context.Context, n int, after int64) ([]Comment, error) {
+	var out []Comment
+	for _, c := range w.comments[n] {
+		if c.ID > after {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
 
-func (w *world) Comment(context.Context, int, string) (string, error) { return "", nil }
+func (w *world) Comment(_ context.Context, n int, body string) (string, error) {
+	c := Comment{ID: w.nextID(), Author: "github-actions[bot]", Body: body}
+	w.comments[n] = append(w.comments[n], c)
+	return fmt.Sprintf("https://github.com/o/workflows/issues/%d#issuecomment-%d", n, c.ID), nil
+}
+
+func (w *world) say(n int, author, body string) {
+	w.comments[n] = append(w.comments[n], Comment{ID: w.nextID(), Author: author, Body: body})
+}
+
+func (w *world) lastComment(n int) string {
+	cs := w.comments[n]
+	return cs[len(cs)-1].Body
+}
+
+func (w *world) IsOrgAdmin(_ context.Context, user string) (bool, error) {
+	return slices.Contains(w.admins, user), nil
+}
 
 // Slack.
 
@@ -270,7 +317,7 @@ func (w *world) state(n int) *State {
 // engine returns an Engine on w at now, with the manifest files of the repo root.
 func (w *world) engine(now time.Time) *Engine {
 	return &Engine{
-		Repos: w, Tracker: w, Slack: w, Bumper: w,
+		Repos: w, Tracker: w, Members: w, Slack: w, Bumper: w,
 		Load:                  func(p string) (*manifest.Manifest, error) { return manifest.Load("../../" + p) },
 		Channel:               "C1",
 		RequiredCheck:         "ci / required",
