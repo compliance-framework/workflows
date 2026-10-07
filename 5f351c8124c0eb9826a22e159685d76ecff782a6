@@ -5,3 +5,6 @@ lisa-design:
 - Replies (failure and recovery) go to the incident's stored channel; the configured channel only picks where new incidents start.
 - A state file that can't be parsed or is for another key is reported and treated as no incident (LoadIncident returns zero + error; caller logs and goes on), so a corrupt newest cache entry can't block notifications forever. Intentional, not an error swallow.
 - Slack.PostMessage kept with its signature as a wrapper around Slack.Post(channel, text, threadTS) -> (channel, ts), so other users of internal/notify are unaffected.
+
+lisa-selfreview:
+Pass 1 (strict, on the combined change before the split): findings: (1) CORE-SIZE-001 combined diff 1216 counted lines -> fixed by splitting into a 2-PR stack; (2) CORE-TEST-001 cmd/notify post's "run not tracked" branch untested -> test added (wire PR); (3) CORE-DOC-001 docs/notify.md guessed the build time ("about half a minute") -> reworded. No other findings (checked CORE-SEC/CI/ID/ERR/INPUT/TEST-002, GO-NIL/RES/CTX/ERR).
