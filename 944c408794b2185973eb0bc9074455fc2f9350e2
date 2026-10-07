@@ -3,3 +3,6 @@ lisa-design:
 - helm edits use yaml.v3 node positions to replace the scalar in the source line, keeping quotes, comments and layout — no yq binary dependency (spec said yq; same effect, testable in-process).
 - "Final" release = vX.Y.Z tag, not draft, not prerelease (agent has v0.7.0-rc1 not flagged prerelease, so the tag shape is checked too). Highest semver wins, not most recent.
 - Auto-merge via GraphQL enablePullRequestAutoMerge with SQUASH (repos are squash-only per repo-settings).
+
+lisa-selfreview:
+pass 1 (strict, reviewed with the whole stack) — findings on this layer: none beyond those recorded on the base PR. pass 2 — approve.
