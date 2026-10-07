@@ -1,2 +1,5 @@
 lisa-addressed:
 pass 2: notify-failure job (and README caller example) grants contents: read for the cross-repo checkout of cmd/notify.
+
+lisa-selfreview:
+pass 3 (strict): approve, no findings. Gate green: gofmt, go vet, go test -race ./..., actionlint v1.7.12 clean (incl. ci-common.yml, notify-failure.yml). Diff vs base: 989+/6- (under the 1000-line limit).
