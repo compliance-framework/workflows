@@ -1,0 +1,6 @@
+lisa-design:
+- plugin-probe.yml checks out job.workflow_repository@job.workflow_sha into .ccf-workflows (the release-checks.yml pattern) so the tool matches the workflow version the caller pinned; it is removed after the build.
+- agent-ref: `go get agent@ref`, then read that agent's go.mod (go list -m -f {{.GoMod}} + go mod edit -json | jq) and `go get` exactly its OPA requirement, then go mod tidy and verify; fails if the agent does not require OPA or the selected OPA differs. Done in a thin shell step (tested in internal/ciworkflows/probe_test.go against a module copy) rather than a Go subcommand.
+- The JSON report is returned as the `report` output as compact JSON (jq -c), so plugin-supplied strings can't break out of the GITHUB_OUTPUT line; the markdown goes to GITHUB_STEP_SUMMARY; the step writes the outputs before propagating the probe's exit status.
+- Permissions: top-level {}, job contents: read; no app token (public GHCR pulls are anonymous). workflow_dispatch added so the overseer can run it by hand after merge; not run in this task.
+- Docs live in docs/plugin-probe.md; README gets only a short section + link (parallel stage-3 PRs).
