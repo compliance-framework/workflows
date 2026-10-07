@@ -1,13 +1,18 @@
-# Posts a failed CI run to Slack once per repo + commit + workflow (rules: internal/notify).
-# Call it from a job with `needs: <CI jobs>`, `if: failure()`, `secrets: inherit` and
-# `permissions: {actions: read, contents: read}`; see README.
+# Keeps one Slack thread per CI incident (rules: internal/notify): a failure opens a thread
+# or replies in the open one, a pass after a failure replies and closes it.
+# Call it from a job with `needs: <CI jobs>`, `if: always()`, `with: {needs: ${{ toJSON(needs) }}}`,
+# `secrets: inherit` and `permissions: {contents: read}`; see docs/notify.md.
 name: notify-failure
 
 on:
   workflow_call:
     inputs:
+      needs:
+        description: "toJSON(needs) of the calling job; empty means the run failed (callers that still run it with if: failure())"
+        type: string
+        default: ""
       channel:
-        description: "Slack channel ID; empty means the SLACK_CHANNEL_CI_FAILURES variable"
+        description: "Slack channel ID for new incidents; empty means the SLACK_CHANNEL_CI_FAILURES variable"
         type: string
         default: ""
       workflows-ref:
@@ -27,11 +32,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      actions: read # look up the previous run on the default branch
       contents: read # check out cmd/notify
     env:
       TOOLS_DIR: ${{ github.workspace }}/.ccf-workflows
-      MARKER: .ccf-notify-failure
+      STATE_FILE: .ccf-notify-incident.json
+      NEEDS: ${{ inputs.needs }}
     steps:
       - name: Check for the Slack token
         id: token
@@ -63,36 +68,30 @@ jobs:
       - name: Decide
         id: plan
         if: steps.token.outputs.enabled == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           go -C "$TOOLS_DIR" build -o "$RUNNER_TEMP/notify" ./cmd/notify
           "$RUNNER_TEMP/notify" plan
 
-      - name: Look up the dedupe marker
-        id: marker
+      # The newest state saved under the incident's key prefix; none means no incident.
+      - name: Restore the incident state
         if: steps.plan.outputs.notify == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ env.MARKER }}
+          path: ${{ env.STATE_FILE }}
           key: ${{ steps.plan.outputs.key }}
-          lookup-only: true
+          restore-keys: ${{ steps.plan.outputs.restore-key }}
 
       - name: Post to Slack
         id: post
-        if: steps.plan.outputs.notify == 'true' && steps.marker.outputs.cache-hit != 'true'
+        if: steps.plan.outputs.notify == 'true'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ inputs.channel || vars.SLACK_CHANNEL_CI_FAILURES }}
-          REASON: ${{ steps.plan.outputs.reason }}
-          KEY: ${{ steps.plan.outputs.key }}
-        run: |
-          "$RUNNER_TEMP/notify" post --reason "$REASON"
-          echo "$KEY" > "$MARKER"
+        run: '"$RUNNER_TEMP/notify" post'
 
-      - name: Save the dedupe marker
-        if: steps.post.outcome == 'success'
+      - name: Save the incident state
+        if: steps.post.outputs.save == 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ env.MARKER }}
+          path: ${{ env.STATE_FILE }}
           key: ${{ steps.plan.outputs.key }}

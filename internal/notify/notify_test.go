@@ -1,7 +1,6 @@
 package notify
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,7 +29,7 @@ func TestRunFromEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := (Run{Repo: "o/r", Workflow: "ci", WorkflowPath: ".github/workflows/ci.yml", EventName: "pull_request", SHA: "2222222222", Branch: "renovate/x",
-		DefaultBranch: "trunk", ServerURL: "https://github.com", RunID: "42", PRNumber: 5, PRTitle: "t", PRAuthor: "renovate[bot]"}); pr != want {
+		DefaultBranch: "trunk", ServerURL: "https://github.com", RunID: "42", RunAttempt: "1", PRNumber: 5, PRTitle: "t", PRAuthor: "renovate[bot]"}); pr != want {
 		t.Errorf("PR run = %+v, want %+v", pr, want)
 	}
 
@@ -51,87 +50,63 @@ func TestRunFromEnv(t *testing.T) {
 }
 
 func TestDecide(t *testing.T) {
-	prev := func(c string) func() (string, error) { return func() (string, error) { return c, nil } }
-	unused := func() (string, error) { return "", errors.New("lookup must not be called") }
 	tests := []struct {
-		name     string
-		run      Run
-		previous func() (string, error)
-		want     Reason
-		wantErr  bool
+		name string
+		run  Run
+		want Reason
 	}{
-		{"PR by the release bot", Run{EventName: "pull_request", PRAuthor: ReleaseBotLogin, Branch: "release-please--branches--main"}, unused, ReasonReleaseBotPR, false},
-		{"PR from renovate/", Run{EventName: "pull_request", PRAuthor: "renovate[bot]", Branch: "renovate/test"}, unused, ReasonAutomationBranch, false},
-		{"pull_request_target from ccf-bump/", Run{EventName: "pull_request_target", Branch: "ccf-bump/api"}, unused, ReasonAutomationBranch, false},
-		{"PR by a human", Run{EventName: "pull_request", PRAuthor: "octocat", Branch: "fix/renovate/x"}, unused, ReasonNone, false},
-		{"push to renovate/", Run{EventName: "push", Branch: "renovate/test", DefaultBranch: "main"}, unused, ReasonAutomationBranch, false},
-		{"main after a pass", Run{EventName: "push", Branch: "main", DefaultBranch: "main"}, prev("success"), ReasonDefaultBranch, false},
-		{"main with no previous run", Run{EventName: "push", Branch: "main", DefaultBranch: "main"}, prev(""), ReasonDefaultBranch, false},
-		{"main already failing", Run{EventName: "push", Branch: "main", DefaultBranch: "main"}, prev("failure"), ReasonNone, false},
-		{"main after a timeout", Run{EventName: "push", Branch: "main", DefaultBranch: "main"}, prev("timed_out"), ReasonNone, false},
-		{"push to another branch", Run{EventName: "push", Branch: "feature", DefaultBranch: "main"}, unused, ReasonNone, false},
-		{"tag push", Run{EventName: "push", DefaultBranch: "main"}, unused, ReasonNone, false},
-		{"schedule on main", Run{EventName: "schedule", Branch: "main", DefaultBranch: "main"}, unused, ReasonNone, false},
-		{"lookup error", Run{EventName: "push", Branch: "main", DefaultBranch: "main"}, func() (string, error) { return "", errors.New("boom") }, ReasonNone, true},
+		{"PR by the release bot", Run{EventName: "pull_request", PRAuthor: ReleaseBotLogin, Branch: "release-please--branches--main"}, ReasonReleaseBotPR},
+		{"PR from renovate/", Run{EventName: "pull_request", PRAuthor: "renovate[bot]", Branch: "renovate/test"}, ReasonAutomationBranch},
+		{"pull_request_target from ccf-bump/", Run{EventName: "pull_request_target", Branch: "ccf-bump/api"}, ReasonAutomationBranch},
+		{"PR by a human", Run{EventName: "pull_request", PRAuthor: "octocat", Branch: "fix/renovate/x"}, ReasonNone},
+		{"PR by a human into main", Run{EventName: "pull_request", PRAuthor: "octocat", Branch: "main", DefaultBranch: "main"}, ReasonNone},
+		{"push to renovate/", Run{EventName: "push", Branch: "renovate/test", DefaultBranch: "main"}, ReasonAutomationBranch},
+		{"push to main", Run{EventName: "push", Branch: "main", DefaultBranch: "main"}, ReasonDefaultBranch},
+		{"push to another branch", Run{EventName: "push", Branch: "feature", DefaultBranch: "main"}, ReasonNone},
+		{"tag push", Run{EventName: "push", DefaultBranch: "main"}, ReasonNone},
+		{"schedule on main", Run{EventName: "schedule", Branch: "main", DefaultBranch: "main"}, ReasonNone},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Decide(tt.run, tt.previous)
-			if (err != nil) != tt.wantErr || got != tt.want {
-				t.Errorf("Decide = %q, %v; want %q, error %v", got, err, tt.want, tt.wantErr)
+			if got := Decide(tt.run); got != tt.want {
+				t.Errorf("Decide = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestDedupeKey(t *testing.T) {
-	r := Run{Repo: "compliance-framework/mock-agent", SHA: "2222222222222222222222222222222222222222", Workflow: "ci", WorkflowPath: ".github/workflows/ci.yml"}
-	// Pinned: a new key would re-post failures already posted under the old one.
-	if got, want := DedupeKey(r), "ccf-notify-failure-28135599d46d14bf7d99c375c67d4634d3d018965f52784732bd87f33e09f39c"; got != want {
-		t.Errorf("DedupeKey = %s, want %s", got, want)
+func TestIncidentKey(t *testing.T) {
+	pr := Run{Repo: "compliance-framework/mock-agent", WorkflowPath: ".github/workflows/ci.yml", PRNumber: 12, Branch: "renovate/x", SHA: "a", RunID: "7", RunAttempt: "2"}
+	// Pinned: a new key forgets every open incident.
+	if got, want := IncidentKey(pr), "ccf-notify-incident-17f485cd39eb5d65d1013e7a0796ae97-"; got != want {
+		t.Errorf("IncidentKey = %s, want %s", got, want)
 	}
+	if got, want := StateKey(pr), IncidentKey(pr)+"7-2"; got != want {
+		t.Errorf("StateKey = %s, want %s", got, want)
+	}
+	// The commit, run and PR head branch don't change a PR's incident.
+	later := pr
+	later.SHA, later.RunID, later.Branch = "b", "8", "renovate/y"
+	if IncidentKey(later) != IncidentKey(pr) {
+		t.Error("a later run of the same PR has another incident")
+	}
+
 	seen := map[string]bool{}
-	for _, k := range []Run{
-		{Repo: "o/r", SHA: "sha", Workflow: "ci", WorkflowPath: "a.yml"},
-		{Repo: "o/r", SHA: "sha", Workflow: "ci", WorkflowPath: "b.yml"}, // same name, another file
-		{Repo: "o/r2", SHA: "sha", WorkflowPath: "a.yml"},
-		{Repo: "o/r", SHA: "sha2", WorkflowPath: "a.yml"},
-		{Repo: "o/rsha", WorkflowPath: "a.yml"}, // the separator keeps fields apart
-		{Repo: "o/r", SHA: "sha", Workflow: "ci"},
+	for _, r := range []Run{
+		{Repo: "o/r", WorkflowPath: "a.yml", PRNumber: 1},
+		{Repo: "o/r", WorkflowPath: "a.yml", PRNumber: 2},
+		{Repo: "o/r", WorkflowPath: "b.yml", PRNumber: 1},    // another workflow file
+		{Repo: "o/r2", WorkflowPath: "a.yml", PRNumber: 1},   // another repo
+		{Repo: "o/r", WorkflowPath: "a.yml", Branch: "main"}, // a push
+		{Repo: "o/r", WorkflowPath: "a.yml", Branch: "1"},    // a branch named like a PR number
+		{Repo: "o/r", WorkflowPath: "a.yml", Branch: "renovate/x"},
+		{Repo: "o/r", Workflow: "ci", Branch: "main"},           // no workflow file: by name
+		{Repo: "o/r", WorkflowPath: "a.yml\x00pr", Branch: "1"}, // the separator keeps fields apart
 	} {
-		if key := DedupeKey(k); seen[key] {
-			t.Errorf("collision for %+v", k)
+		if key := IncidentKey(r); seen[key] {
+			t.Errorf("collision for %+v", r)
 		} else {
 			seen[key] = true
 		}
-	}
-}
-
-func TestMessage(t *testing.T) {
-	pr := Run{Repo: "o/r", Workflow: "ci <go>", ServerURL: "https://github.com", SHA: "2222222222", Branch: "renovate/x",
-		RunID: "42", PRNumber: 12, PRTitle: "fix(deps): a & b"}
-	want := ":rotating_light: *CI failed* in <https://github.com/o/r|o/r>: *ci &lt;go&gt;*\n" +
-		"Automation branch `renovate/x` failed.\n" +
-		"Pull request <https://github.com/o/r/pull/12|#12 fix(deps): a &amp; b> · " +
-		"commit <https://github.com/o/r/commit/2222222222|2222222> · <https://github.com/o/r/actions/runs/42|run>"
-	if got := Message(pr, ReasonAutomationBranch); got != want {
-		t.Errorf("Message =\n%s\nwant\n%s", got, want)
-	}
-
-	push := Run{Repo: "o/r", Workflow: "ci", ServerURL: "https://github.com", SHA: "abc", Branch: "main", RunID: "43"}
-	want = ":rotating_light: *CI failed* in <https://github.com/o/r|o/r>: *ci*\n" +
-		"`main` was passing and is now failing.\n" +
-		"commit <https://github.com/o/r/commit/abc|abc> · <https://github.com/o/r/actions/runs/43|run>"
-	if got := Message(push, ReasonDefaultBranch); got != want {
-		t.Errorf("Message =\n%s\nwant\n%s", got, want)
-	}
-
-	pr.PRTitle = ""
-	want = ":rotating_light: *CI failed* in <https://github.com/o/r|o/r>: *ci &lt;go&gt;*\n" +
-		"A pull request by ccf-release-bot[bot] failed.\n" +
-		"Pull request <https://github.com/o/r/pull/12|#12> · " +
-		"commit <https://github.com/o/r/commit/2222222222|2222222> · <https://github.com/o/r/actions/runs/42|run>"
-	if got := Message(pr, ReasonReleaseBotPR); got != want {
-		t.Errorf("Message =\n%s\nwant\n%s", got, want)
 	}
 }
