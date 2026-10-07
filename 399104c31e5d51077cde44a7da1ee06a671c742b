@@ -1,0 +1,13 @@
+lisa-design:
+- Reads GET /repos/{owner}/{repo}/dependabot/alerts?state=open per manifest repo, not the org endpoint the spec names: ccf-release-bot has repo-level Dependabot alerts read, and the token is scoped (repositories:) to exactly the manifest repos with only vulnerability-alerts: read. The org endpoint needs an org owner/security-manager or an unscoped token. Trade-off table in docs/vuln-summary.md. An --source org mode was written and removed to stay under the 1000-line PR budget and because the workflow can never use it.
+- Every manifest repo is summarised (release: true or not), unlike repo-settings, which only touches release repos: vulnerabilities matter regardless of release status.
+- Default manifest is repos.mock.yaml (CLI const defaultManifest and the workflow input/schedule default) until proven on mocks; flipping to repos.yaml is a one-line change in both.
+- Pagination follows the Link rel="next" URL (the Dependabot endpoints use cursors) and refuses a next URL whose scheme/host differs from GITHUB_API_URL, so the token is only sent to the API host; maxPages=100 bounds a runaway listing.
+- A repo that can't be read is listed under "Could not read" in the message, the others still count, and the command exits non-zero AFTER posting so the weekly run goes red but the summary still lands.
+- No SLACK_BOT_TOKEN -> print only and succeed (same contract as cmd/notify). Channel: vars.SLACK_CHANNEL_VULNS || vars.SLACK_CHANNEL_CI_FAILURES, passed as SLACK_CHANNEL. Slack posting reuses notify.Slack (no change to internal/notify).
+- Repo order: critical, high, medium, low counts descending, then name; non-standard severities count as "other".
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- [should-fix CORE-DOC-001 a79572325c5c] docs/vuln-summary.md: switching the default manifest names only the input default; the schedule uses the MANIFEST fallback in the job env.
+- [should-fix CORE-DOC-001 f0afba36489a] docs/vuln-summary.md trade-off table: org endpoint Token row states token acceptance more precisely than verified; reword around coverage.
