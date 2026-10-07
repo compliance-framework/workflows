@@ -45,7 +45,7 @@ func TestGitHubRepos(t *testing.T) {
 		"GET /repos/o/r/pulls/4":                                  `{"number":4,"state":"closed","merged_at":"2026-12-01T00:00:00Z","merge_commit_sha":"m","head":{"sha":"h"},"base":{"sha":"b"}}`,
 		"GET /repos/o/r/commits/h/check-runs?per_page=100&page=1": `{"check_runs":[{"id":1,"name":"ci / required","status":"completed","conclusion":"success"}]}`,
 		"GET /repos/o/r/commits/h/status?per_page=100":            `{"statuses":[{"id":7,"context":"osv","state":"error"},{"id":8,"context":"cla","state":"pending"}]}`,
-		"GET /repos/o/r/tags?&per_page=100&page=1":                `[{"name":"v0.2.0","commit":{"sha":"m"}},{"name":"v0.1.0","commit":{"sha":"x"}}]`,
+		"GET /repos/o/r/tags?per_page=100&page=1":                 `[{"name":"v0.2.0","commit":{"sha":"m"}},{"name":"v0.1.0","commit":{"sha":"x"}}]`,
 		"PUT /repos/o/r/pulls/4/merge":                            `{"merged":true}`,
 	})
 	branch, sha, err := g.DefaultBranch(ctx, "r")
@@ -84,7 +84,7 @@ func TestGitHubTracker(t *testing.T) {
 	g, bodies := fakeAPI(t, map[string]string{
 		"GET /repos/o/workflows/issues?state=all&labels=train%3Aopen&per_page=100&page=1": `[{"number":1,"title":"Release train 2026-12","state":"open","labels":[{"name":"train:open"}]},{"number":2,"pull_request":{}}]`,
 		"PATCH /repos/o/workflows/issues/1":                                               `{}`,
-		"GET /repos/o/workflows/issues/1/comments?&per_page=100&page=1":                   `[{"id":5,"body":"old","user":{"login":"a"}},{"id":9,"body":"/abort","user":{"login":"b"}}]`,
+		"GET /repos/o/workflows/issues/1/comments?per_page=100&page=1":                    `[{"id":5,"body":"old","user":{"login":"a"}},{"id":9,"body":"/abort","user":{"login":"b"}}]`,
 		"GET /orgs/o/memberships/boss":                                                    `{"state":"active","role":"admin"}`,
 		"GET /orgs/o/memberships/dev":                                                     `{"state":"active","role":"member"}`,
 		"GET /repos/o/helm/issues?state=open&per_page=100&page=1":                         `[{"number":3,"title":"t","html_url":"u3"}]`,

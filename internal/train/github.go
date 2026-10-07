@@ -82,11 +82,15 @@ func (g *GitHub) do(ctx context.Context, method, path string, in, out any) error
 	return json.Unmarshal(data, out)
 }
 
-// pages GETs path (which has a query) page by page until a short page, appending to out.
+// pages GETs path page by page until a short page, appending to out.
 func pages[T any](ctx context.Context, g *GitHub, path string, out *[]T) error {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
 	for page := 1; page <= maxPages; page++ {
 		var items []T
-		if err := g.do(ctx, http.MethodGet, fmt.Sprintf("%s&per_page=100&page=%d", path, page), nil, &items); err != nil {
+		if err := g.do(ctx, http.MethodGet, fmt.Sprintf("%s%sper_page=100&page=%d", path, sep, page), nil, &items); err != nil {
 			return err
 		}
 		*out = append(*out, items...)
@@ -184,15 +188,6 @@ func (g *GitHub) PR(ctx context.Context, repo string, number int) (*PR, error) {
 	return p.pr(), nil
 }
 
-// BehindBy returns how many commits base has that head lacks.
-func (g *GitHub) BehindBy(ctx context.Context, repo, base, head string) (int, error) {
-	var c struct {
-		BehindBy int `json:"behind_by"`
-	}
-	err := g.do(ctx, http.MethodGet, g.repoPath(repo)+"/compare/"+url.PathEscape(base)+"..."+url.PathEscape(head)+"?per_page=1", nil, &c)
-	return c.BehindBy, err
-}
-
 // Checks returns the check runs and commit statuses of sha.
 func (g *GitHub) Checks(ctx context.Context, repo, sha string) ([]Check, error) {
 	var out []Check
@@ -275,7 +270,7 @@ func (g *GitHub) TagsAt(ctx context.Context, repo, sha string) ([]string, error)
 			SHA string `json:"sha"`
 		} `json:"commit"`
 	}
-	if err := pages(ctx, g, g.repoPath(repo)+"/tags?", &tags); err != nil {
+	if err := pages(ctx, g, g.repoPath(repo)+"/tags", &tags); err != nil {
 		return nil, err
 	}
 	var out []string
@@ -379,7 +374,7 @@ func (g *GitHub) Comments(ctx context.Context, number int, after int64) ([]Comme
 			Login string `json:"login"`
 		} `json:"user"`
 	}
-	if err := pages(ctx, g, fmt.Sprintf("%s/issues/%d/comments?", g.repoPath(g.Repo), number), &cs); err != nil {
+	if err := pages(ctx, g, fmt.Sprintf("%s/issues/%d/comments", g.repoPath(g.Repo), number), &cs); err != nil {
 		return nil, err
 	}
 	var out []Comment
