@@ -1,5 +1,6 @@
 // Package pluginprobe loads CCF agent plugins the way the agent does and reports the protocol each
-// speaks and the agent library it was built with. cmd/plugin-probe drives it.
+// speaks and the agent library it was built with, and checks policy bundles with the agent's OPA.
+// cmd/plugin-probe drives it.
 package pluginprobe
 
 import (
@@ -17,9 +18,11 @@ import (
 // Report is the probe's JSON report.
 type Report struct {
 	// AgentVersion is the version of github.com/compliance-framework/agent the probe is built
-	// with: the runner it loads plugins through.
+	// with: the runner it loads plugins through. OPAVersion is the OPA it checks policies with.
 	AgentVersion string         `json:"agent_version"`
+	OPAVersion   string         `json:"opa_version"`
 	Plugins      []PluginResult `json:"plugins"`
+	Policies     []PolicyResult `json:"policies"`
 }
 
 // PluginResult is what the probe found out about one plugin.
@@ -41,9 +44,22 @@ type PluginResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-// Failed reports whether any plugin failed to load.
+// PolicyResult is the check of one policy bundle.
+type PolicyResult struct {
+	Source  string `json:"source"`
+	Digest  string `json:"digest,omitempty"`
+	Modules int    `json:"modules"`
+	Error   string `json:"error,omitempty"`
+}
+
+// Failed reports whether any plugin failed to load or any policy bundle failed its check.
 func (r Report) Failed() bool {
 	for _, p := range r.Plugins {
+		if p.Error != "" {
+			return true
+		}
+	}
+	for _, p := range r.Policies {
 		if p.Error != "" {
 			return true
 		}
@@ -51,7 +67,7 @@ func (r Report) Failed() bool {
 	return false
 }
 
-// Prober probes plugins. Set WorkDir; the other fields have defaults.
+// Prober probes plugins and policy bundles. Set WorkDir; the other fields have defaults.
 type Prober struct {
 	// WorkDir is where OCI artifacts are extracted, one subdirectory per artifact.
 	WorkDir string
@@ -70,11 +86,16 @@ type Prober struct {
 // DefaultPlatform is the platform the probe runs on, os/arch.
 func DefaultPlatform() string { return runtime.GOOS + "/" + runtime.GOARCH }
 
-// Run probes every plugin, in order. Failures are recorded in the report.
-func (p *Prober) Run(ctx context.Context, plugins []string) Report {
-	report := Report{Plugins: []PluginResult{}}
+// Run probes every plugin, then checks every policy bundle, in order. Failures are recorded in the
+// report.
+func (p *Prober) Run(ctx context.Context, plugins, policies []string) Report {
+	report := Report{Plugins: []PluginResult{}, Policies: []PolicyResult{}}
+	dir := func(i int) string { return filepath.Join(p.WorkDir, fmt.Sprintf("%02d", i+1)) }
 	for i, src := range plugins {
-		report.Plugins = append(report.Plugins, p.ProbePlugin(ctx, src, filepath.Join(p.WorkDir, fmt.Sprintf("%02d", i+1))))
+		report.Plugins = append(report.Plugins, p.ProbePlugin(ctx, src, dir(i)))
+	}
+	for i, src := range policies {
+		report.Policies = append(report.Policies, p.CheckPolicies(ctx, src, dir(len(plugins)+i)))
 	}
 	return report
 }

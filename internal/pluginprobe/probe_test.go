@@ -235,10 +235,60 @@ func TestProbeOCIPlugin(t *testing.T) {
 	}
 }
 
+func TestCheckPolicies(t *testing.T) {
+	srv := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	good := "package ccf.mock\n\nviolation contains msg if {\n\tnot input.enabled\n\tmsg := \"disabled\"\n}\n"
+	push := func(repo string, files map[string]string) string {
+		ref := host + "/" + repo + ":v1"
+		if err := remote.Write(mustRef(t, ref), image(t, files)); err != nil {
+			t.Fatal(err)
+		}
+		return ref
+	}
+	local := func(files map[string]string) string {
+		dir := t.TempDir()
+		for name, content := range files {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+
+	for _, tc := range []struct {
+		src, err string
+		modules  int
+	}{
+		{src: push("good", map[string]string{"policies/a.rego": good, "policies/data.json": "{}", "README.md": "x"}), modules: 1},
+		{src: push("flat", map[string]string{"a.rego": good}), err: "no policies/ directory"},
+		{src: local(map[string]string{"policies/a.rego": good, "policies/b_test.rego": "package ccf.mock_test\n\ntest_x if true\n"}), modules: 2},
+		{src: local(map[string]string{"policies/a.rego": "package x\n\nallow { true }\n"}), err: "opa check"}, // Rego v0 syntax
+		{src: local(map[string]string{"policies/a.rego": "package x\n\nallow if undefined_fn(1)\n"}), err: "undefined function"},
+		{src: local(map[string]string{"policies/README.md": "x"}), err: "no .rego files"},
+		{src: local(map[string]string{"policies": "not a dir"}), err: "no policies/ directory"},
+		{src: filepath.Join(local(map[string]string{"f": "x"}), "f"), err: "is a file"},
+	} {
+		got := testProber(t, "").CheckPolicies(context.Background(), tc.src, t.TempDir())
+		if got.Modules != tc.modules || (tc.err == "") != (got.Error == "") || !strings.Contains(got.Error, tc.err) {
+			t.Errorf("CheckPolicies(%s) = %+v; want %d modules, error %q", tc.src, got, tc.modules, tc.err)
+		}
+	}
+}
+
 func TestRunAndReport(t *testing.T) {
 	p := testProber(t, "v1")
-	r := p.Run(context.Background(), []string{self(t), "missing|plugin"})
-	if len(r.Plugins) != 2 || !r.Failed() {
+	policies := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(policies, "policies"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := p.Run(context.Background(), []string{self(t), "missing|plugin"}, []string{policies})
+	if len(r.Plugins) != 2 || len(r.Policies) != 1 || !r.Failed() {
 		t.Fatalf("Run = %+v", r)
 	}
 	if r.Plugins[0].Protocol != 1 || r.Plugins[0].Error != "" {
@@ -248,12 +298,12 @@ func TestRunAndReport(t *testing.T) {
 	if err := r.WriteMarkdown(&md); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"| Plugin | Protocol |", "| v1 | - | ok | the binary does not depend on ", "`missing\\|plugin` | - | - | **failed**: "} {
+	for _, want := range []string{"| Plugin | Protocol |", "| v1 | - | ok | the binary does not depend on ", "`missing\\|plugin` | - | - | **failed**: ", "| Policy bundle |", "| 0 | **failed**: opa check: no .rego files"} {
 		if !strings.Contains(md.String(), want) {
 			t.Errorf("markdown lacks %q:\n%s", want, md.String())
 		}
 	}
-	if (Report{Plugins: []PluginResult{{Protocol: 1}}}).Failed() {
+	if (Report{Plugins: []PluginResult{{Protocol: 1}}, Policies: []PolicyResult{{Modules: 1}}}).Failed() {
 		t.Error("a report without errors failed")
 	}
 }
@@ -262,9 +312,9 @@ func TestDepVersion(t *testing.T) {
 	info := &debug.BuildInfo{Deps: []*debug.Module{
 		{Path: "github.com/hashicorp/go-plugin", Version: "v1.7.0"},
 		{Path: AgentModule, Version: "v0.9.0"},
-		{Path: "github.com/open-policy-agent/opa", Version: "v1.14.1", Replace: &debug.Module{Path: "../opa"}},
+		{Path: OPAModule, Version: "v1.14.1", Replace: &debug.Module{Path: "../opa"}},
 	}}
-	for path, want := range map[string]string{AgentModule: "v0.9.0", "github.com/open-policy-agent/opa": "v1.14.1 => ../opa", "x": ""} {
+	for path, want := range map[string]string{AgentModule: "v0.9.0", OPAModule: "v1.14.1 => ../opa", "x": ""} {
 		if got := DepVersion(info, path); got != want {
 			t.Errorf("DepVersion(%s) = %q, want %q", path, got, want)
 		}
@@ -290,5 +340,26 @@ func TestLibVersion(t *testing.T) {
 	}
 	if got, err := LibVersion(bin); err != nil || got == "" || got != strings.TrimSpace(string(want)) {
 		t.Errorf("LibVersion = %q, %v; want %s", got, err, want)
+	}
+}
+
+// TestOPAMatchesAgent keeps the OPA that checks policies equal to the one the agent requires, as
+// the agent's own make check-opa-version does against the API.
+func TestOPAMatchesAgent(t *testing.T) {
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Path}} {{.Version}} {{.GoMod}}", AgentModule, OPAModule).Output()
+	if err != nil {
+		t.Fatalf("go list: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("go list: %q", out)
+	}
+	agentGoMod, selected := strings.Fields(lines[0])[2], strings.Fields(lines[1])[1]
+	data, err := os.ReadFile(agentGoMod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "\t" + OPAModule + " " + selected + "\n"; !strings.Contains(string(data), want) {
+		t.Errorf("go.mod selects OPA %s, but the agent's go.mod (%s) requires another version", selected, agentGoMod)
 	}
 }

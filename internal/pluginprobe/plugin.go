@@ -20,6 +20,9 @@ import (
 // AgentModule is the module path of the agent library plugins are built against.
 const AgentModule = "github.com/compliance-framework/agent"
 
+// OPAModule is the module path of OPA, which the agent evaluates policies with.
+const OPAModule = "github.com/open-policy-agent/opa"
+
 // DefaultTimeout bounds starting a plugin and its Init call when Prober.Timeout is unset.
 const DefaultTimeout = time.Minute
 

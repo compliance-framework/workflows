@@ -18,18 +18,19 @@ import (
 // ProtocolAnnotation is the OCI annotation the agent reads a plugin's protocol version from.
 const ProtocolAnnotation = "org.ccf.plugin.protocol.version"
 
-// artifact is a fetched plugin.
+// artifact is a fetched plugin or policy bundle.
 type artifact struct {
-	path        string // the plugin executable
+	path        string // the plugin executable or the policies directory
 	oci         bool
 	digest      string
 	annotations map[string]string
 }
 
 // fetch resolves src the way the agent does: an existing file is used as is, an existing directory
-// must hold entry (`plugin`), and anything else must be an OCI tag, which gooci downloads and
-// extracts into outDir. platform ("os/arch") selects the image of a multi-platform index. Local
-// paths are made absolute, so a bare name like "plugin" is never looked up in PATH.
+// must hold entry (`plugin` or `policies`), and anything else must be an OCI tag, which gooci
+// downloads and extracts into outDir. platform ("os/arch") selects a plugin's image; "" takes the
+// registry default, which suits single-manifest policy bundles. Local paths are made absolute, so
+// a bare name like "plugin" is never looked up in PATH.
 func (p *Prober) fetch(ctx context.Context, src, outDir, entry, platform string) (artifact, error) {
 	if info, err := os.Stat(src); err == nil {
 		abs, err := filepath.Abs(src)
@@ -38,6 +39,9 @@ func (p *Prober) fetch(ctx context.Context, src, outDir, entry, platform string)
 		}
 		if info.IsDir() {
 			return artifact{path: filepath.Join(abs, entry)}, nil
+		}
+		if entry == "policies" {
+			return artifact{}, fmt.Errorf("%s is a file; want a policy bundle directory holding %s/", src, entry)
 		}
 		return artifact{path: abs}, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
