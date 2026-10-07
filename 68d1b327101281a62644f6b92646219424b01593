@@ -1,0 +1,5 @@
+lisa-addressed:
+- pass 1: split release-checks base-manifest read into its own step with a fake-gh test (ok/404/500); readManifest errors name the file; NonFinalDeps replace message trimmed.
+
+lisa-selfreview:
+- pass 2: approve, no findings.
