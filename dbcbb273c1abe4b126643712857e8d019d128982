@@ -1,0 +1,2 @@
+lisa-addressed:
+Rebase onto main (incident threads #21/#22 merged): internal/notify is main's version; Post's signature is identical, so cmd/train's adapter is unchanged. Dropped internal/notify/post_test.go (duplicate of main's TestPostInThread).
