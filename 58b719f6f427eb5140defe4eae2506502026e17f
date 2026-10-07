@@ -1,3 +1,6 @@
 lisa-addressed:
 pass 1: [80de2e12ce83 CORE-DOC-001] README lists the CLI-only flags (--owner, --required-check-app-id, --check-token-scope) with defaults.
 pass 1: [72af5c00e829 CORE-STYLE-001] apiServer requires a body for PATCH, POST and PUT /rulesets/.
+
+lisa-selfreview:
+pass 2 (strict): no findings; approve
