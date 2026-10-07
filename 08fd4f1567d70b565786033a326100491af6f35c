@@ -1,0 +1,8 @@
+lisa-design:
+- Plugin/policy OCI tags keep the v (ReleaseTags artifact style: vX.Y.Z [+ latest]); the field references plugin-x:v0.4.0. No floating vX.Y/vX for artifacts (spec asks only for :latest).
+- gooci authenticates through docker/login-action (gooci v0.0.7 resolves credentials via go-containerregistry's DefaultKeychain), instead of `gooci login --password <token>` on the command line.
+- protocol-version is an input (default "2") rather than a hard-coded annotation, so a v1-protocol plugin isn't mislabelled.
+- Preview and release publishing are separate jobs, not one shared reusable workflow: the release's goreleaser needs contents: write to attach archives, and a shared workflow would force previews (which run PR code) to be granted contents: write. The identical parts (upload scripts, the whole policy step list, the tags job modulo --style) are pinned by TestReleaseCopies.
+- Plugin previews use `goreleaser release --snapshot --clean` (not `goreleaser build`): gooci upload reads dist/'s archives and metadata, which `build` doesn't produce.
+- release-policies.yml no longer attaches bundle.tar.gz to the GitHub release (the legacy per-repo workflow did via softprops); the spec asks only for opa build + gooci upload-single, so contents: read suffices.
+- preview.yml rejects an unknown kind in the tags job instead of silently publishing nothing.
