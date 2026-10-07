@@ -5,3 +5,6 @@ lisa-design:
 - Workflow input is named `needs` (like release-finished.yml's input of the same toJSON(needs)), not the spec's example `needs-json`.
 - No job-level concurrency group: a queued notify job replaced by a newer one would show as a cancelled check; the double-thread race (two runs of one incident finishing together) is documented in docs/notify.md instead.
 - Detailed docs in docs/notify.md; README keeps a short summary + link and the updated caller example only (parallel stage-3 PRs edit README).
+
+lisa-selfreview:
+Pass 2 (strict, on the split stack): no findings. Checked the split for leftovers (incident.go messages used only via Handle/tests in the bottom PR; notify.go package doc updated here; clients_test keeps TestPostInThread), README caller example vs docs/notify.md snippet (same shape), CORE-CI-001 on notify-failure.yml (top-level permissions {}, SHA pins, persist-credentials false), NEEDS passed via env (no expression injection). Verdict: approve.
