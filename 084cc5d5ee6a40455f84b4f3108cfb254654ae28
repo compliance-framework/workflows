@@ -1,0 +1,2 @@
+lisa-addressed:
+pass 1: ReleaseTags reuses valid() (one X.Y.Z[-pre] check); release-action.yml comments why its tags job runs release-tags.
