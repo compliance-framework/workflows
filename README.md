@@ -23,8 +23,10 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `repos.mock.yaml` | The same schema for the `mock-*` repos, used to develop and test changes without touching product repos. |
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
+| `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
 | `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`. |
-| `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`). |
+| `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, `ci-go-plugin.yml`, `ci-policies.yml`). |
+| `.golangci.yml`, `.regal/config.yaml` | Shared lint base configs, used by the CI workflows when the calling repo has none. |
 
 ### The manifest
 
@@ -98,10 +100,11 @@ jobs:
     secrets: inherit
 ```
 
-The next tasks add one CI workflow per `kind`, plus release workflows; the building blocks
-below are in place. The mock repos adopt each one before the product repos do. Consumers
-pin a major tag (`@v1`) or a full commit SHA, never `@main`. The `permissions` above are the
-ones `ci-common.yml` and `notify-failure.yml` need (see below).
+Each `kind` gets its own CI workflow (`ci-go-plugin.yml` and `ci-policies.yml` so far; the
+others follow), plus release workflows later. The mock repos adopt each one before the
+product repos do. Consumers pin a major tag (`@v1`) or a full commit SHA, never `@main`.
+The `permissions` above are the ones `ci-common.yml` and `notify-failure.yml` need (see
+below).
 
 ## Reusable workflows
 
@@ -142,6 +145,67 @@ logic is `cmd/notify` (rules in `internal/notify`), built from this repo at `wor
 
 Secret: `SLACK_BOT_TOKEN` (optional, `chat:write`), via `secrets: inherit`. The calling job
 runs `if: failure()` after the CI jobs and grants `actions: read` and `contents: read`.
+
+### Kind CI workflows
+
+Each calls `ci-common.yml` and ends in a job named `required`, the one status check a repo
+needs to require (branch protection shows it as `<caller job> / required`). `required` runs
+with `if: always()`, needs every other job, and fails unless all of them succeeded. None of
+those jobs is conditional, so a skipped job also fails it; the `pull_request`-only jobs inside
+`ci-common.yml` don't count, because `common` still succeeds when they skip. In the `go` and
+`opa` jobs every check runs even if an earlier one failed, so one run reports every problem.
+Callers grant the permissions `ci-common.yml` needs (see the example above); neither workflow
+takes secrets.
+
+`ci-common.yml` is called as `./.github/workflows/ci-common.yml`. In a called workflow, a
+local reference means this repo at the same commit as the calling workflow file, not the
+top-level caller's repo, so a caller pinned to `@v1` or a SHA gets the matching
+`ci-common.yml` ("the called workflow is from the same commit as the caller workflow",
+[Reusing workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)).
+The shared lint configs are fetched the same way, from `job.workflow_repository` at
+`job.workflow_sha` (the repo and commit of the workflow file defining the job; actionlint
+v1.7.12 doesn't know these yet, so `.github/actionlint.yaml` silences that one message).
+
+#### `ci-go-plugin.yml` (kind `go-plugin`)
+
+Go comes from the caller's `go.mod`.
+
+| Job | Checks |
+| --- | --- |
+| `golangci-lint` | golangci-lint (version pinned in the workflow) with the repo's config, or this repo's `.golangci.yml` when it has none. |
+| `go` | `gofmt -l .` (prints the diff), `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test ./...`. |
+| `goreleaser` | GoReleaser (version pinned in the workflow): `goreleaser check` (deprecated properties only warn), `goreleaser build --snapshot --clean --single-target`. |
+
+| Input | Default | What |
+| --- | --- | --- |
+| `lint-new-from-merge-base` | `true` | Report only issues the change adds: `--new-from-merge-base=origin/<base>` on PRs, `--new-from-rev=<before>` on pushes (everything when there is no such commit). `false` lints everything. |
+
+#### `ci-policies.yml` (kind `policies`)
+
+| Job | Checks |
+| --- | --- |
+| `opa` | `opa fmt --list --fail` (prints the diff), `opa check --strict`, `opa test`, `opa build --bundle`. |
+| `regal` | `regal lint` with the repo's `.regal/config.yaml` (or `.regal.yaml`), or this repo's `.regal/config.yaml` when it has none. That base config ignores CCF layout rules (package/directory mismatch, tests in the policy's package, no entrypoint, line length, and `opa-fmt`, which the `opa` job checks) and makes idiomatic, performance and style findings warnings. |
+
+| Input | Default | What |
+| --- | --- | --- |
+| `directory` | `policies` | The policies directory (the bundle root). |
+| `opa-version` | `1.14.1` | OPA version. |
+| `regal-version` | `0.43.0` | Regal version. |
+
+A caller is the example above with the kind's workflow in `uses:`, for example:
+
+```yaml
+  ci:
+    uses: compliance-framework/workflows/.github/workflows/ci-policies.yml@v1
+    with:
+      directory: policies  # the default; inputs are optional
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
+```
 
 ## Development
 

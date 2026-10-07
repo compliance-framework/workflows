@@ -1,0 +1,186 @@
+# CI for agent plugin repos (kind go-plugin). Calls ci-common.yml and ends in the `required`
+# job, the one status check to require. Callers grant the permissions ci-common.yml needs
+# (actions: read, contents: read, pull-requests: read, security-events: write); see README.
+name: ci-go-plugin
+
+on:
+  workflow_call:
+    inputs:
+      lint-new-from-merge-base:
+        description: "Report only lint issues the change adds (vs the PR's merge base, or the pushed range); false lints everything"
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  common:
+    name: common
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/ci-common.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the merge base / pushed range must be in the clone
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Find the repo's golangci-lint config
+        id: config
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          for f in .golangci.yml .golangci.yaml .golangci.toml .golangci.json; do
+            if [ -f "$f" ]; then
+              echo "Using the repo's $f."
+              echo "shared=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "No golangci-lint config in the repo; using the shared base config."
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so the shared config can't be fetched"
+            exit 1
+          fi
+          echo "shared=true" >> "$GITHUB_OUTPUT"
+      - name: Check out the shared config
+        if: steps.config.outputs.shared == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ccf-workflows
+          sparse-checkout: .golangci.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Choose the lint arguments
+        id: args
+        env:
+          SHARED: ${{ steps.config.outputs.shared }}
+          NEW_ONLY: ${{ inputs.lint-new-from-merge-base }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          args=""
+          if [ "$SHARED" = "true" ]; then
+            # Moved out of the tree so neither golangci-lint nor git status sees the clone.
+            mv .ccf-workflows/.golangci.yml "$RUNNER_TEMP/ccf-golangci.yml"
+            rm -rf .ccf-workflows
+            args="--config=$RUNNER_TEMP/ccf-golangci.yml"
+          fi
+          if [ "$NEW_ONLY" = "true" ]; then
+            if [ -n "$BASE_REF" ]; then
+              args="$args --new-from-merge-base=origin/$BASE_REF"
+            elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              args="$args --new-from-rev=$BEFORE"
+            else
+              echo "No merge base or pushed range for this event; linting everything."
+            fi
+          fi
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.11.4
+          args: ${{ steps.args.outputs.args }}
+
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: setup
+        with:
+          go-version-file: go.mod
+      # Each check runs even when an earlier one failed, so one run reports all of them.
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)" # a parse error fails the step here
+          if [ -n "$unformatted" ]; then
+            echo "::error::files need gofmt (run gofmt -w .):"
+            gofmt -d .
+            exit 1
+          fi
+      - name: go mod tidy
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain -- go.mod go.sum)" ]; then
+            echo "::error::go.mod/go.sum are not tidy (run go mod tidy):"
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+      - name: go test
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: go test ./...
+
+  goreleaser:
+    name: goreleaser
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: v2.18.2
+          install-only: true
+      - name: goreleaser check
+        # Exit code 2 means a valid config with deprecated properties: a warning, not a failure.
+        run: |
+          rc=0
+          goreleaser check || rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning::.goreleaser.yaml uses deprecated properties (see the log above)"
+          elif [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+      - name: goreleaser build
+        run: goreleaser build --snapshot --clean --single-target
+
+  required:
+    name: required
+    needs: [common, lint, go, goreleaser]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # No job above is conditional, so anything but success fails (jobs ci-common skips
+      # on push events are inside `common`, whose result is still success).
+      - name: Check the results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::required jobs did not succeed:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All required jobs succeeded."

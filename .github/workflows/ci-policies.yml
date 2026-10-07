@@ -1,0 +1,145 @@
+# CI for Rego policy repos (kind policies). Calls ci-common.yml and ends in the `required`
+# job, the one status check to require. Callers grant the permissions ci-common.yml needs
+# (actions: read, contents: read, pull-requests: read, security-events: write); see README.
+name: ci-policies
+
+on:
+  workflow_call:
+    inputs:
+      directory:
+        description: "Directory holding the policies (the bundle root)"
+        type: string
+        default: policies
+      opa-version:
+        description: "OPA version, without the leading v"
+        type: string
+        default: "1.14.1"
+      regal-version:
+        description: "Regal version, without the leading v"
+        type: string
+        default: "0.43.0"
+
+permissions: {}
+
+jobs:
+  common:
+    name: common
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/ci-common.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
+
+  opa:
+    name: opa
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      POLICY_DIR: ${{ inputs.directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1 # v2.4.0
+        id: setup
+        with:
+          version: ${{ inputs.opa-version }}
+      # Each check runs even when an earlier one failed, so one run reports all of them.
+      - name: opa fmt
+        run: |
+          if ! opa fmt --list --fail "$POLICY_DIR"; then
+            echo "::error::policies need opa fmt (run opa fmt -w $POLICY_DIR)"
+            opa fmt --diff "$POLICY_DIR" || true
+            exit 1
+          fi
+      - name: opa check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: opa check --strict "$POLICY_DIR"
+      - name: opa test
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: opa test "$POLICY_DIR"
+      - name: opa build
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: opa build --bundle "$POLICY_DIR" --output "$RUNNER_TEMP/bundle.tar.gz"
+
+  regal:
+    name: regal
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: open-policy-agent/setup-regal@761188c3b435761fa254beca508a44875619648f # v2.0.0
+        with:
+          version: ${{ inputs.regal-version }}
+      - name: Find the repo's Regal config
+        id: config
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          for f in .regal/config.yaml .regal.yaml; do
+            if [ -f "$f" ]; then
+              echo "Using the repo's $f."
+              echo "shared=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "No Regal config in the repo; using the shared base config."
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so the shared config can't be fetched"
+            exit 1
+          fi
+          echo "shared=true" >> "$GITHUB_OUTPUT"
+      - name: Check out the shared config
+        if: steps.config.outputs.shared == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ccf-workflows
+          sparse-checkout: .regal/config.yaml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: regal lint
+        env:
+          SHARED: ${{ steps.config.outputs.shared }}
+          POLICY_DIR: ${{ inputs.directory }}
+        run: |
+          args=()
+          if [ "$SHARED" = "true" ]; then
+            # Moved out of the tree so Regal doesn't lint the clone.
+            mv .ccf-workflows/.regal/config.yaml "$RUNNER_TEMP/ccf-regal.yaml"
+            rm -rf .ccf-workflows
+            args=(--config-file "$RUNNER_TEMP/ccf-regal.yaml")
+          fi
+          regal lint "${args[@]}" --format github "$POLICY_DIR"
+
+  required:
+    name: required
+    needs: [common, opa, regal]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # No job above is conditional, so anything but success fails (jobs ci-common skips
+      # on push events are inside `common`, whose result is still success).
+      - name: Check the results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::required jobs did not succeed:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All required jobs succeeded."

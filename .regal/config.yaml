@@ -1,0 +1,29 @@
+# Shared Regal base config for CCF policy repos. ci-policies.yml uses it when the calling repo
+# has no Regal config of its own. Bugs, imports and testing findings fail CI; idiomatic,
+# performance and style findings are warnings, so existing policies don't block.
+rules:
+  idiomatic:
+    default:
+      level: warning
+    # CCF layout: packages are compliance_framework.<name>, all in one policies/ directory.
+    directory-package-mismatch:
+      level: ignore
+    # The agent evaluates every package it finds; policies have no entrypoint.
+    no-defined-entrypoint:
+      level: ignore
+  performance:
+    default:
+      level: warning
+  style:
+    default:
+      level: warning
+    # Risk templates hold long statement and remediation strings.
+    line-length:
+      level: ignore
+    # The opa job runs opa fmt with the pinned OPA version.
+    opa-fmt:
+      level: ignore
+  testing:
+    # CCF tests share their policy's package.
+    test-outside-test-package:
+      level: ignore

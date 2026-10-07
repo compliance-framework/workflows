@@ -4,3 +4,7 @@ paths:
   .github/workflows/plugin-release.yml:
     ignore:
       - 'SC2086'
+  # actionlint v1.7.12 predates the job.workflow_* contexts (docs: "Contexts reference", job).
+  .github/workflows/*.yml:
+    ignore:
+      - 'property "workflow_(repository|sha|ref|file_path)" is not defined in object type'
