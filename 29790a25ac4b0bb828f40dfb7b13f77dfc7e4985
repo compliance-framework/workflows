@@ -7,3 +7,9 @@ lisa-design:
 - cmd/manifest is the first tool: validates a manifest and prints stages (text or --json for fromJSON); shows the --manifest convention (manifest.DefaultPath).
 - Cycle errors list every repo that cannot be ordered (the cycle plus repos downstream of it), sorted.
 - CI runs actionlint via `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` (no third-party action to pin). The legacy plugin-release.yml has a shellcheck SC2086 finding; it is silenced for that one path in .github/actionlint.yaml because the legacy files must not be edited in this task.
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- [blocker] CORE-SIZE-001: diff 1045 counted lines > 1000; compact test tables and README.
+- [must-fix] CORE-INPUT-001 manifest.go Parse: extra YAML documents after the first silently ignored.
+- [should-fix] CORE-DOC-001 README: validation list omits the non-helm -> helm dependency rule.
