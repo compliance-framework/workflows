@@ -9,3 +9,9 @@ lisa-design:
 - required: needs every job, if: always(), fails on any result != success (none of the top-level jobs is conditional, so skipped also fails). ci-common's pull_request-only jobs are inside `common`, which still succeeds when they skip.
 - Check steps after setup use `if: !cancelled() && steps.setup.outcome == 'success'` so one run reports every failing check.
 - Tool pins: golangci-lint v2.11.4 (spec), GoReleaser v2.18.2, OPA 1.14.1 (input), Regal 0.43.0 (input). Jobs split as golangci-lint / go / goreleaser and opa / regal for parallelism and clear status names.
+
+lisa-selfreview:
+pass 1 (strict): request_changes.
+- [must-fix] CORE-TEST-001: inline shell logic (lint args selection, goreleaser check exit mapping, required result check) untested. Fix: Go test that extracts the run scripts from the workflow YAML and runs them with bash + fixtures; assert the required script is identical in both workflows.
+- [should-fix] CORE-DUP-001 README repeats golangci-lint v2.11.4 / GoReleaser v2.18.2 pinned in ci-go-plugin.yml.
+- [should-fix] CORE-DOC-001 README says every check step runs after an earlier failure; only true in the go and opa jobs.
