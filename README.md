@@ -407,7 +407,7 @@ It never publishes `latest`, which only final releases move. What it publishes d
 | `go-plugin` | `go-plugin` | `goreleaser release --snapshot --clean` (nothing is released), then `gooci upload` of `dist/` with the `org.ccf.plugin.protocol.version` annotation. |
 | `policies` | `policies` | `opa build` of `directory`, then `gooci upload-single` of the bundle. |
 
-Plugins and policies set `on-main: false` to publish PR previews only.
+A plugin or policy repo that wants PR previews only sets `on-main: false`.
 
 | Input | Default | What |
 | --- | --- | --- |
