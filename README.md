@@ -23,7 +23,7 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `repos.yaml` | Manifest of the product repos: `name`, `kind`, `depends_on`, `release`, `charts`, plus top-level `holidays`, `include_patterns` and `exclude`. |
 | `repos.mock.yaml` | The same schema for the `mock-*` repos, used to develop and test changes without touching product repos. |
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
-| `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
+| `internal/notify` | The CI incident rules (which runs, incident key, transitions), the Slack messages and the Slack client ([docs/notify.md](docs/notify.md)). |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
 | `internal/reposettings` | The desired repo settings and rulesets, the current-vs-desired diff, and the GitHub client [`repo-settings.yml`](#repo-settings) uses. |
 | `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag, the preview tags, the release tags and the chart a helm release tag is for. |
@@ -96,10 +96,11 @@ jobs:
     secrets: inherit
   notify:
     needs: [ci]
-    if: failure()
+    if: always()
     uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@v1
+    with:
+      needs: ${{ toJSON(needs) }}
     permissions:
-      actions: read
       contents: read
     secrets: inherit
 ```
@@ -129,26 +130,13 @@ grant `actions: read`, `contents: read`, `pull-requests: read` and `security-eve
 
 ### `notify-failure.yml`
 
-Posts a failed run to Slack (`chat.postMessage`) when:
-
-- (a) it's for a pull request opened by `ccf-release-bot[bot]`, or for a branch starting with
-  `renovate/` or `ccf-bump/`;
-- (b) it's for a push to the default branch, and the previous completed push run of the same
-  workflow there passed, or there is none (cancelled and skipped runs are stepped over). A
-  broken `main` posts when it breaks, not on every later push.
-
-It posts once per repo + commit (the PR head for pull requests) + workflow: after posting it
-saves an Actions cache entry with that key, and skips the post when the entry exists. Without
-`SLACK_BOT_TOKEN` (forks, repos outside the secret's scope) it does nothing and succeeds. The
-logic is `cmd/notify` (rules in `internal/notify`), built from this repo at `workflows-ref`.
-
-| Input | Default | What |
-| --- | --- | --- |
-| `channel` | `""` | Slack channel ID; empty means the `SLACK_CHANNEL_CI_FAILURES` variable. |
-| `workflows-ref` | `v1` | Ref of this repo to build `cmd/notify` from. A reusable workflow can't see the ref it was called at, so pass the same ref when calling it at anything but `@v1`. |
-
-Secret: `SLACK_BOT_TOKEN` (optional, `chat:write`), via `secrets: inherit`. The calling job
-runs `if: failure()` after the CI jobs and grants `actions: read` and `contents: read`.
+Keeps one Slack thread per CI incident (a pull request, or a branch for pushes) for release-bot
+PRs, `renovate/` and `ccf-bump/` branches and the default branch: the first failure posts a
+top-level message, later failures reply in its thread, and the first pass after them replies
+`✅ passing again` and closes the incident. The calling job runs `if: always()` and passes
+`needs: ${{ toJSON(needs) }}`. State lives in the Actions cache; without `SLACK_BOT_TOKEN` it
+does nothing. Callers still on `if: failure()` keep working but never get recoveries. Inputs,
+caller snippet, state and migration: [docs/notify.md](docs/notify.md).
 
 ### Kind CI workflows
 

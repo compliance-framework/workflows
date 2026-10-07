@@ -1,11 +1,14 @@
 // Package notify holds the logic of the notify-failure reusable workflow (run through
-// cmd/notify): whether a failed CI run is posted to Slack, its dedupe key, and the message.
+// cmd/notify): which CI runs it tracks, their incident key, the incident transitions and
+// the Slack messages.
 //
-// A failed run is posted when:
+// A run is tracked when:
 //   - (a) it is for a pull request opened by ReleaseBotLogin, or for a branch starting with
 //     one of AutomationBranchPrefixes (a pull request, or a push to that branch);
-//   - (b) it is for a push to the default branch, and the previous completed run of the
-//     same workflow on that branch passed (or there is none).
+//   - (b) it is for a push to the default branch.
+//
+// A failed tracked run opens an incident (a top-level Slack message) or, while one is open,
+// replies in its thread; a passing run closes it with a reply. See Handle.
 package notify
 
 import (
@@ -15,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -24,26 +28,17 @@ const ReleaseBotLogin = "ccf-release-bot[bot]"
 // AutomationBranchPrefixes are the branch name prefixes of dependency-bump branches.
 var AutomationBranchPrefixes = []string{"renovate/", "ccf-bump/"}
 
-// Reason says why a run is posted; ReasonNone means it is not.
+// Reason says why a run is tracked; ReasonNone means it is not.
 type Reason string
 
 const (
 	ReasonNone             Reason = ""
 	ReasonReleaseBotPR     Reason = "release-bot-pr"
 	ReasonAutomationBranch Reason = "automation-branch"
-	ReasonDefaultBranch    Reason = "default-branch-broken"
+	ReasonDefaultBranch    Reason = "default-branch"
 )
 
-// ParseReason checks that s is a known, non-empty Reason.
-func ParseReason(s string) (Reason, error) {
-	switch r := Reason(s); r {
-	case ReasonReleaseBotPR, ReasonAutomationBranch, ReasonDefaultBranch:
-		return r, nil
-	}
-	return ReasonNone, fmt.Errorf("unknown reason %q", s)
-}
-
-// Run is the failed workflow run, from the caller's github context.
+// Run is the workflow run, from the caller's github context.
 type Run struct {
 	Repo          string // owner/name
 	Workflow      string // the caller workflow's name
@@ -54,6 +49,7 @@ type Run struct {
 	DefaultBranch string
 	ServerURL     string
 	RunID         string
+	RunAttempt    string
 	PRNumber      int
 	PRTitle       string
 	PRAuthor      string
@@ -63,12 +59,13 @@ type Run struct {
 // at GITHUB_EVENT_PATH.
 func RunFromEnv(getenv func(string) string) (Run, error) {
 	r := Run{
-		Repo:      getenv("GITHUB_REPOSITORY"),
-		Workflow:  getenv("GITHUB_WORKFLOW"),
-		EventName: getenv("GITHUB_EVENT_NAME"),
-		SHA:       getenv("GITHUB_SHA"),
-		ServerURL: strings.TrimRight(getenv("GITHUB_SERVER_URL"), "/"),
-		RunID:     getenv("GITHUB_RUN_ID"),
+		Repo:       getenv("GITHUB_REPOSITORY"),
+		Workflow:   getenv("GITHUB_WORKFLOW"),
+		EventName:  getenv("GITHUB_EVENT_NAME"),
+		SHA:        getenv("GITHUB_SHA"),
+		ServerURL:  strings.TrimRight(getenv("GITHUB_SERVER_URL"), "/"),
+		RunID:      getenv("GITHUB_RUN_ID"),
+		RunAttempt: cmp.Or(getenv("GITHUB_RUN_ATTEMPT"), "1"),
 	}
 	for _, name := range []string{"GITHUB_REPOSITORY", "GITHUB_WORKFLOW", "GITHUB_EVENT_NAME", "GITHUB_SHA", "GITHUB_RUN_ID"} {
 		if getenv(name) == "" {
@@ -114,7 +111,7 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 	if pr := ev.PullRequest; pr != nil {
 		r.PRNumber, r.PRTitle, r.PRAuthor, r.Branch = pr.Number, pr.Title, pr.User.Login, pr.Head.Ref
 		// GITHUB_SHA is the test merge commit, which changes whenever the base moves; the
-		// head is the commit that was pushed, so every run for it shares a dedupe key.
+		// head is the commit that was pushed, so every run for it sees the same commit.
 		if pr.Head.SHA != "" {
 			r.SHA = pr.Head.SHA
 		}
@@ -124,10 +121,8 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 	return r, nil
 }
 
-// Decide returns why the failed run r is posted, or ReasonNone. previous returns the
-// conclusion of the previous run on the default branch ("" if none); it is called only
-// for a push to that branch.
-func Decide(r Run, previous func() (string, error)) (Reason, error) {
+// Decide returns why the run r is tracked, or ReasonNone.
+func Decide(r Run) Reason {
 	automation := false
 	for _, p := range AutomationBranchPrefixes {
 		automation = automation || strings.HasPrefix(r.Branch, p)
@@ -135,54 +130,36 @@ func Decide(r Run, previous func() (string, error)) (Reason, error) {
 	switch {
 	case r.EventName == "pull_request" || r.EventName == "pull_request_target":
 		if r.PRAuthor == ReleaseBotLogin {
-			return ReasonReleaseBotPR, nil
+			return ReasonReleaseBotPR
 		}
 		if automation {
-			return ReasonAutomationBranch, nil
+			return ReasonAutomationBranch
 		}
 	case r.EventName == "push" && automation:
-		return ReasonAutomationBranch, nil
-	case r.EventName == "push" && r.Branch == r.DefaultBranch:
-		conclusion, err := previous()
-		if err != nil {
-			return ReasonNone, fmt.Errorf("looking up the previous run on %s: %w", r.Branch, err)
-		}
-		if conclusion == "" || conclusion == "success" {
-			return ReasonDefaultBranch, nil
-		}
+		return ReasonAutomationBranch
+	case r.EventName == "push" && r.Branch != "" && r.Branch == r.DefaultBranch:
+		return ReasonDefaultBranch
 	}
-	return ReasonNone, nil
+	return ReasonNone
 }
 
-// DedupeKey is the cache key marking r's failure as posted: one per repo + commit +
-// workflow (its file, or its name if the file is unknown), so re-runs and repeated events
-// for a commit post once. Changing it re-posts failures already posted under the old key.
-func DedupeKey(r Run) string {
-	sum := sha256.Sum256([]byte(r.Repo + "\x00" + r.SHA + "\x00" + cmp.Or(r.WorkflowPath, r.Workflow)))
-	return "ccf-notify-failure-" + hex.EncodeToString(sum[:])
-}
-
-// Message formats the Slack mrkdwn text for a posted run.
-func Message(r Run, reason Reason) string {
-	repoURL := r.ServerURL + "/" + r.Repo
-	var b strings.Builder
-	fmt.Fprintf(&b, ":rotating_light: *CI failed* in %s: *%s*\n", link(repoURL, r.Repo), escape(r.Workflow))
-	switch reason {
-	case ReasonReleaseBotPR:
-		b.WriteString("A pull request by " + ReleaseBotLogin + " failed.\n")
-	case ReasonAutomationBranch:
-		b.WriteString("Automation branch `" + escape(r.Branch) + "` failed.\n")
-	case ReasonDefaultBranch:
-		b.WriteString("`" + escape(r.Branch) + "` was passing and is now failing.\n")
-	}
+// IncidentKey is the Actions cache key prefix of r's incident state: one incident per
+// repo + workflow (its file, or its name if the file is unknown) + pull request, or + branch
+// for a push. Each save appends a unique suffix (StateKey), and the newest entry with this
+// prefix is the current state. Changing it forgets every open incident.
+func IncidentKey(r Run) string {
+	scope := "branch\x00" + r.Branch
 	if r.PRNumber != 0 {
-		label := strings.TrimSpace(fmt.Sprintf("#%d %s", r.PRNumber, r.PRTitle))
-		fmt.Fprintf(&b, "Pull request %s · ", link(fmt.Sprintf("%s/pull/%d", repoURL, r.PRNumber), label))
+		scope = "pr\x00" + strconv.Itoa(r.PRNumber)
 	}
-	short := r.SHA[:min(7, len(r.SHA))]
-	fmt.Fprintf(&b, "commit %s · %s", link(repoURL+"/commit/"+r.SHA, short),
-		link(repoURL+"/actions/runs/"+r.RunID, "run"))
-	return b.String()
+	sum := sha256.Sum256([]byte(r.Repo + "\x00" + cmp.Or(r.WorkflowPath, r.Workflow) + "\x00" + scope))
+	return "ccf-notify-incident-" + hex.EncodeToString(sum[:16]) + "-"
+}
+
+// StateKey is the cache key this run saves its incident state under: IncidentKey plus the
+// run ID and attempt, so every save is a new entry.
+func StateKey(r Run) string {
+	return IncidentKey(r) + r.RunID + "-" + r.RunAttempt
 }
 
 // escape escapes the characters Slack mrkdwn treats as control characters.
