@@ -1,0 +1,2 @@
+lisa-addressed:
+Self-review pass 2: docs/renovate.md says vulnerability PRs skip the concurrent-PR limit (not every PR limit).
