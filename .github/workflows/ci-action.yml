@@ -1,0 +1,101 @@
+# CI for Docker GitHub Action repos (kind action: agent-action). Calls ci-common.yml, whose
+# actionlint job lints the workflows, and ends in the `required` job, the one status check to
+# require. Callers grant the permissions ci-common.yml needs (actions: read, contents: read,
+# pull-requests: read, security-events: write); see README.
+name: ci-action
+
+on:
+  workflow_call:
+    inputs:
+      dockerfile:
+        description: "Dockerfile to build"
+        type: string
+        default: Dockerfile
+      context:
+        description: "Docker build context"
+        type: string
+        default: .
+
+permissions: {}
+
+jobs:
+  common:
+    name: common
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/ci-common.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
+
+  hadolint:
+    name: hadolint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install hadolint
+        env:
+          VERSION: v2.15.1
+          SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507 # hadolint-linux-x86_64
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/hadolint" "https://github.com/hadolint/hadolint/releases/download/$VERSION/hadolint-linux-x86_64"
+          echo "$SHA256  $RUNNER_TEMP/bin/hadolint" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/hadolint"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: hadolint
+        # Every tracked Dockerfile*; hadolint reads the repo's .hadolint.yaml, if any.
+        run: |
+          files=()
+          while IFS= read -r f; do
+            files+=("$f")
+          done < <(git ls-files | grep -E '(^|/)Dockerfile[^/]*$')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no Dockerfile in the repo"
+            exit 1
+          fi
+          hadolint "${files[@]}"
+
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: docker build
+        env:
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.context }}
+        run: docker build --file "$DOCKERFILE" "$CONTEXT"
+
+  required:
+    name: required
+    needs: [common, hadolint, docker]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # No job above is conditional, so anything but success fails (jobs ci-common skips
+      # on push events are inside `common`, whose result is still success).
+      - name: Check the results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::required jobs did not succeed:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All required jobs succeeded."

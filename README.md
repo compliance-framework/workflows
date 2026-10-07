@@ -100,8 +100,8 @@ jobs:
     secrets: inherit
 ```
 
-Each `kind` gets its own CI workflow (`ci-<kind>.yml`, see [Kind CI workflows](#kind-ci-workflows);
-ui, helm and action follow), plus release workflows later. The mock repos adopt each one before the
+Each `kind` gets its own CI workflow (`ci-<kind>.yml`, see [Kind CI workflows](#kind-ci-workflows)),
+plus release workflows later. The mock repos adopt each one before the
 product repos do. Consumers pin a major tag (`@v1`) or a full commit SHA, never `@main`.
 The `permissions` above are the ones `ci-common.yml` and `notify-failure.yml` need (see
 below).
@@ -238,6 +238,54 @@ The snippets below show only the `uses:` and `with:` keys of that `ci` job.
 | `goreleaser` | `goreleaser check` (deprecated properties only warn). |
 
 Caller: `uses: compliance-framework/workflows/.github/workflows/ci-go-lib.yml@v1`.
+
+#### `ci-ui.yml` (kind `ui`)
+
+One `node` job: Node from the repo's `.nvmrc` (else `node-version`), `npm ci`, then
+`npm run lint` (ESLint fails on errors, not warnings, unless the script sets
+`--max-warnings`), `npm run format:check`, `npm run type-check`, `npm run <test-script>`,
+`npm run build` and the extra command.
+
+| Input | Default | What |
+| --- | --- | --- |
+| `node-version` | `20` | Node version when the repo has no `.nvmrc`. |
+| `test-script` | `test` | npm script that runs Vitest. |
+| `extra-command` | `""` | Shell command run last, e.g. a drift check. |
+
+```yaml
+    uses: compliance-framework/workflows/.github/workflows/ci-ui.yml@v1
+    with:  # ui
+      test-script: test:unit
+      extra-command: scripts/sync-agentconfig-conformance.sh --check main
+```
+
+#### `ci-helm.yml` (kind `helm`)
+
+| Job | Checks |
+| --- | --- |
+| `helm` | `helm lint` on every chart; [kubeconform](https://github.com/yannh/kubeconform) `-strict` on each chart rendered with its default values; each of `make-targets` (the chart unit tests). |
+| `ct` | `ct lint --all --check-version-increment=false`, plus `--config ct.yaml` when the repo has a `ct.yaml` (chart-testing-action points ct's config search at its own install dir, so ct would not find the repo's file otherwise). release-please owns chart versions, and `ccf-bump` PRs change only `appVersion` and image tags, so no version bump is required. |
+
+| Input | Default | What |
+| --- | --- | --- |
+| `charts-dir` | `charts` | Directory with one subdirectory per chart. |
+| `make-targets` | `""` | `make` targets that run the chart unit tests, space-separated. |
+
+```yaml
+    uses: compliance-framework/workflows/.github/workflows/ci-helm.yml@v1
+    with:
+      make-targets: helm.test
+```
+
+#### `ci-action.yml` (kind `action`)
+
+| Job | Checks |
+| --- | --- |
+| `hadolint` | [hadolint](https://github.com/hadolint/hadolint) on every tracked `Dockerfile*`, with the repo's `.hadolint.yaml` if any. |
+| `docker` | `docker build --file <dockerfile> <context>`. |
+
+actionlint runs in `ci-common.yml`. Inputs: `dockerfile` (default `Dockerfile`) and `context`
+(default `.`). Caller: `uses: compliance-framework/workflows/.github/workflows/ci-action.yml@v1`.
 
 ## Development
 

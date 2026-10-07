@@ -20,10 +20,13 @@ const (
 	policies  = "ci-policies.yml"
 	goService = "ci-go-service.yml"
 	goLib     = "ci-go-lib.yml"
+	ui        = "ci-ui.yml"
+	helm      = "ci-helm.yml"
+	action    = "ci-action.yml"
 )
 
 // kinds are the kind CI workflows; each ends in the same `required` job.
-var kinds = []string{goPlugin, policies, goService, goLib}
+var kinds = []string{goPlugin, policies, goService, goLib, ui, helm, action}
 
 type workflow struct {
 	Jobs map[string]struct {
@@ -185,6 +188,7 @@ func TestSharedCopies(t *testing.T) {
 		{goPlugin, "go", "gofmt", goLib, "go"},
 		{goPlugin, "go", "go mod tidy", goService, "go"},
 		{goService, "go", "Prepare", goService, "make"},
+		{goService, "make", "make", helm, "helm"},
 	} {
 		if script(t, c.file, c.job, c.step) != script(t, c.otherFile, c.otherJob, c.step) {
 			t.Errorf("step %q differs between %s (%s) and %s (%s)", c.step, c.file, c.job, c.otherFile, c.otherJob)
@@ -220,6 +224,112 @@ func TestMakeTargets(t *testing.T) {
 				t.Fatalf("failed=%v, want %v:\n%s", r.failed, tc.failed, r.out)
 			}
 		})
+	}
+}
+
+func TestNodeVersion(t *testing.T) {
+	src := script(t, ui, "node", "Choose the Node version")
+	dir := t.TempDir()
+	if r := run(t, dir, src, "NODE_VERSION=20"); r.failed || r.outputs["version"] != "20" || r.outputs["file"] != "" {
+		t.Fatalf("without .nvmrc: got %v, failed=%v:\n%s", r.outputs, r.failed, r.out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".nvmrc"), []byte("22\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(t, dir, src, "NODE_VERSION=20"); r.failed || r.outputs["file"] != ".nvmrc" || r.outputs["version"] != "" {
+		t.Fatalf("with .nvmrc: got %v, failed=%v:\n%s", r.outputs, r.failed, r.out)
+	}
+}
+
+func TestHadolintFiles(t *testing.T) {
+	need(t, "git")
+	src := script(t, action, "hadolint", "hadolint")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "hadolint"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := "PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH")
+	dir := t.TempDir()
+	git(t, dir, "init", "-q")
+	if r := run(t, dir, src, path); !r.failed || !strings.Contains(r.out, "no Dockerfile") {
+		t.Fatalf("want a failure without Dockerfiles:\n%s", r.out)
+	}
+	for _, f := range []string{"Dockerfile", "Dockerfile-ci", "build/Dockerfile.dev", "Dockerfile.d/notes", ".dockerignore"} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(t, dir, "add", ".")
+	r := run(t, dir, src, path)
+	if got := strings.Fields(r.out); r.failed || !slices.Equal(got, []string{"Dockerfile", "Dockerfile-ci", "build/Dockerfile.dev"}) {
+		t.Fatalf("linted %v (failed=%v)", got, r.failed)
+	}
+}
+
+func TestKubeconform(t *testing.T) {
+	src := script(t, helm, "helm", "kubeconform")
+	bin := t.TempDir()
+	fakes := map[string]string{
+		// go install drops a fake kubeconform that rejects manifests containing "invalid".
+		"go":   "#!/bin/sh\nprintf '#!/bin/sh\\n! grep -q invalid\\n' > \"$GOBIN/kubeconform\"\nchmod +x \"$GOBIN/kubeconform\"\n",
+		"helm": "#!/bin/sh\n[ \"$3\" != charts/broken ] || exit 1\ncat \"$3/manifest\"\n",
+	}
+	for name, body := range fakes {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	for chart, manifest := range map[string]string{"good": "kind: Pod", "bad": "invalid", "broken": ""} {
+		if err := os.MkdirAll(filepath.Join(dir, "charts", chart), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, body := range map[string]string{"Chart.yaml": "", "manifest": manifest} {
+			if err := os.WriteFile(filepath.Join(dir, "charts", chart, name), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	path := "PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH")
+	r := run(t, dir, src, path, "CHARTS_DIR=charts")
+	// broken fails only through pipefail: kubeconform accepts its empty input.
+	if !r.failed || !strings.Contains(r.out, "not valid Kubernetes objects: charts/bad charts/broken\n") {
+		t.Fatalf("want bad and broken reported (failed=%v):\n%s", r.failed, r.out)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "charts", "bad")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "charts", "broken")); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(t, dir, src, path, "CHARTS_DIR=charts"); r.failed {
+		t.Fatalf("valid chart failed:\n%s", r.out)
+	}
+}
+
+// TestCtLint pins that the repo's ct.yaml reaches ct only through --config:
+// chart-testing-action points ct's own config search at the action's install dir.
+func TestCtLint(t *testing.T) {
+	src := script(t, helm, "ct", "ct lint")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ct"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := "PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH")
+	lint := []string{"lint", "--all", "--chart-dirs", "charts", "--check-version-increment=false"}
+	dir := t.TempDir()
+	if r := run(t, dir, src, path, "CHARTS_DIR=charts"); r.failed || !slices.Equal(strings.Fields(r.out), lint) {
+		t.Fatalf("without ct.yaml: ran ct %v (failed=%v)", strings.Fields(r.out), r.failed)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ct.yaml"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := append([]string{"lint", "--config", "ct.yaml"}, lint[1:]...)
+	if r := run(t, dir, src, path, "CHARTS_DIR=charts"); r.failed || !slices.Equal(strings.Fields(r.out), want) {
+		t.Fatalf("with ct.yaml: ran ct %v (failed=%v), want %v", strings.Fields(r.out), r.failed, want)
 	}
 }
 
