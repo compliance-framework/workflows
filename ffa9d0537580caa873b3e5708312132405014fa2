@@ -1,0 +1,2 @@
+lisa-addressed:
+pass 1: CORE-INPUT-001 (03cfae7e4aad) SMOKE_TIMEOUT/SMOKE_API_PORT/SMOKE_UI_PORT validated in check_settings + tests; CORE-ERR-001 teardown failure warns; CORE-TEST-001 TestSmokeRunPasses with fakeStack curl; CORE-DUP-001 docs note on ui-config API_URL; CORE-STYLE-001 strings.Cut in composeCalls.
