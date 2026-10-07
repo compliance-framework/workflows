@@ -7,3 +7,11 @@ lisa-design:
 - One repo's failure is reported (::error::) and the rest still run; exit is non-zero.
 - The token reaches git via GIT_CONFIG_* extraheader env (not argv/URL) and is stripped from the env of go and the repo's own sync script.
 - ccf-bump-sync.yml: scheduled runs use repos.yaml and stay dry runs until repo variable CCF_BUMP_SYNC_LIVE == 'true' (so merging this doesn't start writing to product repos); dispatch has manifest + dry_run (default true). Token: read-only for dry runs; contents/pull-requests/workflows write when live (bumps edit workflow files). Commits authored as <app-slug>[bot].
+
+lisa-selfreview:
+pass 1 (strict, whole stack) — request_changes on this layer:
+- CORE-INPUT-001: --set accepted non-version values; --all/--repos/--batch silently ignored with --repo; `sync --mode train` silently forced to sync.
+- CORE-SEC (credential exposure): repo-owned sync script and go ran with GH_TOKEN in env.
+- CORE-ERR: one repo's failure aborted the remaining repos of sync --all; `git diff` errors printed as "no file changes".
+- docs: "every repo is scanned for every pin" inaccurate (kind-gated updaters).
+pass 2 (strict) — approve. Deferred: superseded ccf-bump PRs from an earlier date are not auto-closed (documented; open question for reviewers).
