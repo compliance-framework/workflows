@@ -1,0 +1,20 @@
+lisa-design:
+- Two phases: each updater Scans pins into Refs, Decide plans them against targets, ApplyAll rewrites only the planned Changes. Dry runs, conflict reports and PR bodies all come from the same plan.
+- Never downgrade: semver-newer pins and pseudo-versions whose commit time is after the target tag's commit are Conflicts and are left as they are. A pin that is not a version (alpine:3.20, branch, SHA, "latest") is replaced; shared-workflow refs are replaced whenever they differ from the given ref (no semver check), since @v1 vs @v1.2.0 isn't a downgrade.
+- Internal = any github.com/compliance-framework/<repo> module, in or outside the manifest (mock plugins also pin the product agent module; its releases are only read). Only direct go.mod requires are bumped; indirect ones follow via go mod tidy.
+- Edits are in-place regexp/line edits, not YAML re-serialisation, so comments and layout survive; values that are not versions (opa-version: ${{ ... }}) are not matched.
+- Dockerfile/ui/opa updaters are only enabled for repos of kind action/ui/policies, with their source repo taken from the manifest's depends_on (the caller fills Config).
+- Mock-specific knowledge is limited to the ui sync script table: scripts/sync-mock-api-version.sh records its tag in src/api-version.json (current version); the real ui script has no recorded version, so its current version is unknown.
+- Split into a 3-PR stack for the 1000-line limit: (1) core + updaters, (2) helm updater + GitHub client, (3) cmd/ccf-bump, ccf-bump-sync.yml, docs.
+
+lisa-selfreview:
+pass 1 (strict, whole stack reviewed before splitting) — request_changes:
+- CORE-ERR/ID: opa-version Apply rewrote every opa-version in a file, so a conflicting (newer) pin next to an older one would be downgraded; go install / workflow ref lookups keyed by key only.
+- CORE-INPUT-001: workflow refs could hit the semver downgrade check (v1.2.0 -> v1 conflict), contradicting "replaced whenever they differ".
+- nit: rewrite() reset file modes to 0644.
+pass 2 (strict) — approve: no new findings on internal/bump.
+
+lisa-addressed:
+- find() matches key AND current version; opa-version Apply rewrites only matches whose value is a planned change's current (test: preview.yml 1.16.0 conflict stays).
+- Decide replaces DepWorkflows refs whenever they differ (test: @v1.2.0 -> @v1).
+- rewrite() keeps the file's permission bits.
