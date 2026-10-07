@@ -43,8 +43,8 @@ repos:
     charts: [ccf-agent, ccf-app]  # helm repos only
 ```
 
-Loading rejects unknown fields and kinds, duplicate names, dependencies on unknown repos,
-missing `release` values, and cycles.
+Loading rejects unknown fields and kinds, duplicate names, missing `release` values,
+dependencies on unknown repos, cycles, and a non-helm repo depending on a helm repo.
 
 `Stages()` groups repos into release stages. Every repo's dependencies are in earlier stages,
 and each stage is sorted by name. Repos of kind `helm` always release last, after every
@@ -87,16 +87,10 @@ pin a major tag (`@v1`) or a full commit SHA, never `@main`.
 
 ## Development
 
-```sh
-go test ./...
-go vet ./...
-gofmt -l .                     # must print nothing
-go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-go run ./cmd/manifest --manifest repos.mock.yaml
-```
-
-CI (`.github/workflows/ci.yml`) runs the same checks. Third-party actions are pinned by full
-commit SHA, with the version in a comment.
+CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,
+`go run ./cmd/manifest` on both manifests, and
+`go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`. Third-party actions are pinned by
+full commit SHA, with the version in a comment.
 
 ## Legacy files
 

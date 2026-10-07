@@ -7,29 +7,27 @@ import (
 	"time"
 )
 
+func date(t *testing.T, s string) time.Time {
+	t.Helper()
+	d, err := time.Parse(dateLayout, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
 func TestLoadRepoManifests(t *testing.T) {
 	tests := []struct {
 		path   string
 		stages [][]string
 	}{
-		{
-			path: "../../repos.yaml",
-			stages: [][]string{
-				{"api", "gooci"},
-				{"agent", "ui"},
-				{"agent-action"},
-				{"helm-charts"},
-			},
-		},
-		{
-			path: "../../repos.mock.yaml",
-			stages: [][]string{
-				{"mock-api", "mock-gooci"},
-				{"mock-agent", "mock-ui"},
-				{"mock-agent-action", "mock-plugin-1", "mock-plugin-2", "mock-plugin-policies-1", "mock-plugin-policies-2"},
-				{"mock-helm-charts"},
-			},
-		},
+		{"../../repos.yaml", [][]string{{"api", "gooci"}, {"agent", "ui"}, {"agent-action"}, {"helm-charts"}}},
+		{"../../repos.mock.yaml", [][]string{
+			{"mock-api", "mock-gooci"},
+			{"mock-agent", "mock-ui"},
+			{"mock-agent-action", "mock-plugin-1", "mock-plugin-2", "mock-plugin-policies-1", "mock-plugin-policies-2"},
+			{"mock-helm-charts"},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -44,219 +42,101 @@ func TestLoadRepoManifests(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.stages) {
 				t.Errorf("Stages() = %v, want %v", got, tt.stages)
 			}
-			if want := []string{"2026-12-25", "2027-01-01"}; !reflect.DeepEqual(m.Holidays, want) {
-				t.Errorf("Holidays = %v, want %v", m.Holidays, want)
+			if got := m.NextWorkingWeekday(date(t, "2027-01-01")).Format(dateLayout); got != "2027-01-04" {
+				t.Errorf("NextWorkingWeekday(2027-01-01) = %s, want 2027-01-04", got)
 			}
 		})
 	}
 }
 
 func TestLoadMissingFile(t *testing.T) {
-	if _, err := Load("does-not-exist.yaml"); err == nil {
-		t.Fatal("Load of a missing file succeeded")
+	if _, err := Load("does-not-exist.yaml"); err == nil || !strings.Contains(err.Error(), "read manifest") {
+		t.Fatalf("Load() error = %v, want a read error", err)
 	}
 }
 
-func TestParse(t *testing.T) {
-	tests := []struct {
-		name    string
-		yaml    string
-		wantErr string // empty: must succeed
-		want    *Manifest
-	}{
-		{
-			name: "all fields",
-			yaml: `
+func TestParseAllFields(t *testing.T) {
+	got, err := Parse([]byte(`
 holidays: ["2026-12-25", 2027-01-01]
 include_patterns: ["plugin-*"]
 exclude: [plugin-template]
 repos:
   - {name: api, kind: go-service, release: true}
   - {name: charts, kind: helm, depends_on: [api], release: false, charts: [a, b]}
-`,
-			want: &Manifest{
-				Holidays:        []string{"2026-12-25", "2027-01-01"},
-				IncludePatterns: []string{"plugin-*"},
-				Exclude:         []string{"plugin-template"},
-				Repos: []Repo{
-					{Name: "api", Kind: KindGoService, Release: true},
-					{Name: "charts", Kind: KindHelm, DependsOn: []string{"api"}, Charts: []string{"a", "b"}},
-				},
-			},
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := &Manifest{
+		Holidays:        []string{"2026-12-25", "2027-01-01"},
+		IncludePatterns: []string{"plugin-*"},
+		Exclude:         []string{"plugin-template"},
+		Repos: []Repo{
+			{Name: "api", Kind: KindGoService, Release: true},
+			{Name: "charts", Kind: KindHelm, DependsOn: []string{"api"}, Charts: []string{"a", "b"}},
 		},
-		{
-			name:    "empty document",
-			yaml:    "",
-			wantErr: "manifest is empty",
-		},
-		{
-			name:    "no repos",
-			yaml:    "holidays: []\n",
-			wantErr: "no repos",
-		},
-		{
-			name:    "unknown field",
-			yaml:    "repos:\n  - {name: api, kind: go-service, release: true, wave: 1}\n",
-			wantErr: "field wave not found",
-		},
-		{
-			name:    "missing release",
-			yaml:    "repos:\n  - {name: api, kind: go-service}\n",
-			wantErr: "release must be set",
-		},
-		{
-			name:    "missing name",
-			yaml:    "repos:\n  - {kind: go-service, release: true}\n",
-			wantErr: "name is required",
-		},
-		{
-			name:    "duplicate name",
-			yaml:    "repos:\n  - {name: api, kind: go-service, release: true}\n  - {name: api, kind: go-lib, release: true}\n",
-			wantErr: `"api" is listed more than once`,
-		},
-		{
-			name:    "unknown kind",
-			yaml:    "repos:\n  - {name: api, kind: rust, release: true}\n",
-			wantErr: `unknown kind "rust"`,
-		},
-		{
-			name:    "charts on non-helm repo",
-			yaml:    "repos:\n  - {name: api, kind: go-service, release: true, charts: [x]}\n",
-			wantErr: "charts are only allowed",
-		},
-		{
-			name:    "unknown dependency",
-			yaml:    "repos:\n  - {name: agent, kind: go-service, release: true, depends_on: [api]}\n",
-			wantErr: `unknown repo "api"`,
-		},
-		{
-			name:    "self dependency",
-			yaml:    "repos:\n  - {name: api, kind: go-service, release: true, depends_on: [api]}\n",
-			wantErr: "depends on itself",
-		},
-		{
-			name:    "duplicate dependency",
-			yaml:    "repos:\n  - {name: api, kind: go-service, release: true}\n  - {name: ui, kind: ui, release: true, depends_on: [api, api]}\n",
-			wantErr: `dependency "api" more than once`,
-		},
-		{
-			name:    "cycle",
-			yaml:    "repos:\n  - {name: a, kind: go-lib, release: true, depends_on: [b]}\n  - {name: b, kind: go-lib, release: true, depends_on: [a]}\n",
-			wantErr: "dependency cycle: cannot order repos a, b",
-		},
-		{
-			name:    "non-helm repo depends on a helm repo",
-			yaml:    "repos:\n  - {name: charts, kind: helm, release: true}\n  - {name: api, kind: go-service, release: true, depends_on: [charts]}\n",
-			wantErr: `depends on helm repo "charts"`,
-		},
-		{
-			name:    "bad holiday",
-			yaml:    "holidays: [25/12/2026]\nrepos:\n  - {name: api, kind: go-service, release: true}\n",
-			wantErr: "not an ISO date",
-		},
-		{
-			name:    "bad include pattern",
-			yaml:    "include_patterns: [\"plugin-[\"]\nrepos:\n  - {name: api, kind: go-service, release: true}\n",
-			wantErr: "include pattern",
-		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Parse() = %+v, want %+v", got, want)
+	}
+}
+
+func TestParseErrors(t *testing.T) {
+	const api = "  - {name: api, kind: go-service, release: true}\n"
+	tests := []struct {
+		name, yaml, wantErr string
+	}{
+		{"empty document", "", "manifest is empty"},
+		{"second document", "repos:\n" + api + "---\nrepos: []\n", "single YAML document"},
+		{"no repos", "holidays: []\n", "no repos"},
+		{"unknown field", "repos:\n  - {name: api, kind: go-service, release: true, wave: 1}\n", "field wave not found"},
+		{"missing release", "repos:\n  - {name: api, kind: go-service}\n", "release must be set"},
+		{"missing name", "repos:\n  - {kind: go-service, release: true}\n", "name is required"},
+		{"duplicate name", "repos:\n" + api + api, `"api" is listed more than once`},
+		{"unknown kind", "repos:\n  - {name: api, kind: rust, release: true}\n", `unknown kind "rust"`},
+		{"charts on non-helm repo", "repos:\n  - {name: api, kind: go-lib, release: true, charts: [x]}\n", "charts are only allowed"},
+		{"unknown dependency", "repos:\n  - {name: ui, kind: ui, release: true, depends_on: [api]}\n", `unknown repo "api"`},
+		{"self dependency", "repos:\n  - {name: api, kind: go-lib, release: true, depends_on: [api]}\n", "depends on itself"},
+		{"duplicate dependency", "repos:\n" + api + "  - {name: ui, kind: ui, release: true, depends_on: [api, api]}\n", `dependency "api" more than once`},
+		{"non-helm depends on helm", "repos:\n  - {name: c, kind: helm, release: true}\n  - {name: ui, kind: ui, release: true, depends_on: [c]}\n", `depends on helm repo "c"`},
+		{"cycle", "repos:\n  - {name: a, kind: go-lib, release: true, depends_on: [b]}\n  - {name: b, kind: go-lib, release: true, depends_on: [a]}\n", "dependency cycle: cannot order repos a, b"},
+		{"bad holiday", "holidays: [25/12/2026]\nrepos:\n" + api, "not an ISO date"},
+		{"bad include pattern", "include_patterns: [\"plugin-[\"]\nrepos:\n" + api, "include pattern"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Parse([]byte(tt.yaml))
-			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("Parse() error = %v, want it to contain %q", err, tt.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Parse: %v", err)
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Parse() = %+v, want %+v", got, tt.want)
+			_, err := Parse([]byte(tt.yaml))
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Parse() error = %v, want it to contain %q", err, tt.wantErr)
 			}
 		})
 	}
 }
 
 func TestStages(t *testing.T) {
-	repo := func(name string, deps ...string) Repo {
-		return Repo{Name: name, Kind: KindGoLib, DependsOn: deps}
-	}
-	helm := func(name string, deps ...string) Repo {
-		return Repo{Name: name, Kind: KindHelm, DependsOn: deps}
-	}
+	repo := func(name string, deps ...string) Repo { return Repo{Name: name, Kind: KindGoLib, DependsOn: deps} }
+	helm := func(name string, deps ...string) Repo { return Repo{Name: name, Kind: KindHelm, DependsOn: deps} }
 	tests := []struct {
 		name    string
 		repos   []Repo
 		want    [][]string
 		wantErr string
 	}{
-		{
-			name:  "single repo",
-			repos: []Repo{repo("a")},
-			want:  [][]string{{"a"}},
-		},
-		{
-			name:  "independent repos share a sorted stage",
-			repos: []Repo{repo("c"), repo("a"), repo("b")},
-			want:  [][]string{{"a", "b", "c"}},
-		},
-		{
-			name:  "chain",
-			repos: []Repo{repo("c", "b"), repo("b", "a"), repo("a")},
-			want:  [][]string{{"a"}, {"b"}, {"c"}},
-		},
-		{
-			name:  "repo waits for its deepest dependency",
-			repos: []Repo{repo("a"), repo("b", "a"), repo("c", "a", "b")},
-			want:  [][]string{{"a"}, {"b"}, {"c"}},
-		},
-		{
-			name:  "diamond",
-			repos: []Repo{repo("top", "left", "right"), repo("left", "base"), repo("right", "base"), repo("base")},
-			want:  [][]string{{"base"}, {"left", "right"}, {"top"}},
-		},
-		{
-			name:  "helm repo releases after every non-helm repo",
-			repos: []Repo{repo("a"), repo("b", "a"), helm("charts", "a")},
-			want:  [][]string{{"a"}, {"b"}, {"charts"}},
-		},
-		{
-			name:  "helm repo with no depends_on still releases last",
-			repos: []Repo{helm("charts"), repo("a"), repo("b", "a")},
-			want:  [][]string{{"a"}, {"b"}, {"charts"}},
-		},
-		{
-			name:  "helm-only manifest",
-			repos: []Repo{helm("x"), helm("y", "x")},
-			want:  [][]string{{"x"}, {"y"}},
-		},
-		{
-			name:  "duplicate dependency counted once",
-			repos: []Repo{repo("a"), repo("b", "a", "a")},
-			want:  [][]string{{"a"}, {"b"}},
-		},
-		{
-			name:    "two-repo cycle",
-			repos:   []Repo{repo("a", "b"), repo("b", "a")},
-			wantErr: "dependency cycle: cannot order repos a, b",
-		},
-		{
-			name:    "cycle reports dependents too",
-			repos:   []Repo{repo("root"), repo("x", "root", "z"), repo("y", "x"), repo("z", "y"), repo("leaf", "z")},
-			wantErr: "dependency cycle: cannot order repos leaf, x, y, z",
-		},
-		{
-			name:    "self cycle",
-			repos:   []Repo{repo("a", "a")},
-			wantErr: "dependency cycle: cannot order repos a",
-		},
+		{"independent repos share a sorted stage", []Repo{repo("c"), repo("a"), repo("b")}, [][]string{{"a", "b", "c"}}, ""},
+		{"chain", []Repo{repo("c", "b"), repo("b", "a"), repo("a")}, [][]string{{"a"}, {"b"}, {"c"}}, ""},
+		{"waits for deepest dependency", []Repo{repo("a"), repo("b", "a"), repo("c", "a", "b")}, [][]string{{"a"}, {"b"}, {"c"}}, ""},
+		{"diamond", []Repo{repo("top", "l", "r"), repo("l", "base"), repo("r", "base"), repo("base")}, [][]string{{"base"}, {"l", "r"}, {"top"}}, ""},
+		{"duplicate dependency counted once", []Repo{repo("a"), repo("b", "a", "a")}, [][]string{{"a"}, {"b"}}, ""},
+		{"helm releases after every non-helm repo", []Repo{repo("a"), repo("b", "a"), helm("charts", "a")}, [][]string{{"a"}, {"b"}, {"charts"}}, ""},
+		{"helm without depends_on still last", []Repo{helm("charts"), repo("a"), repo("b", "a")}, [][]string{{"a"}, {"b"}, {"charts"}}, ""},
+		{"helm-only manifest", []Repo{helm("x"), helm("y", "x")}, [][]string{{"x"}, {"y"}}, ""},
+		{"two-repo cycle", []Repo{repo("a", "b"), repo("b", "a")}, nil, "dependency cycle: cannot order repos a, b"},
+		{"cycle reports dependents too", []Repo{repo("root"), repo("x", "root", "z"), repo("y", "x"), repo("z", "y"), repo("leaf", "z")}, nil, "dependency cycle: cannot order repos leaf, x, y, z"},
+		{"self cycle", []Repo{repo("a", "a")}, nil, "dependency cycle: cannot order repos a"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &Manifest{Repos: tt.repos}
-			got, err := m.Stages()
+			got, err := (&Manifest{Repos: tt.repos}).Stages()
 			if tt.wantErr != "" {
 				if err == nil || err.Error() != tt.wantErr {
 					t.Fatalf("Stages() error = %v, want %q", err, tt.wantErr)
@@ -275,57 +155,35 @@ func TestStages(t *testing.T) {
 
 func TestNextWorkingWeekday(t *testing.T) {
 	m := &Manifest{Holidays: []string{"2026-12-25", "2027-01-01", "2027-01-04"}}
-	noHolidays := &Manifest{}
-	date := func(s string) time.Time {
-		d, err := time.Parse(dateLayout, s)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return d
-	}
 	tests := []struct {
-		name string
-		m    *Manifest
-		in   string
-		want string
+		name    string
+		m       *Manifest
+		in, out string
 	}{
 		{"working weekday is returned as is", m, "2026-12-01", "2026-12-01"},
 		{"saturday moves to monday", m, "2026-12-05", "2026-12-07"},
 		{"sunday moves to monday", m, "2026-12-06", "2026-12-07"},
 		{"holiday on a friday moves to monday", m, "2026-12-25", "2026-12-28"},
-		{"holiday then weekend then holiday", m, "2027-01-01", "2027-01-05"},
-		{"2027-01-01 to 2027-01-04 with no extra holiday", &Manifest{Holidays: []string{"2027-01-01"}}, "2027-01-01", "2027-01-04"},
-		{"no holidays: friday stays", noHolidays, "2027-01-01", "2027-01-01"},
+		{"holiday, weekend, holiday", m, "2027-01-01", "2027-01-05"},
+		{"2027-01-01 to 2027-01-04", &Manifest{Holidays: []string{"2027-01-01"}}, "2027-01-01", "2027-01-04"},
+		{"no holidays: friday stays", &Manifest{}, "2027-01-01", "2027-01-01"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.m.NextWorkingWeekday(date(tt.in))
-			if got.Format(dateLayout) != tt.want {
-				t.Errorf("NextWorkingWeekday(%s) = %s, want %s", tt.in, got.Format(dateLayout), tt.want)
+			if got := tt.m.NextWorkingWeekday(date(t, tt.in)).Format(dateLayout); got != tt.out {
+				t.Errorf("NextWorkingWeekday(%s) = %s, want %s", tt.in, got, tt.out)
 			}
 		})
 	}
 }
 
-func TestNextWorkingWeekdayKeepsTimeAndLocation(t *testing.T) {
+func TestNextWorkingWeekdayUsesLocalDate(t *testing.T) {
 	loc := time.FixedZone("UTC-5", -5*3600)
-	// 08:00 on Fri 2027-01-01 in UTC-5; the holiday check uses the local date.
-	in := time.Date(2027, 1, 1, 8, 0, 0, 0, loc)
-	m := &Manifest{Holidays: []string{"2027-01-01"}}
-	got := m.NextWorkingWeekday(in)
-	want := time.Date(2027, 1, 4, 8, 0, 0, 0, loc)
-	if !got.Equal(want) || got.Location() != loc {
-		t.Errorf("NextWorkingWeekday(%v) = %v, want %v", in, got, want)
-	}
-}
-
-func TestNextWorkingWeekdayRealManifest(t *testing.T) {
-	m, err := Load("../../repos.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := m.NextWorkingWeekday(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
-	if want := "2027-01-04"; got.Format(dateLayout) != want {
-		t.Errorf("NextWorkingWeekday(2027-01-01) = %s, want %s", got.Format(dateLayout), want)
+	// 20:00 on Thu 2026-12-24 in UTC-5 is already the 25th (a holiday) in UTC;
+	// the local date counts, so the time is returned unchanged.
+	in := time.Date(2026, 12, 24, 20, 0, 0, 0, loc)
+	got := (&Manifest{Holidays: []string{"2026-12-25"}}).NextWorkingWeekday(in)
+	if !got.Equal(in) || got.Location() != loc {
+		t.Errorf("NextWorkingWeekday(%v) = %v, want it unchanged", in, got)
 	}
 }

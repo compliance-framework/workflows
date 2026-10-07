@@ -112,6 +112,9 @@ func Parse(data []byte) (*Manifest, error) {
 		}
 		return nil, fmt.Errorf("decode manifest: %w", err)
 	}
+	if err := dec.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
+		return nil, errors.New("manifest must be a single YAML document")
+	}
 
 	m := &Manifest{
 		Holidays:        raw.Holidays,
