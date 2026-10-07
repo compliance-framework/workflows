@@ -9,3 +9,10 @@ lisa-design:
 - The caller decides failure (`if: failure()` on the notify job); the reusable workflow does not re-check the run's result.
 - Token gate is a shell step (secrets can't be used in if:); notify post also no-ops on an empty token. A post error or a missing channel fails the notify job (visible), and the marker is not saved, so a re-run retries.
 - This repo's ci.yml dogfoods ./.github/workflows/ci-common.yml (replaces its standalone actionlint job), so pr-title/vulns/actionlint run on this PR.
+
+lisa-selfreview:
+pass 1 (strict): request_changes.
+- [must-fix] CORE-SIZE-001: first draft was ~1500 counted lines (>1000). Trimmed code/tests/README, dropped ci-common inputs and the ci.yml dogfooding; now <1000.
+- [must-fix] ci-common.yml vulns: osv-scanner exits before writing results when a repo has no lockfiles (policies, helm), so the reusable workflow's "both scans completed" check would fail every PR there. Fix: scan-args add --allow-no-lockfiles.
+- [must-fix] CORE-ID-001 internal/notify DedupeKey: keyed on the workflow *name*, which two workflow files in one repo can share. Fix: key on the workflow file path from GITHUB_WORKFLOW_REF (name as fallback).
+- [should-fix] cache-scoped dedupe: a push run on renovate/x and a pull_request run for the same commit save markers in different cache scopes, so a caller triggering on both would post twice. Callers push-trigger on main only; recorded in design notes, not fixed.
