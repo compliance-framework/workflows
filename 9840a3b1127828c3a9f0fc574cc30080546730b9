@@ -1,0 +1,7 @@
+lisa-design:
+- Commands are read from the issue's comments on every run (LastComment cursor), not only on issue_comment runs, so a run dropped from the concurrency queue loses nothing. Org owner = GET /orgs/<org>/memberships/<user> role admin.
+- A dry run plans every stage in one run from the release PRs' proposed versions (a bump alone = a patch), and closes its issue: title "(dry run)", label train:dry-run, so it never blocks the real train's title check.
+- Manual (dispatch) trains take "(N)" title suffixes; the scheduled start proceeds only on NextWorkingWeekday(1st) when "Release train YYYY-MM" doesn't exist.
+- Chart issues are generic over the manifest: in each helm repo, its depends_on repos that went up a minor (api, ui, agent for helm-charts).
+- Escalation posts one top-level channel message per new month, from any run on the stale train.
+- A start while a train is open only reconciles the open one: one train at a time.
