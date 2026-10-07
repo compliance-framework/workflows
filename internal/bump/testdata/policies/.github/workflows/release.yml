@@ -1,0 +1,9 @@
+name: release
+on:
+  release:
+    types: [published]
+jobs:
+  release:
+    uses: compliance-framework/workflows/.github/workflows/release-policies.yml@v1
+    with:
+      opa-version: "1.14.1"
