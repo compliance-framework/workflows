@@ -1,0 +1,5 @@
+lisa-addressed:
+- pass 1: gh pr list --limit 1000 and isCrossRepository filter; TestCutPrerelease runs the step with a fake gh (first rc, third rc, 0/2 PRs, unknown package, already released).
+
+lisa-selfreview:
+- pass 2: approve, no findings.
