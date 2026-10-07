@@ -66,8 +66,10 @@ func goreleaserReleases(t *testing.T) []string {
 // goreleaser publishes.
 func TestGoreleaserReleaseGuard(t *testing.T) {
 	users := goreleaserReleases(t)
-	if !slices.Contains(users, "release-go-plugin.yml") {
-		t.Fatalf("goreleaser releases %v: want release-go-plugin.yml", users)
+	for _, want := range []string{"release-go-plugin.yml", "release-go-lib.yml"} {
+		if !slices.Contains(users, want) {
+			t.Fatalf("goreleaser releases %v: want %s", users, want)
+		}
 	}
 }
 
