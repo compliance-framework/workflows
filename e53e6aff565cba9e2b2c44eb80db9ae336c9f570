@@ -6,3 +6,6 @@ lisa-design:
 - go-module-path uses x/mod module.CheckPathMajor on the root package (".") version for every version, not only >= 1.0: a /vN suffix on a v0/v1 module is also wrong.
 - internal-deps-final also flags any replace directive of a compliance-framework module (a replace bypasses the required version). Uses modfile.Parse (strict), since ParseLax drops replace directives.
 - release-checks is one job skipped (not failed) outside release-please-- branches, so callers can make it a required check from their CI workflow.
+
+lisa-selfreview:
+pass 1 (strict): must-fix CORE-TEST-001 release-checks.yml base-manifest 404/other-error handling untested; should-fix GO-ERR-001 cmd/release readManifest errors lack the file path; nit replace message trailing space in NonFinalDeps.
