@@ -3,3 +3,6 @@ lisa-design:
 - Phase (progress) and Hold (blocked / needs-human) are separate fields. Holds are recomputed from GitHub on every run, except Sticky ones (a failed ccf-bump), which wait for /retry.
 - EvaluateChecks uses the latest check of each name; the required check (ci / required) must be present and pass.
 - The interfaces follow the tokens: Repos (release bot, scoped to the train's repos), Tracker (GITHUB_TOKEN, issues in workflows), Members (optional org-members-read token).
+
+lisa-selfreview:
+- pass 1 (stack-wide): BehindBy in the Repos interface is wrong for release-please (it leaves its PR behind main for ci:/chore: commits; seen on mock-agent#4, behind 2). Fixed: dropped from the interface.
