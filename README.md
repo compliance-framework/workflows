@@ -726,6 +726,12 @@ runs against a token in `GH_TOKEN` (a personal token isn't an installation token
 go run ./cmd/repo-settings sync --manifest repos.mock.yaml --repos mock-api --bypass-app-id <id> --check-token-scope=false
 ```
 
+## Renovate
+
+`renovate.yml` runs self-hosted Renovate daily on the manifest's repos, with the shared preset
+`renovate/default.json` (third-party updates on the 8th and 22nd, vulnerability fixes any day,
+non-majors grouped and auto-merged). See [docs/renovate.md](docs/renovate.md).
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,

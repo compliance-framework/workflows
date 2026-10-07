@@ -1,0 +1,93 @@
+name: renovate
+
+# Self-hosted Renovate for the manifest's repos, with the shared preset (renovate/default.json).
+# Runs daily: the preset limits normal updates to the 8th and 22nd and lets vulnerability fixes
+# through any day. A scheduled run uses the dispatch defaults below. See docs/renovate.md.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Manifest to read the repos from
+        type: choice
+        options: [repos.mock.yaml, repos.yaml]
+        default: repos.mock.yaml
+      repos:
+        description: Comma-separated subset of repos (default every repo in the manifest)
+        type: string
+        default: ""
+      dry_run:
+        description: Renovate dryRun (off runs live and opens PRs)
+        type: choice
+        options: [full, lookup, extract, "off"]
+        default: full
+      log_level:
+        description: Renovate log level
+        type: choice
+        options: [info, debug]
+        default: info
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    name: renovate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # A scheduled run has no inputs: keep these fallbacks equal to the dispatch defaults.
+      MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+      REPOS: ${{ inputs.repos }}
+      DRY_RUN: ${{ inputs.dry_run || 'full' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Select repos
+        id: select
+        run: |
+          repos="$(go run ./cmd/renovate-config list --manifest "$MANIFEST" --repos "$REPOS")"
+          # An empty list would mint a token for every repo the app is installed on (all of them).
+          if [ -z "$repos" ]; then
+            echo "::error::no repos selected"
+            exit 1
+          fi
+          echo "repos=$repos" >> "$GITHUB_OUTPUT"
+      - name: Build the Renovate config
+        id: config
+        run: |
+          config="$RUNNER_TEMP/renovate-config.json"
+          go run ./cmd/renovate-config config --manifest "$MANIFEST" --repos "$REPOS" --dry-run "$DRY_RUN" > "$config"
+          echo "path=$config" >> "$GITHUB_OUTPUT"
+          jq '{repositories, dryRun}' "$config"
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: token
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ steps.select.outputs.repos }}
+          # A dry run writes nothing, so its token can't either.
+          permission-contents: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # branches and commits
+          permission-pull-requests: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # PRs and auto-merge
+          permission-issues: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # Dependency Dashboard, labels
+          permission-workflows: ${{ env.DRY_RUN == 'off' && 'write' || '' }} # action updates in .github/workflows
+          permission-checks: read # branch status
+          permission-vulnerability-alerts: read # Dependabot alerts, for vulnerability fixes
+      - uses: renovatebot/github-action@230ce922b08968d0a4f6f70f295601daff09ef1d # v46.3.7
+        with:
+          configurationFile: ${{ steps.config.outputs.path }}
+          token: ${{ steps.token.outputs.token }}
+          renovate-version: 44.145.1
+        env:
+          LOG_LEVEL: ${{ inputs.log_level || 'info' }}
