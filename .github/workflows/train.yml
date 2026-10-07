@@ -1,0 +1,168 @@
+name: train
+
+# The monthly release train (cmd/train, docs/train.md). It keeps its state in a tracking issue
+# here (label train:open) and moves on whenever a release finishes, a command is commented on
+# the issue, someone runs it, or every hour. Scheduled starts are dry runs until the repo
+# variable TRAIN_LIVE is "true".
+
+on:
+  schedule:
+    - cron: "0 8 1-7 * *" # start: the train only starts on the month's first working weekday
+    - cron: "17 * * * *" # reconcile: does nothing when no train is open
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Start a train, or move the open one on
+        type: choice
+        options: [start, reconcile]
+        default: start
+      manifest:
+        description: Manifest to read the repos from (start)
+        type: choice
+        options: [repos.mock.yaml, repos.yaml]
+        default: repos.mock.yaml
+      repos:
+        description: Comma-separated repos (start; default every repo with release true)
+        type: string
+        default: ""
+      dry_run:
+        description: Plan and post, merge nothing (start)
+        type: boolean
+        default: true
+  repository_dispatch:
+    types: [release-finished, bump-merged]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+# One run at a time. GitHub keeps one pending run and cancels older pending ones; every run
+# reads the state and the new comments afresh, so a dropped pending run loses nothing.
+concurrency:
+  group: train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: train
+    # Comment commands only: on an open train's issue, starting with "/", not from a bot.
+    if: >-
+      github.event_name != 'issue_comment' || (
+        github.event.issue.pull_request == null &&
+        contains(github.event.issue.labels.*.name, 'train:open') &&
+        startsWith(github.event.comment.body, '/') &&
+        github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write # the tracking issue, with GITHUB_TOKEN
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Plan the run
+        id: plan
+        env:
+          TRACKER_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          ACTION: ${{ inputs.action }}
+          MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+          REPOS: ${{ inputs.repos }}
+          # Scheduled starts are dry runs until TRAIN_LIVE is true; manual ones follow the input.
+          DRY_RUN: ${{ github.event_name == 'schedule' && vars.TRAIN_LIVE != 'true' || github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+        run: |
+          case "$EVENT/$SCHEDULE" in
+            "schedule/0 8 1-7 * *") mode=start ;;
+            workflow_dispatch/*) mode="$ACTION" ;;
+            *) mode=reconcile ;;
+          esac
+          if [ "$EVENT" = repository_dispatch ]; then
+            echo "repository_dispatch: $PAYLOAD"
+          fi
+          go build -o "$RUNNER_TEMP/train" ./cmd/train
+          go build -o "$RUNNER_TEMP/ccf-bump" ./cmd/ccf-bump
+          "$RUNNER_TEMP/train" select --for "$mode" --manifest "$MANIFEST" --repos "$REPOS" | tee "$RUNNER_TEMP/select"
+          open="$(sed -n 's/^open=//p' "$RUNNER_TEMP/select")"
+          # An open train is live (dry runs close in the run that starts them).
+          write=false
+          if [ "$open" = true ] || { [ "$mode" = start ] && [ "$DRY_RUN" != true ]; }; then
+            write=true
+          fi
+          {
+            cat "$RUNNER_TEMP/select"
+            echo "mode=$mode"
+            echo "dry_run=$([ "$DRY_RUN" = true ] && echo true || echo false)"
+            echo "write=$write"
+          } >> "$GITHUB_OUTPUT"
+      # The release bot is installed on every org repo: a token minted with an owner and no
+      # repositories would reach all of them, so only mint one for a non-empty list.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: token
+        if: steps.plan.outputs.repos != ''
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ steps.plan.outputs.repos }}
+          permission-contents: ${{ steps.plan.outputs.write == 'true' && 'write' || 'read' }}
+          permission-pull-requests: ${{ steps.plan.outputs.write == 'true' && 'write' || 'read' }}
+          permission-issues: ${{ steps.plan.outputs.write == 'true' && 'write' || 'read' }} # chart issues
+          permission-actions: ${{ steps.plan.outputs.write == 'true' && 'write' || 'read' }} # /retry re-runs jobs
+          permission-checks: read
+          permission-statuses: read
+          # Bumps edit .github/workflows files; the permission has no read level, so only when live.
+          permission-workflows: ${{ steps.plan.outputs.write == 'true' && 'write' || '' }}
+      # Comment commands need the commenter's org role. The app may lack Members read: then the
+      # step fails, the token is empty and the train refuses commands instead of failing.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: members
+        if: steps.plan.outputs.open == 'true'
+        continue-on-error: true
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: workflows
+          permission-members: read
+      - name: Commit as the release bot
+        if: steps.plan.outputs.write == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          SLUG: ${{ steps.token.outputs.app-slug }}
+        run: |
+          id="$(gh api "/users/${SLUG}%5Bbot%5D" --jq .id)"
+          {
+            echo "GIT_AUTHOR_NAME=${SLUG}[bot]"
+            echo "GIT_COMMITTER_NAME=${SLUG}[bot]"
+            echo "GIT_AUTHOR_EMAIL=${id}+${SLUG}[bot]@users.noreply.github.com"
+            echo "GIT_COMMITTER_EMAIL=${id}+${SLUG}[bot]@users.noreply.github.com"
+          } >> "$GITHUB_ENV"
+      - name: Run the train
+        if: steps.plan.outputs.repos != ''
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TRACKER_TOKEN: ${{ github.token }}
+          MEMBERS_TOKEN: ${{ steps.members.outputs.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ vars.SLACK_CHANNEL_RELEASES }}
+          MODE: ${{ steps.plan.outputs.mode }}
+          MANIFEST: ${{ steps.plan.outputs.manifest }}
+          REPOS: ${{ inputs.repos }}
+          DRY_RUN: ${{ steps.plan.outputs.dry_run }}
+          SCHEDULED: ${{ github.event_name == 'schedule' }}
+        run: |
+          args=(--ccf-bump "$RUNNER_TEMP/ccf-bump" --watch 30m)
+          if [ "$MODE" = start ]; then
+            args+=(--manifest "$MANIFEST" --repos "$REPOS" --dry-run="$DRY_RUN" --scheduled="$SCHEDULED")
+          fi
+          "$RUNNER_TEMP/train" "$MODE" "${args[@]}"
+      - name: No open train
+        if: steps.plan.outputs.repos == ''
+        run: echo "No train is open; nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"

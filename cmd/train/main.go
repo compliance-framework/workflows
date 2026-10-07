@@ -3,8 +3,12 @@
 //	train select --for start|reconcile [--manifest M] [--repos a,b]
 //	    print the manifest and repos the run acts on (open=, manifest=, repos= lines for
 //	    $GITHUB_OUTPUT), to scope the release-bot token: the open train's, else the selection
-//	train start [--manifest M] [--repos a,b] [--dry-run] [--scheduled]
-//	train reconcile
+//	train start [--manifest M] [--repos a,b] [--dry-run] [--scheduled] [--watch D]
+//	train reconcile [--watch D]
+//
+// --watch keeps reconciling every --interval, up to D, while the open train has a repo that is
+// waiting (not held for a human), so one run sees release-please and CI finish instead of
+// waiting for the next event or hourly run.
 //
 // Environment: GH_TOKEN (the release bot, scoped to the train's repos; ccf-bump uses it too),
 // TRACKER_TOKEN (issues in the workflows repo), MEMBERS_TOKEN (optional: org members read, for
@@ -55,6 +59,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	bumpPath := fs.String("ccf-bump", "ccf-bump", "the ccf-bump binary")
 	required := fs.String("required-check", "ci / required", "a check every merged PR must pass")
 	rpWorkflow := fs.String("release-please-workflow", "release-please.yml", "the repos' release-please workflow file")
+	watch := fs.Duration("watch", 0, "start, reconcile: keep reconciling while the open train is waiting on GitHub, for up to this long")
+	interval := fs.Duration("interval", time.Minute, "start, reconcile: the pause between --watch runs")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -92,11 +98,38 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	if tok := getenv("SLACK_BOT_TOKEN"); tok != "" {
 		e.Slack = slack{&notify.Slack{BaseURL: envOr(getenv, "SLACK_API_URL", "https://slack.com/api"), Token: tok}}
 	}
+	var err error
 	if cmd == "reconcile" {
-		return e.Reconcile(ctx)
+		err = e.Reconcile(ctx)
+	} else {
+		err = e.Start(ctx, train.StartOptions{Manifest: *path, Repos: selected, DryRun: *dryRun, Scheduled: *scheduled})
 	}
-	return e.Start(ctx, train.StartOptions{Manifest: *path, Repos: selected, DryRun: *dryRun, Scheduled: *scheduled})
+	// Every run reads GitHub afresh, so a failed one is retried; the last result counts.
+	for deadline := now().Add(*watch); now().Add(*interval).Before(deadline); {
+		issues, ierr := tracker.Issues(ctx, train.LabelOpen)
+		if ierr != nil || !slices.ContainsFunc(issues, waiting) {
+			return errors.Join(err, ierr)
+		}
+		sleep(*interval)
+		err = e.Reconcile(ctx)
+	}
+	return err
 }
+
+// waiting reports whether is is an open train with a repo in an open stage that waits on
+// GitHub (release-please, checks, a release workflow) rather than on a human.
+func waiting(is train.Issue) bool {
+	st, err := train.Parse(is.Body)
+	if !is.Open || err != nil || st.Status != train.StatusOpen {
+		return false
+	}
+	return slices.ContainsFunc(st.Repos, func(r *train.RepoState) bool {
+		return st.StageOpen(r.Stage) && !r.Phase.Done() && r.Hold == train.NoHold
+	})
+}
+
+// sleep is time.Sleep; tests replace it.
+var sleep = time.Sleep
 
 // manifestName is a manifest in this repo's root; a train's state names its manifest, so it
 // can't point anywhere else.

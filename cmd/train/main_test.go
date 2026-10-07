@@ -120,3 +120,58 @@ func TestRunRejectsUnknownCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestWatch(t *testing.T) {
+	render := func(r *train.RepoState) string {
+		body, err := train.Render(&train.State{Month: "2026-12", Manifest: "repos.mock.yaml", Status: train.StatusOpen, Repos: []*train.RepoState{r}}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	// Waiting for release-please to tag the merge commit, and held for a human.
+	publishing := render(&train.RepoState{Name: "mock-api", Stage: 1, Phase: train.Publishing, MergeSHA: "m", Versions: map[string]string{".": "0.2.0"}})
+	held := render(&train.RepoState{Name: "mock-api", Stage: 1, Phase: train.Bumping, Hold: train.Blocked, Sticky: true, Detail: "ccf-bump failed"})
+	body, edits := "", 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /repos/compliance-framework/workflows/issues":
+			if body == "" {
+				_, _ = io.WriteString(w, `[]`)
+				return
+			}
+			_, _ = fmt.Fprintf(w, `[{"number":7,"state":"open","body":%q,"labels":[{"name":"train:open"}]}]`, body)
+		case "GET /repos/compliance-framework/workflows/issues/7/comments", "GET /repos/compliance-framework/mock-api/tags":
+			_, _ = io.WriteString(w, `[]`)
+		case "GET /repos/compliance-framework/mock-api/actions/runs":
+			_, _ = io.WriteString(w, `{"workflow_runs":[]}`)
+		case "PATCH /repos/compliance-framework/workflows/issues/7":
+			edits++
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	getenv := func(k string) string { return map[string]string{"GITHUB_API_URL": srv.URL}[k] }
+	clock := time.Date(2026, 12, 1, 8, 0, 0, 0, time.UTC)
+	now := func() time.Time { return clock }
+	sleeps := 0
+	sleep = func(d time.Duration) { sleeps++; clock = clock.Add(d) }
+	defer func() { sleep = time.Sleep }()
+
+	for _, tt := range []struct {
+		name, body    string
+		sleeps, edits int
+	}{
+		{"waiting on GitHub: runs at 0, 3, 6 and 9 minutes", publishing, 3, 4},
+		{"held for a human: one run", held, 0, 1},
+		{"no open train", "", 0, 0},
+	} {
+		body, sleeps, edits = tt.body, 0, 0
+		err := run(context.Background(), []string{"reconcile", "--watch", "10m", "--interval", "3m"}, getenv, io.Discard, now)
+		if err != nil || sleeps != tt.sleeps || edits != tt.edits {
+			t.Errorf("%s: %v, sleeps %d, runs %d", tt.name, err, sleeps, edits)
+		}
+	}
+}

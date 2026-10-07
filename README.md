@@ -742,6 +742,12 @@ policy OPA versions, the ui sync, helm appVersions and image tags, shared-workfl
 latest final releases, one `fix(deps)` PR per repo; `ccf-bump-sync.yml` runs it on the 8th and 22nd.
 See [docs/ccf-bump.md](docs/ccf-bump.md).
 
+## Release train
+
+`train.yml` releases the manifest's repos once a month, stage by stage: it bumps each repo's
+internal dependencies with `ccf-bump`, merges the release PRs, waits for the releases, and tracks it
+all in a `Release train YYYY-MM` issue and a Slack thread. See [docs/train.md](docs/train.md).
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,
