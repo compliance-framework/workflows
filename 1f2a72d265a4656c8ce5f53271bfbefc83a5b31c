@@ -1,0 +1,6 @@
+lisa-design:
+- OPA check runs in-process with the OPA library (github.com/open-policy-agent/opa/v1 loader + ast compiler, mirroring `opa check` non-bundle mode: Rego v1, process annotations, print statements, type-check annotations, no --strict since the agent does not compile strictly) instead of shelling out to an opa binary: the probe needs no extra tool and uses the same parser the agent links. go.mod pins OPA equal to the agent's requirement; TestOPAMatchesAgent reads the agent's go.mod via `go list -m` and fails on drift (the workflow re-aligns it for a different agent-ref).
+- Policy bundle sources: OCI tag (gooci, no platform) or a directory holding policies/ (an extracted bundle or a policies repo checkout); a plain file is rejected. Zero .rego files is a failure.
+- Exit status 1 if any plugin fails to load OR any policy bundle fails its check (the spec names plugins; a bundle the agent's OPA can't compile is equally fatal). Both reports are written before failing.
+- --json - and --markdown - can't both use stdout; --markdown "" disables markdown. --log-level is validated (hclog.NoLevel rejected).
+- The CLI passes plugins only PATH/HOME/TMPDIR from its environment.
