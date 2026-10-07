@@ -12,7 +12,7 @@ on:
         description: Manifest to read the repos from
         type: choice
         options: [repos.mock.yaml, repos.yaml]
-        # The mocks until the summary is proven on them; the schedule uses the same default.
+        # The mocks until the summary is proven on them; MANIFEST below is the schedule's.
         default: repos.mock.yaml
 
 permissions:
@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      # A scheduled run has no inputs: keep this fallback equal to the input's default.
       MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

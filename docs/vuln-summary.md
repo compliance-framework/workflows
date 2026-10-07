@@ -25,7 +25,7 @@ Severity is the advisory's (`critical`, `high`, `medium`, `low`); anything else 
 
 | Input | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.mock.yaml` | The repos to summarise: every repo in the manifest. `repos.yaml` for the product repos, once the summary is proven on the mocks (then change the default, which the schedule also uses). |
+| `manifest` | `repos.mock.yaml` | The repos to summarise: every repo in the manifest. `repos.yaml` for the product repos, once the summary is proven on the mocks: then change both the input's default and the `MANIFEST` fallback in `vuln-summary.yml` (a scheduled run has no inputs and uses the fallback). |
 
 ## Secrets and variables
 
@@ -48,7 +48,7 @@ instead, following the `Link` header's cursor pagination (only to the API host):
 
 | | Per repo (this tool) | Org endpoint |
 | --- | --- | --- |
-| Token | `ccf-release-bot`'s repo-level **Dependabot alerts: read**, scoped to the manifest's repos. | An org owner or security manager, or an installation token reaching every repo: the unscoped token the workflows never mint. |
+| Token | `ccf-release-bot`'s repo-level **Dependabot alerts: read**, scoped to the manifest's repos. | Returns only the repos the token reaches, so covering the org needs an org owner's or security manager's token, or an installation token reaching every repo: the unscoped token the workflows never mint. |
 | Repos covered | The manifest's repos only; repos picked up by `include_patterns` (workstream 3) once the manifest lists them. | Every repo the token reads, including ones outside the manifest. |
 | "No alerts" | Known: the repo was read and returned nothing. | Unknown: only repos with alerts are returned. |
 | Alerts disabled on a repo | Listed under "Could not read"; the run fails. | Silently absent. |
