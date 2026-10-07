@@ -1,0 +1,7 @@
+lisa-design:
+- Stack split: this PR adds only the incident engine in internal/notify (additive: ParseNeeds, Incident state, Handle, messages, Slack.Post); the next PR (ra/w1-s3-notify-threads-wire) wires cmd/notify + notify-failure.yml + docs. Split because the single change was 1216 counted lines (> ccf-review CORE-SIZE-001's 1000).
+- Dedupe = open incident with the same head SHA and the same sorted failed-job set -> post nothing. A new commit or a different failed set replies.
+- Result from the caller's toJSON(needs): any failure -> failure (failed jobs sorted); else any cancelled or nothing ran -> leave the incident alone; else success. Empty input = legacy if: failure() caller -> failure with unknown jobs (un-migrated callers keep working, they never post recoveries).
+- Replies (failure and recovery) go to the incident's stored channel; the configured channel only picks where new incidents start.
+- A state file that can't be parsed or is for another key is reported and treated as no incident (LoadIncident returns zero + error; caller logs and goes on), so a corrupt newest cache entry can't block notifications forever. Intentional, not an error swallow.
+- Slack.PostMessage kept with its signature as a wrapper around Slack.Post(channel, text, threadTS) -> (channel, ts), so other users of internal/notify are unaffected.
