@@ -1,0 +1,12 @@
+lisa-design:
+- Coexisting with the release-please release: goreleaser v2.18.2 finds the existing release by tag (GetReleaseByTag) and updates it instead of creating one, so no flag is needed to avoid failing. Default release.mode keep-existing keeps release-please's notes; append/prepend/replace were rejected (duplicate or overwrite the changelog) and only warn.
+- goreleaser's update always sends Prerelease=ctx.PreRelease, which is false unless release.prerelease is auto/true; a cut-prerelease rc would become a full release. So the workflow FAILS unless release.prerelease == auto (tag-decided, matching the "tags from tag name" rule). Applies equally to release-go-plugin.yml (not changed here; follow-up).
+- replace_existing_artifacts is a warning, not an error: needed only for re-runs after a partial upload.
+- Config check is a shell step with yq (preinstalled on ubuntu runners) rather than a cmd/release subcommand: avoids a tools checkout and a second Go setup; so no "Check the tools ref" step (no cmd/release fetched). The analogous guard is "Check the release tag" (fails when not called on release: published).
+- GORELEASER_CURRENT_TAG is set to the event's tag so two rc tags on one commit can't make goreleaser release the wrong one; checkout uses refs/tags/<tag> explicitly.
+- finished job identical to the other release-* tails (incl. packages: write for the prune); callers must grant packages: write although a library has no package (prune 404 -> nothing). Kept for identity with release-finished.yml rather than changing the shared tail.
+- TestReleaseFinishedJobs replaces the release-policies/release-go-plugin-only DeepEqual: every release-*.yml with a finished job must match (modulo needs and release-go-image's images), needs must list every other job; files without a tail are an explicit allow-list.
+- TestGoreleaserPins: one goreleaser-action SHA + goreleaser version across all workflows (legacy plugin-release.yml excluded).
+
+lisa-selfreview:
+- pass 1 (core,go packs): no findings. Checked SHA pins (verified against tags), permissions {}/job-scoped, persist-credentials false, env-passed shell values, the finished-job identity test fails on a mutated tail (mutation run), yq test in golang:1.26 + bash 5.
