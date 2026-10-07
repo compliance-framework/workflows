@@ -3,3 +3,8 @@ lisa-design:
 - Charts are packaged with --version <tag version>, not Chart.yaml's version: a cut-prerelease rc is tagged on main, whose Chart.yaml still has the previous version until the release PR merges. So no "Chart.yaml version == tag" check. Charts get no latest.
 - release-helm.yml logs in with `helm registry login --password-stdin` (token never on argv); registry is an input defaulting to oci://ghcr.io/compliance-framework/helm-charts (the mocks push there too, under mock-* names).
 - release-action.yml moves v<major> only for FINAL tags (an rc must not reach @v0 users), via the REST refs API with GITHUB_TOKEN (contents: write): PATCH force when the tag exists, POST when it's 404, fail on anything else. major comes from `release release-tags` (new major= output). No image is published: agent-action runs `image: Dockerfile`.
+
+lisa-selfreview:
+pass 1 (strict):
+- [should-fix CORE-DUP-001] internal/release: the "X.Y.Z[-pre], canonical" check is written twice (ReleaseTags in tags.go and valid() in helm.go); ReleaseTags should use valid().
+- [nit CORE-STYLE-001] release-action.yml's tags job runs release-tags --style image only for its final/major outputs; say so, or a reader looks for where its image tags go.
