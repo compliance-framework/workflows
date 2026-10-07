@@ -1,0 +1,9 @@
+lisa-design:
+- Repo set, kinds and dependency edges come from --manifest: sync --all = every release: true repo in Stages() order; the action's Dockerfile source = its single depends_on; ui sync dep and policies' OPA source = their go-service depends_on (OPA falls back to "agent").
+- sync mode targets latest finals of every internal ref found (inside or outside the manifest, read-only for outside ones); train mode only the --set versions (+ OPA derived from the source repo's go.mod at its --set tag). --set versions must be semver; workflows refs only move when --workflows-ref/--set workflows is given.
+- Without --pr ccf-bump only prints plan + diff; --pr --dry-run prints the PR it would open. Working copies are temp clones (GitHub, or --clones DIR for local dry runs); the user's clones are never modified.
+- Branch ccf-bump/<mode>-<YYYY-MM-DD> is force-pushed and an open PR on it is updated, so a same-day rerun is idempotent. Older-date ccf-bump PRs are not closed (documented).
+- Auto-merge only when no change is major (a new major, or a move from a pin that isn't a version / unknown current, e.g. real ui conformance or alpine -> mock-agent).
+- One repo's failure is reported (::error::) and the rest still run; exit is non-zero.
+- The token reaches git via GIT_CONFIG_* extraheader env (not argv/URL) and is stripped from the env of go and the repo's own sync script.
+- ccf-bump-sync.yml: scheduled runs use repos.yaml and stay dry runs until repo variable CCF_BUMP_SYNC_LIVE == 'true' (so merging this doesn't start writing to product repos); dispatch has manifest + dry_run (default true). Token: read-only for dry runs; contents/pull-requests/workflows write when live (bumps edit workflow files). Commits authored as <app-slug>[bot].
