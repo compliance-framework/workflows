@@ -3,7 +3,8 @@
 # them to ghcr.io/<owner>/<repo>:vX.Y.Z, and to :latest for a final tag (decided from the tag
 # name, never from the release's prerelease flag), annotated with the plugin protocol version.
 # release-finished.yml reports the result. Call it on `release: published` with
-# `secrets: inherit`; see README. Tag rules: internal/release (ReleaseTags).
+# `secrets: inherit`; the caller's goreleaser config needs `release.prerelease: auto`
+# (checked here). See README. Tag rules: internal/release (ReleaseTags).
 name: release-go-plugin
 
 on:
@@ -75,6 +76,35 @@ jobs:
         with:
           fetch-depth: 0 # goreleaser reads the tags for its changelog
           persist-credentials: false
+      # goreleaser updates the existing release with `prerelease` from its config, so anything
+      # but auto (decided from the tag) would turn a release candidate into a full release.
+      - name: Check the goreleaser config
+        run: |
+          config=""
+          # goreleaser's own search order.
+          for f in .config/goreleaser.yml .config/goreleaser.yaml .goreleaser.yml .goreleaser.yaml goreleaser.yml goreleaser.yaml; do
+            if [ -f "$f" ]; then
+              config="$f"
+              break
+            fi
+          done
+          if [ -z "$config" ]; then
+            echo "::error::no goreleaser config (.goreleaser.yaml) in the repo"
+            exit 1
+          fi
+          prerelease="$(yq -r '.release.prerelease // ""' "$config")"
+          if [ "$prerelease" != "auto" ]; then
+            echo "::error file=$config::release.prerelease must be auto (it is '$prerelease'), so a release candidate stays a pre-release"
+            exit 1
+          fi
+          mode="$(yq -r '.release.mode // ""' "$config")"
+          if [ -n "$mode" ] && [ "$mode" != "keep-existing" ]; then
+            echo "::warning file=$config::release.mode is $mode: goreleaser changes the release notes release-please wrote"
+          fi
+          if [ "$(yq -r '.release.replace_existing_artifacts // false' "$config")" != "true" ]; then
+            echo "::warning file=$config::release.replace_existing_artifacts is not true: re-running a release that uploaded some archives fails"
+          fi
+          echo "Using $config."
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod

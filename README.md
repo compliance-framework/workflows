@@ -500,7 +500,7 @@ release-bot secrets.
 | --- | --- | --- |
 | `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`. |
 | `release-ui.yml` | `ui` | The same as `release-go-image.yml` (it calls it), with the ui's single image. |
-| `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`. |
+| `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release; the config needs `release.prerelease: auto`), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`. |
 | `release-policies.yml` | `policies` | `opa build` of `directory` at `opa-version`, then `gooci upload-single` of the bundle. |
 
 Image tags, for the tag `v1.2.3` (prefix `tag-prefix`, default `v`): `1.2.3`, `1.2`, `1` and
@@ -523,6 +523,30 @@ github.com/compliance-framework/gooci@v0.0.7`) and reads the registry login from
 
 `release-go-plugin.yml` needs `contents: write` (goreleaser attaches the archives to the
 release) and `packages: write`; the others need `contents: read` and `packages: write`.
+
+**goreleaser config.** release-please (or `cut-prerelease.yml`) has already created the
+GitHub release, so `goreleaser release` finds it by tag and updates it: it uploads the
+archives and checksums and, with the default `release.mode` (`keep-existing`), keeps the
+notes release-please wrote. It also resets the release's pre-release flag to what the config
+says, `false` unless `release.prerelease` is `auto` or `true`, which would turn a release
+candidate into a full release that can be marked latest. So before building, the publish job
+checks the repo's goreleaser config, found the way goreleaser finds it
+(`.config/goreleaser.y[a]ml`, `.goreleaser.y[a]ml`, `goreleaser.y[a]ml`):
+
+- `release.prerelease` must be `auto`, so the flag comes from the tag (`v1.2.3-rc1` stays
+  a pre-release); anything else fails the release.
+- `release.mode` other than `keep-existing` warns (`append`, `prepend` and `replace` add
+  goreleaser's changelog to release-please's notes or replace them).
+- `release.replace_existing_artifacts` not `true` warns: without it a re-run after a
+  partial upload fails on the archives already attached.
+
+```yaml
+# .goreleaser.yaml in a plugin repo: the release settings this workflow expects
+version: 2
+release:
+  prerelease: auto
+  replace_existing_artifacts: true
+```
 
 ```yaml
 # .github/workflows/release.yml in a consuming repo
