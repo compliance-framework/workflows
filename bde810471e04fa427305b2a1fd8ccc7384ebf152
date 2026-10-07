@@ -3,3 +3,8 @@ pass 1:
 - CORE-TEST-001: internal/ciworkflows/steps_test.go extracts the run scripts from the workflow YAML and runs them with bash (GITHUB_OUTPUT, RUNNER_TEMP) against fixtures: required check (success/failure/cancelled/skipped, identical in both workflows), find-config (repo config / shared / empty workflow sha, both workflows), lint args (PR, push, zero before, no range, lint-everything, shared config move), goreleaser check exit 0/2/1 with a fake binary. Mutation-checked.
 - CORE-DUP-001: README no longer repeats the golangci-lint / GoReleaser versions.
 - CORE-DOC-001: README scopes "every check runs after a failure" to the go and opa jobs; layout lists internal/ciworkflows.
+
+lisa-selfreview:
+pass 2 (strict): request_changes.
+- [nit] CORE-STYLE-001 README: paragraphs edited in this PR ran past the 100-column wrap used elsewhere.
+- [nit] CORE-DOC-001 README: the kind workflows were described only as "the example above with X in uses:"; add a concrete caller snippet (task asks for an example caller).
