@@ -5,3 +5,8 @@ lisa-design:
 - Chart issues are generic over the manifest: in each helm repo, its depends_on repos that went up a minor (api, ui, agent for helm-charts).
 - Escalation posts one top-level channel message per new month, from any run on the stale train.
 - A start while a train is open only reconciles the open one: one train at a time.
+
+lisa-selfreview:
+- pass 1: [must-fix] the dry-run plan comment embeds ccf-bump output (diffs, go.sum) and could pass GitHub's 65536-char limit. Fixed (clip at 4000 bytes per repo).
+- pass 1: [should-fix CORE-DUP-001] chart issue links hardcoded the org. Fixed (link the digest draft instead).
+- pass 2: approve.
