@@ -23,6 +23,7 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `repos.mock.yaml` | The same schema for the `mock-*` repos, used to develop and test changes without touching product repos. |
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
+| `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
 | `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`. |
 | `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, `ci-go-plugin.yml`, `ci-policies.yml`). |
 | `.golangci.yml`, `.regal/config.yaml` | Shared lint base configs, used by the CI workflows when the calling repo has none. |
@@ -150,8 +151,8 @@ Each calls `ci-common.yml` and ends in a job named `required`, the one status ch
 needs to require (branch protection shows it as `<caller job> / required`). `required` runs
 with `if: always()`, needs every other job, and fails unless all of them succeeded. None of
 those jobs is conditional, so a skipped job also fails it; the `pull_request`-only jobs inside
-`ci-common.yml` don't count, because `common` still succeeds when they skip. Every check step
-runs even if an earlier one failed, so one run reports every problem. Callers grant the
+`ci-common.yml` don't count, because `common` still succeeds when they skip. In the `go` and
+`opa` jobs every check runs even if an earlier one failed, so one run reports every problem. Callers grant the
 permissions `ci-common.yml` needs (see the example above); neither workflow takes secrets.
 
 `ci-common.yml` is called as `./.github/workflows/ci-common.yml`. In a called workflow, a
@@ -169,9 +170,9 @@ Go comes from the caller's `go.mod`.
 
 | Job | Checks |
 | --- | --- |
-| `golangci-lint` | golangci-lint v2.11.4 with the repo's config, or this repo's `.golangci.yml` when it has none. |
+| `golangci-lint` | golangci-lint (version pinned in the workflow) with the repo's config, or this repo's `.golangci.yml` when it has none. |
 | `go` | `gofmt -l .` (prints the diff), `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test ./...`. |
-| `goreleaser` | GoReleaser v2.18.2: `goreleaser check` (deprecated properties only warn), `goreleaser build --snapshot --clean --single-target`. |
+| `goreleaser` | GoReleaser (version pinned in the workflow): `goreleaser check` (deprecated properties only warn), `goreleaser build --snapshot --clean --single-target`. |
 
 | Input | Default | What |
 | --- | --- | --- |
