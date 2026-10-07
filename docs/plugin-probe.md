@@ -34,6 +34,8 @@ plugin config sets `protocol_version: 2`.
 
 Plugins run with only `PATH`, `HOME` and `TMPDIR` from the probe's environment (plus go-plugin's
 handshake variables), so tokens in a CI job's environment never reach a plugin binary.
+The probe still executes every plugin it loads, and gooci extracts layers without confining their
+paths to the work directory, so probe only artifacts you would run.
 
 For each **policy bundle** (an OCI tag, or a directory holding `policies/`):
 
