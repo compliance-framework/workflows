@@ -14,7 +14,7 @@ require (
 	github.com/compliance-framework/api v1.4.0
 	github.com/compliance-framework/mock-api v0.2.0-rc1
 	github.com/compliance-framework/gooci v0.0.0-20260101000000-abcdefabcdef
-	github.com/compliance-framework/old/v2 v2.0.0+incompatible
+	github.com/compliance-framework/old v2.0.0+incompatible
 	github.com/other/lib v0.1.0-beta
 )
 
@@ -27,7 +27,7 @@ replace github.com/compliance-framework/api => ../api
 	want := []string{
 		"github.com/compliance-framework/mock-api@v0.2.0-rc1",
 		"github.com/compliance-framework/gooci@v0.0.0-20260101000000-abcdefabcdef",
-		"replace github.com/compliance-framework/api => ../api ",
+		"replace github.com/compliance-framework/api => ../api",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %q, want %q", got, want)

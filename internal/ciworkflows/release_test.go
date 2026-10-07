@@ -41,3 +41,33 @@ func TestReleasePleaseDefaultsDrift(t *testing.T) {
 		})
 	}
 }
+
+func TestReleaseChecksBaseManifest(t *testing.T) {
+	src := script(t, "release-checks.yml", "release-checks", "Read the base manifest")
+	bin := t.TempDir()
+	fake := "#!/bin/sh\ncase \"$FAKE\" in\nok) echo '{\".\": \"1.2.0\"}' ;;\n404) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\n*) echo 'gh: Server Error (HTTP 500)' >&2; exit 1 ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		fake, want string
+		failed     bool
+	}{
+		{"ok", `{".": "1.2.0"}`, false},
+		{"404", "{}", false},
+		{"500", "", true},
+	} {
+		t.Run(tc.fake, func(t *testing.T) {
+			r := run(t, t.TempDir(), src, "PATH="+bin+":"+os.Getenv("PATH"), "FAKE="+tc.fake, "GITHUB_REPOSITORY=o/r", "BASE_SHA=abc")
+			if r.failed != tc.failed {
+				t.Fatalf("failed=%v, want %v; output:\n%s", r.failed, tc.failed, r.out)
+			}
+			if !tc.failed {
+				b, err := os.ReadFile(filepath.Join(r.temp, "base.json"))
+				if err != nil || strings.TrimSpace(string(b)) != tc.want {
+					t.Fatalf("base.json = %q, %v; want %q", b, err, tc.want)
+				}
+			}
+		})
+	}
+}

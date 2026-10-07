@@ -38,7 +38,7 @@ func NonFinalDeps(gomod []byte) ([]string, error) {
 	}
 	for _, r := range f.Replace {
 		if strings.HasPrefix(r.Old.Path, OrgPrefix) {
-			bad = append(bad, fmt.Sprintf("replace %s => %s %s", r.Old.Path, r.New.Path, r.New.Version))
+			bad = append(bad, strings.TrimSpace(fmt.Sprintf("replace %s => %s %s", r.Old.Path, r.New.Path, r.New.Version)))
 		}
 	}
 	return bad, nil

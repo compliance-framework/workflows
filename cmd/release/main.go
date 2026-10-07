@@ -131,7 +131,11 @@ func readManifest(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return release.ParseManifest(b)
+	m, err := release.ParseManifest(b)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return m, nil
 }
 
 // prLabels reads the pull request's label names from a GitHub event payload.

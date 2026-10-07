@@ -44,12 +44,15 @@ jobs:
           cache: false
       - name: Build cmd/release
         id: build
+        run: |
+          go -C "$TOOLS_DIR" build -o "$RUNNER_TEMP/release" ./cmd/release
+          rm -rf "$TOOLS_DIR"
+      - name: Read the base manifest
+        id: base
         env:
           GH_TOKEN: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          go -C "$TOOLS_DIR" build -o "$RUNNER_TEMP/release" ./cmd/release
-          rm -rf "$TOOLS_DIR"
           # The manifest before this release; none yet means every package starts at 0.0.0.
           if ! gh api -H "Accept: application/vnd.github.raw" \
             "repos/$GITHUB_REPOSITORY/contents/.release-please-manifest.json?ref=$BASE_SHA" \
@@ -67,7 +70,7 @@ jobs:
           if [ ! -f go.mod ]; then echo "No go.mod; not a Go repo, skipping."; exit 0; fi
           "$RUNNER_TEMP/release" check internal-deps --gomod go.mod
       - name: version-guard
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.base.outcome == 'success' }}
         run: '"$RUNNER_TEMP/release" check version-guard --base "$RUNNER_TEMP/base.json" --head .release-please-manifest.json'
       - name: go-module-path
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
