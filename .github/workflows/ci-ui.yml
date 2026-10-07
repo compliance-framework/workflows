@@ -1,0 +1,111 @@
+# CI for the Node front end (kind ui). Calls ci-common.yml and ends in the `required` job,
+# the one status check to require. Callers grant the permissions ci-common.yml needs
+# (actions: read, contents: read, pull-requests: read, security-events: write); see README.
+name: ci-ui
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node version, used only when the repo has no .nvmrc"
+        type: string
+        default: "20"
+      test-script:
+        description: "npm script that runs the unit tests (Vitest)"
+        type: string
+        default: test
+      extra-command:
+        description: "Extra shell command run after the build (ui: scripts/sync-agentconfig-conformance.sh --check main)"
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  common:
+    name: common
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/ci-common.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
+
+  node:
+    name: node
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Choose the Node version
+        id: node
+        env:
+          NODE_VERSION: ${{ inputs.node-version }}
+        run: |
+          if [ -f .nvmrc ]; then
+            echo "Using the repo's .nvmrc."
+            echo "file=.nvmrc" >> "$GITHUB_OUTPUT"
+          else
+            echo "No .nvmrc; using Node $NODE_VERSION."
+            echo "version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # One of the two is empty; setup-node prefers node-version when both are set.
+          node-version: ${{ steps.node.outputs.version }}
+          node-version-file: ${{ steps.node.outputs.file }}
+          cache: npm
+      - name: npm ci
+        id: ci
+        run: npm ci
+      # Each check runs even when an earlier one failed, so one run reports all of them.
+      - name: eslint
+        # The repo's lint script; ESLint exits non-zero on errors, not on warnings.
+        if: ${{ !cancelled() && steps.ci.outcome == 'success' }}
+        run: npm run lint
+      - name: prettier
+        if: ${{ !cancelled() && steps.ci.outcome == 'success' }}
+        run: npm run format:check
+      - name: type-check
+        if: ${{ !cancelled() && steps.ci.outcome == 'success' }}
+        run: npm run type-check
+      - name: test
+        if: ${{ !cancelled() && steps.ci.outcome == 'success' }}
+        env:
+          TEST_SCRIPT: ${{ inputs.test-script }}
+        run: npm run "$TEST_SCRIPT"
+      - name: build
+        if: ${{ !cancelled() && steps.ci.outcome == 'success' }}
+        run: npm run build
+      - name: Extra command
+        if: ${{ !cancelled() && steps.ci.outcome == 'success' && inputs.extra-command != '' }}
+        env:
+          EXTRA: ${{ inputs.extra-command }}
+        run: bash -e -c "$EXTRA"
+
+  required:
+    name: required
+    needs: [common, node]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # No job above is conditional, so anything but success fails (jobs ci-common skips
+      # on push events are inside `common`, whose result is still success).
+      - name: Check the results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::required jobs did not succeed:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All required jobs succeeded."

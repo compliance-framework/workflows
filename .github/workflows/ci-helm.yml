@@ -1,0 +1,138 @@
+# CI for Helm chart repos (kind helm). Calls ci-common.yml and ends in the `required` job,
+# the one status check to require. Callers grant the permissions ci-common.yml needs
+# (actions: read, contents: read, pull-requests: read, security-events: write); see README.
+name: ci-helm
+
+on:
+  workflow_call:
+    inputs:
+      charts-dir:
+        description: "Directory holding one subdirectory per chart"
+        type: string
+        default: charts
+      make-targets:
+        description: "make targets that run the chart unit tests, space-separated, each in turn (e.g. helm.test)"
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  common:
+    name: common
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/ci-common.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
+
+  helm:
+    name: helm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CHARTS_DIR: ${{ inputs.charts-dir }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        id: setup
+        with:
+          version: v3.22.0
+      # kubeconform is built from source at a pinned version, like actionlint in ci-common.yml.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
+        with:
+          go-version: stable
+          cache: false
+      # Each check runs even when an earlier one failed, so one run reports all of them.
+      - name: helm lint
+        run: |
+          charts=("$CHARTS_DIR"/*/Chart.yaml)
+          [ -f "${charts[0]}" ] || { echo "::error::no charts in $CHARTS_DIR"; exit 1; }
+          helm lint "${charts[@]%/Chart.yaml}"
+      - name: kubeconform
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && steps.go.outcome == 'success' }}
+        run: |
+          GOBIN="$RUNNER_TEMP" go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
+          set -o pipefail # a chart that fails to render fails the check
+          failed=""
+          for chart in "$CHARTS_DIR"/*/Chart.yaml; do
+            chart="${chart%/Chart.yaml}"
+            echo "::group::$chart"
+            # The chart's default values; the release name is arbitrary.
+            helm template ccf "$chart" | "$RUNNER_TEMP/kubeconform" -strict -summary - || failed="$failed $chart"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::rendered manifests are not valid Kubernetes objects:$failed"
+            exit 1
+          fi
+      - name: make
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          TARGETS: ${{ inputs.make-targets }}
+        run: |
+          # Every target runs even when an earlier one failed.
+          failed=""
+          for target in $TARGETS; do
+            echo "::group::make $target"
+            make "$target" || failed="$failed $target"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::make targets failed:$failed"
+            exit 1
+          fi
+          [ -n "$TARGETS" ] || echo "No make targets."
+
+  ct:
+    name: ct
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.0
+      - uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
+        with:
+          version: 3.14.0
+      - name: ct lint
+        env:
+          CHARTS_DIR: ${{ inputs.charts-dir }}
+        # Every chart, not only the changed ones; ct also reads the repo's ct.yaml, if any.
+        # release-please owns chart versions and ccf-bump PRs change only appVersion and image
+        # tags, so no version increment is required.
+        run: ct lint --all --chart-dirs "$CHARTS_DIR" --check-version-increment=false
+
+  required:
+    name: required
+    needs: [common, helm, ct]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # No job above is conditional, so anything but success fails (jobs ci-common skips
+      # on push events are inside `common`, whose result is still success).
+      - name: Check the results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::required jobs did not succeed:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All required jobs succeeded."
