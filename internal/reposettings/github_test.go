@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -28,7 +29,8 @@ func apiServer(t *testing.T) (*GitHub, func() []string) {
 			t.Errorf("%s %s: missing token", r.Method, r.URL.Path)
 		}
 		body, _ := io.ReadAll(r.Body)
-		if r.Method != http.MethodGet && r.Method != http.MethodDelete && r.Method != http.MethodPut && len(body) == 0 {
+		needsBody := r.Method == http.MethodPatch || r.Method == http.MethodPost || (r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/rulesets/"))
+		if needsBody && len(body) == 0 {
 			t.Errorf("%s %s: empty body", r.Method, r.URL.Path)
 		}
 		mu.Lock()

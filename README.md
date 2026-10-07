@@ -716,8 +716,11 @@ How to run it:
    should be `up to date` (the sync is idempotent). Then set Administration back to **read**.
    Do the mocks first.
 
-Locally, the same tool runs against a token in `GH_TOKEN` (a personal token isn't an
-installation token, so pass `--check-token-scope=false`):
+The workflow calls `go run ./cmd/repo-settings sync`. Flags it doesn't expose: `--owner`
+(default `compliance-framework`), `--required-check-app-id` (default `15368`, GitHub Actions; `0`
+accepts the check from any source) and `--check-token-scope` (default `true`). Locally, the tool
+runs against a token in `GH_TOKEN` (a personal token isn't an installation token, so pass
+`--check-token-scope=false`):
 
 ```sh
 go run ./cmd/repo-settings sync --manifest repos.mock.yaml --repos mock-api --bypass-app-id <id> --check-token-scope=false
