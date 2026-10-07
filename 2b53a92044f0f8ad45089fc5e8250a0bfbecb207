@@ -1,0 +1,8 @@
+lisa-design:
+- notify.Slack.Post is the exact code of the notify-threads stack (#21/#22), so the two merge cleanly; its test is in a separate file with a distinct name.
+- train select checks an open train's repos against its own manifest (release: true) before the workflow scopes the token; manifest paths must be a .yaml in the repo root.
+- ccf-bump is exec'd, not linked; the PR number comes from its "PR: <url>" line, "dry run: would push" marks a planned change.
+
+lisa-selfreview:
+- pass 1: BehindBy (compare API) dropped with the interface change; list queries no longer build "?&". Fixed.
+- pass 2: approve. Deferred nit: ghPR.AutoMrg field name.
