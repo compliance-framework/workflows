@@ -1,0 +1,2 @@
+lisa-addressed:
+- Local plugin sources resolve to absolute paths (fetch.go), with a test running a bare "plugin" name from its directory; ParsePlatform errors name the platform.
