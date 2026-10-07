@@ -6,3 +6,8 @@ lisa-design:
 - A repo that can't be read is listed under "Could not read" in the message, the others still count, and the command exits non-zero AFTER posting so the weekly run goes red but the summary still lands.
 - No SLACK_BOT_TOKEN -> print only and succeed (same contract as cmd/notify). Channel: vars.SLACK_CHANNEL_VULNS || vars.SLACK_CHANNEL_CI_FAILURES, passed as SLACK_CHANNEL. Slack posting reuses notify.Slack (no change to internal/notify).
 - Repo order: critical, high, medium, low counts descending, then name; non-standard severities count as "other".
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- [should-fix CORE-DOC-001 a79572325c5c] docs/vuln-summary.md: switching the default manifest names only the input default; the schedule uses the MANIFEST fallback in the job env.
+- [should-fix CORE-DOC-001 f0afba36489a] docs/vuln-summary.md trade-off table: org endpoint Token row states token acceptance more precisely than verified; reword around coverage.
