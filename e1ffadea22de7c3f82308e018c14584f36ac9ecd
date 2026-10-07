@@ -6,3 +6,8 @@ lisa-design:
 - Publishing: the tags pointing at the merge commit, and the latest release-event run per tag and workflow, must all succeed.
 - --set versions: every single-package repo released in an earlier stage; ccf-bump ignores deps a repo doesn't pin.
 - version-guard is computed with internal/release.MajorIncreases on the PR's base/head manifests, so a major is needs-human (not just a failing check) until the release:major-approved label.
+
+lisa-selfreview:
+- pass 1: [must-fix] releasePR waited for behind_by==0, which never happens after ci:/chore: commits. Fixed (gate on release-please's run for the head).
+- pass 1: [must-fix CORE-TEST-001] bump PR without auto-merge, closed bump PR and release-please failure had no tests. Fixed (TestHolds).
+- pass 2: approve. Deferred nit: Engine.Members is unused until the commands PR (#next in the stack).
