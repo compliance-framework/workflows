@@ -71,3 +71,28 @@ func TestReleaseChecksBaseManifest(t *testing.T) {
 		})
 	}
 }
+
+// TestTokenScopeGuard pins the guard that stops an org-wide release token to one copy.
+func TestTokenScopeGuard(t *testing.T) {
+	const step = "Check the token scope"
+	src := script(t, "release-please.yml", "release-please", step)
+	if other := script(t, "cut-prerelease.yml", "cut", step); other != src {
+		t.Fatalf("step %q differs between release-please.yml and cut-prerelease.yml", step)
+	}
+	for _, tc := range []struct {
+		name, repoName, repository string
+		failed                     bool
+	}{
+		{"this repo", "mock-api", "compliance-framework/mock-api", false},
+		{"empty name", "", "compliance-framework/mock-api", true},
+		{"other owner", "mock-api", "someone/mock-api", true},
+		{"other repo", "api", "compliance-framework/mock-api", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := run(t, t.TempDir(), src, "REPO_NAME="+tc.repoName, "GITHUB_REPOSITORY="+tc.repository)
+			if r.failed != tc.failed {
+				t.Fatalf("failed=%v, want %v; output:\n%s", r.failed, tc.failed, r.out)
+			}
+		})
+	}
+}

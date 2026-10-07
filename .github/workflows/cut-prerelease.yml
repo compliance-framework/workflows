@@ -1,0 +1,113 @@
+# Cuts a release candidate: takes the next version from the open release-please PR's manifest,
+# tags <prefix><version>-rc<N+1> on the default branch's head and creates a GitHub prerelease
+# as ccf-release-bot, so the caller's release workflows run. Call it from a workflow_dispatch
+# workflow with `secrets: inherit`; see README. Tag rule: internal/release (NextRC).
+name: cut-prerelease
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: "release-please package path whose version is used"
+        type: string
+        default: "."
+      tag-prefix:
+        description: "Prefix of the release tags"
+        type: string
+        default: v
+    secrets:
+      RELEASE_BOT_APP_ID:
+        description: "ccf-release-bot App ID"
+        required: true
+      RELEASE_BOT_PRIVATE_KEY:
+        description: "ccf-release-bot private key"
+        required: true
+    outputs:
+      tag:
+        description: "The release-candidate tag created"
+        value: ${{ jobs.cut.outputs.tag }}
+
+permissions: {}
+
+jobs:
+  cut:
+    name: cut
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    concurrency:
+      group: cut-prerelease-${{ github.repository }}
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.cut.outputs.tag }}
+    steps:
+      # The release bot is installed on every org repo: a token minted with an owner and no
+      # repositories would reach all of them, so refuse anything but this exact repo.
+      - name: Check the token scope
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          if [ -z "$REPO_NAME" ] || [ "$GITHUB_REPOSITORY" != "compliance-framework/$REPO_NAME" ]; then
+            echo "::error::refusing to mint a release token: repo name '$REPO_NAME' vs $GITHUB_REPOSITORY"
+            exit 1
+          fi
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: token
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write # tags and releases
+          permission-pull-requests: read # find the release-please PR
+
+      - name: Check the tools ref
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so cmd/release can't be fetched"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Tag and create the prerelease
+        id: cut
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PKG: ${{ inputs.path }}
+          PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          set -o pipefail # a failed gh api must not look like "no tags yet"
+          go build -o "$RUNNER_TEMP/release" ./cmd/release
+          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base "$DEFAULT_BRANCH" --json headRefName \
+            --jq '[.[].headRefName | select(startswith("release-please--branches--"))] | join(" ")')"
+          read -r -a heads <<< "$prs"
+          if [ "${#heads[@]}" -ne 1 ]; then
+            echo "::error::want exactly one open release-please PR into $DEFAULT_BRANCH, found ${#heads[@]}: $prs"
+            exit 1
+          fi
+          version="$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$GITHUB_REPOSITORY/contents/.release-please-manifest.json?ref=${heads[0]}" | jq -r --arg p "$PKG" '.[$p] // empty')"
+          if [ -z "$version" ]; then
+            echo "::error::no version for package '$PKG' in ${heads[0]}'s .release-please-manifest.json"
+            exit 1
+          fi
+          tag="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$PREFIX$version" \
+            --jq '.[].ref | sub("^refs/tags/"; "")' | "$RUNNER_TEMP/release" next-rc --prefix "$PREFIX" --version "$version")"
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$DEFAULT_BRANCH" --jq .sha)"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$sha" \
+            --prerelease --latest=false --title "$tag" --generate-notes
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Created prerelease $tag at $sha (from ${heads[0]})." | tee -a "$GITHUB_STEP_SUMMARY"
