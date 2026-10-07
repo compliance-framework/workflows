@@ -1,2 +1,5 @@
 lisa-addressed:
 - docs/plugin-probe.md: the probe executes plugins and gooci's untar doesn't confine paths, so probe only trusted artifacts.
+
+lisa-selfreview:
+Self-review pass 2 (whole stack, after the fixes): no new findings; approve. Size: PR1 ~780, PR2 ~460, PR3 ~370 counted lines (go.sum excluded).
