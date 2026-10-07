@@ -15,7 +15,8 @@ import (
 type Reader interface {
 	// InstallationRepos lists the "owner/name" repos the token can reach.
 	InstallationRepos(ctx context.Context) ([]string, error)
-	MergeSettings(ctx context.Context, repo string) (MergeSettings, error)
+	// MergeSettings returns the merge settings; a nil field is one the token can't read.
+	MergeSettings(ctx context.Context, repo string) (CurrentMergeSettings, error)
 	VulnerabilityAlerts(ctx context.Context, repo string) (bool, error)
 	SecurityUpdates(ctx context.Context, repo string) (bool, error)
 	// Rulesets returns the repo's own rulesets (not inherited ones) by ID.
@@ -47,10 +48,19 @@ func (c Change) String() string { return fmt.Sprintf("%s: %s -> %s", c.Key, c.Cu
 // unset stands for a value the repo doesn't have.
 const unset = "(unset)"
 
+// unknown stands for a merge setting the token can't read.
+const unknown = "unknown (not readable with Administration read)"
+
+// unknownHint explains unknown settings once, under the totals.
+const unknownHint = "unknown: GitHub hides merge settings from a token with Administration read; apply writes the full desired merge settings"
+
 // Plan is what bringing one repo to the desired state takes.
 type Plan struct {
 	Repo    string
 	Changes []Change
+	// Unknown are merge settings the token can't read, so whether they differ isn't known. They
+	// are not counted as changes, but Apply writes them.
+	Unknown []Change
 
 	merge               *MergeSettings
 	vulnerabilityAlerts *bool
@@ -70,8 +80,29 @@ func PlanRepo(ctx context.Context, r Reader, repo string, d Desired) (*Plan, err
 	if err != nil {
 		return nil, err
 	}
-	if c := diff("repo", toMap(merge), toMap(d.Merge)); len(c) > 0 {
-		p.Changes = append(p.Changes, c...)
+	// Compare only the fields the token could read; the others are unknown.
+	cur, want := toMap(merge), toMap(d.Merge)
+	readable, hidden := map[string]any{}, map[string]any{}
+	for k, v := range want {
+		if _, ok := cur[k]; ok {
+			readable[k] = v
+		} else {
+			hidden[k] = v
+		}
+	}
+	// diff treats an empty map as one leaf, so skip it for an empty side.
+	if len(readable) > 0 {
+		p.Changes = append(p.Changes, diff("repo", cur, readable)...)
+	}
+	if len(hidden) > 0 {
+		for _, c := range diff("repo", nil, hidden) {
+			c.Current = unknown
+			p.Unknown = append(p.Unknown, c)
+		}
+	}
+	if len(p.Changes) > 0 || len(p.Unknown) > 0 {
+		// The PATCH sends every managed merge field, so it is the same whether some or all of
+		// them differ or are unknown, and repeating it is harmless.
 		p.merge = &d.Merge
 	}
 
@@ -196,7 +227,7 @@ func Run(ctx context.Context, gh Client, o Options, out io.Writer) error {
 	}
 
 	var errs []error
-	total, changed := 0, 0
+	total, unknowns, changed := 0, 0, 0
 	for _, repo := range full {
 		p, err := PlanRepo(ctx, gh, repo, o.Desired)
 		if err != nil {
@@ -204,14 +235,15 @@ func Run(ctx context.Context, gh Client, o Options, out io.Writer) error {
 			errs = append(errs, fmt.Errorf("%s: %w", repo, err))
 			continue
 		}
-		if len(p.Changes) == 0 {
+		if len(p.Changes) == 0 && len(p.Unknown) == 0 {
 			fmt.Fprintf(out, "%s: up to date\n", repo)
 			continue
 		}
 		total += len(p.Changes)
+		unknowns += len(p.Unknown)
 		changed++
-		fmt.Fprintf(out, "%s: %d change(s)\n", repo, len(p.Changes))
-		for _, c := range p.Changes {
+		fmt.Fprintf(out, "%s: %d change(s)%s\n", repo, len(p.Changes), unknownCount(len(p.Unknown)))
+		for _, c := range slices.Concat(p.Changes, p.Unknown) {
 			fmt.Fprintf(out, "  %s\n", c)
 		}
 		if !o.Apply {
@@ -228,8 +260,19 @@ func Run(ctx context.Context, gh Client, o Options, out io.Writer) error {
 	if o.Apply {
 		mode = "applied"
 	}
-	fmt.Fprintf(out, "%d change(s) in %d of %d repo(s) (%s)\n", total, changed, len(full), mode)
+	fmt.Fprintf(out, "%d change(s)%s in %d of %d repo(s) (%s)\n", total, unknownCount(unknowns), changed, len(full), mode)
+	if unknowns > 0 {
+		fmt.Fprintln(out, unknownHint)
+	}
 	return errors.Join(errs...)
+}
+
+// unknownCount is ", N unknown", or "" for none.
+func unknownCount(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d unknown", n)
 }
 
 // diff flattens current and desired into dotted keys and returns the keys whose values differ,

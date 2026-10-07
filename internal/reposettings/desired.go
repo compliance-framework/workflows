@@ -33,6 +33,20 @@ type MergeSettings struct {
 	DeleteBranchOnMerge      bool   `json:"delete_branch_on_merge"`
 }
 
+// CurrentMergeSettings are MergeSettings as GET /repos/{owner}/{repo} returns them. A nil field is
+// one the response left out (or sent as null): GitHub omits the merge settings for a token with
+// Administration read only, so nil means unknown, not false or "". The omitempty tags keep unknown
+// fields out of toMap.
+type CurrentMergeSettings struct {
+	AllowSquashMerge         *bool   `json:"allow_squash_merge,omitempty"`
+	AllowMergeCommit         *bool   `json:"allow_merge_commit,omitempty"`
+	AllowRebaseMerge         *bool   `json:"allow_rebase_merge,omitempty"`
+	SquashMergeCommitTitle   *string `json:"squash_merge_commit_title,omitempty"`
+	SquashMergeCommitMessage *string `json:"squash_merge_commit_message,omitempty"`
+	AllowAutoMerge           *bool   `json:"allow_auto_merge,omitempty"`
+	DeleteBranchOnMerge      *bool   `json:"delete_branch_on_merge,omitempty"`
+}
+
 // Ruleset is the part of a repository ruleset this tool manages. Decoding drops the read-only
 // fields GitHub adds (id, source, links, ...).
 type Ruleset struct {
