@@ -1,0 +1,8 @@
+lisa-addressed:
+---
+Comment (.github/workflows/ci-helm.yml:116):
+`ct lint` never reads the caller's `ct.yaml`. `helm/chart-testing-action` sets `CT_CONFIG_DIR` to its install dir, and ct v3.14.0 (`pkg/config/config.go` L103-110) then searches only that dir. The run has no `Using config file:` line, so `validate-maintainers: false` was ignored and both mock charts failed with "chart doesn't have maintainers". Fix: pass `--config ct.yaml` when it exists (keep `--check-version-increment=false` on the command line), e.g. `cfg=(); [ -f ct.yaml ] && cfg=(--config ct.yaml); ct lint "${cfg[@]}" --all --chart-dirs "$CHARTS_DIR" --check-version-increment=false`. Also correct the comment on L113 and the README row (L267), and add a test covering the config flag (with and without ct.yaml) like the other step tests.
+Replies:
+**lisa implementation guidance:** Fix on ra/w1-s1-t03c-ci-ui-helm-action (#7, which introduced ci-helm.yml): in the ct job's `ct lint` step, build `cfg=()`, set `cfg=(--config ct.yaml)` when `ct.yaml` exists in the checkout, and run `ct lint "${cfg[@]}" --all --chart-dirs "$CHARTS_DIR" --check-version-increment=false` (the flag stays on the command line so a repo ct.yaml cannot turn the check back on). Rewrite the step comment to say chart-testing-action points CT_CONFIG_DIR at its install dir, so ct only reads the repo's ct.yaml via --config. Update the README `ct` row likewise. Add TestCtLint in internal/ciworkflows/steps_test.go: fake `ct` on PATH printing its args one per line; assert args without ct.yaml and with an (empty) ct.yaml file. Then stack rebase #8/#9.
+
+<!-- lisa-guidance-posted -->
