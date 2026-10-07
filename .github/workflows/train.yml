@@ -37,12 +37,6 @@ on:
 permissions:
   contents: read
 
-# One run at a time. GitHub keeps one pending run and cancels older pending ones; every run
-# reads the state and the new comments afresh, so a dropped pending run loses nothing.
-concurrency:
-  group: train
-  cancel-in-progress: false
-
 jobs:
   train:
     name: train
@@ -55,6 +49,12 @@ jobs:
         github.event.comment.user.type != 'Bot')
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # One run at a time, at the job level so that skipped runs (other comments) don't queue.
+    # GitHub keeps one pending run and cancels older pending ones; every run reads the state and
+    # the new comments afresh, so a dropped pending run loses nothing.
+    concurrency:
+      group: train
+      cancel-in-progress: false
     permissions:
       contents: read
       issues: write # the tracking issue, with GITHUB_TOKEN
@@ -78,6 +78,7 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'schedule' && vars.TRAIN_LIVE != 'true' || github.event_name == 'workflow_dispatch' && inputs.dry_run }}
           PAYLOAD: ${{ toJSON(github.event.client_payload) }}
         run: |
+          set -o pipefail
           case "$EVENT/$SCHEDULE" in
             "schedule/0 8 1-7 * *") mode=start ;;
             workflow_dispatch/*) mode="$ACTION" ;;

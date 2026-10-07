@@ -12,7 +12,7 @@ train bumps its internal dependencies to what the earlier stages released, with
 | --- | --- |
 | `waiting` | An earlier stage isn't done. |
 | `bumping` | Runs `ccf-bump --repo <repo> --mode train --set <dep>=<version>... --pr` with every version the earlier stages released, then merges the bump PR once its checks pass. No release in an earlier stage, or nothing to move, skips the bump. |
-| `release-pr` | Waits until release-please's PR (`release-please--branches--<default branch>`) contains the default branch's head. No release PR after release-please's run on that head succeeded means nothing to release: the repo is `released` with no new version. |
+| `release-pr` | Waits for release-please's run on the default branch's head (the workflow file `release-please.yml`), then takes its PR (`release-please--branches--<default branch>`). No PR means nothing to release: the repo is `released` with no new version. The run is the signal because release-please leaves its PR behind the branch for commits that release nothing (`ci:`, `chore:`). |
 | `merging` | Merges the release PR (squash, as ccf-release-bot, the `ccf-review` bypass actor) once its checks pass, including `ci / required`, and unless `version-guard` would flag it: a major increase without the `release:major-approved` label. |
 | `publishing` | Waits for release-please's tags on the merge commit and for every release workflow run of each tag (`event: release`) to succeed. |
 | `released` | Done. |
@@ -61,7 +61,7 @@ The train posts to `vars.SLACK_CHANNEL_RELEASES`: a parent message when a train 
 is kept in the state), then thread replies when a repo becomes blocked or needs a human (once per
 cause), when a run fails, when a repo is skipped and when the train finishes or is aborted. A
 train still open when a new month starts gets one message in the channel itself, on the first
-scheduled run of that month. Without `SLACK_BOT_TOKEN` messages are only printed.
+run of that month. Without `SLACK_BOT_TOKEN` messages are only printed.
 
 ## Dry run
 
@@ -81,7 +81,8 @@ that needs the planned tag to exist (a pseudo-version, an OPA version); the plan
 | `issue_comment` | `reconcile`, for a comment starting with `/` on an open train's issue. |
 | `workflow_dispatch` | `action` (`start` or `reconcile`), `manifest` (`repos.mock.yaml` or `repos.yaml`), `repos` and `dry_run` (default `true`). |
 
-Runs share one concurrency group. A run with an open train keeps reconciling every minute for up
+Runs share one concurrency group (at the job level, so comments that aren't commands don't
+queue). A run with an open train keeps reconciling every minute for up
 to 30 minutes while a repo waits on GitHub (release-please, CI, a release workflow), and stops
 early once every repo left is held for a human.
 
