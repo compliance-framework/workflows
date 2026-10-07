@@ -5,3 +5,7 @@ lisa-design:
 - ci-go-service: extra make targets run in their own `make` job (api's test-integration is slow, and api's current CI runs it as a separate job); the job is unconditional and no-ops with no targets, because `required` treats a skipped job as a failure.
 - ci-go-service: `prepare-command` (not "pre-test-command") runs before go vet/test/build and before the make targets, since go vet also compiles the tests. It is not run in the lint job, which must stay identical across Go kinds (api commits its swag docs, so lint compiles without it).
 - ci-go-lib: exactly the spec's checks (golangci-lint, gofmt, go test ./..., goreleaser check); no go vet / go mod tidy / -race, which the spec reserves for services.
+
+lisa-selfreview:
+pass 1 (strict): verdict approve, no fix-worthy findings. Checked CORE-CI-001 (all actions SHA-pinned, permissions: {} top-level, persist-credentials: false), CORE-SEC-003 (prepare-command/make-targets come from the caller's workflow file and reach the shell via env, not ${{ }} interpolation), CORE-TEST-001 (make loop, required needs, shared copies tested; Prepare step is a one-line passthrough), CORE-DUP-001 (copied lint/gofmt/tidy/goreleaser/required pinned by tests), CORE-SIZE-001 (535+15 lines after the split).
+Question (not fixed): the shared lint job has timeout-minutes: 15; api's current CI runs golangci-lint with --timeout=30m. If api's lint is slow uncached, the lint job (shared with ci-go-plugin.yml, T03a) may need a longer timeout.
