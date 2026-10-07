@@ -1,0 +1,40 @@
+# Publishes the ui's release image (kind ui): release-go-image.yml's tags, native amd64 and
+# arm64 builds, and release-finished.yml tail, with the ui's single image by default. Call it
+# on `release: published` with `secrets: inherit`; see README.
+name: release-ui
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: 'JSON list of {"name", "dockerfile", "context"}; name defaults to the repo name, dockerfile to Dockerfile, context to .'
+        type: string
+        default: '[{}]'
+      tag-prefix:
+        description: "Prefix of the release tags"
+        type: string
+        default: v
+    secrets:
+      RELEASE_BOT_APP_ID:
+        description: "ccf-release-bot App ID"
+        required: true
+      RELEASE_BOT_PRIVATE_KEY:
+        description: "ccf-release-bot private key"
+        required: true
+
+permissions: {}
+
+jobs:
+  release:
+    name: release
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/release-go-image.yml
+    with:
+      images: ${{ inputs.images }}
+      tag-prefix: ${{ inputs.tag-prefix }}
+    permissions:
+      contents: read
+      packages: write
+    secrets:
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}

@@ -5,6 +5,8 @@
 //	release check version-guard --base base.json [--head .release-please-manifest.json]
 //	release next-rc --version X.Y.Z [--prefix v]    (existing tags on stdin, one per line)
 //	release preview-tags [--on-main=true|false]     (appends tags=... to $GITHUB_OUTPUT)
+//	release release-tags --tag T [--prefix v] [--style image|artifact]
+//	                                               (appends tags=... and final=... to $GITHUB_OUTPUT)
 //
 // version-guard and preview-tags read the PR from $GITHUB_EVENT_PATH.
 package main
@@ -30,7 +32,7 @@ func main() {
 	}
 }
 
-const usage = "usage: release check internal-deps|module-path|version-guard [flags] | next-rc [flags] | preview-tags [flags]"
+const usage = "usage: release check internal-deps|module-path|version-guard [flags] | next-rc [flags] | preview-tags [flags] | release-tags [flags]"
 
 func run(args []string, getenv func(string) string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 0 {
@@ -52,6 +54,15 @@ func run(args []string, getenv func(string) string, stdin io.Reader, stdout io.W
 			return err
 		}
 		return previewTags(*onMain, getenv, stdout)
+	case "release-tags":
+		fs := flag.NewFlagSet("release release-tags", flag.ContinueOnError)
+		tag := fs.String("tag", "", "the release's git tag (required)")
+		prefix := fs.String("prefix", "v", "tag prefix")
+		style := fs.String("style", release.ImageTags, "registry tag style: image or artifact")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return releaseTags(*tag, *prefix, *style, getenv, stdout)
 	}
 	if len(args) < 2 || args[0] != "check" {
 		return errors.New(usage)
@@ -182,6 +193,24 @@ func previewTags(onMain bool, getenv func(string) string, stdout io.Writer) erro
 	} else {
 		fmt.Fprintln(stdout, "Preview tags: "+strings.Join(tags, " "))
 	}
+	return writeOutputs(getenv, "tags="+strings.Join(tags, " "))
+}
+
+func releaseTags(tag, prefix, style string, getenv func(string) string, stdout io.Writer) error {
+	tags, final, err := release.ReleaseTags(tag, prefix, style)
+	if err != nil {
+		return err
+	}
+	kind := "pre-release"
+	if final {
+		kind = "final release"
+	}
+	fmt.Fprintf(stdout, "Release tags for %s (%s): %s\n", tag, kind, strings.Join(tags, " "))
+	return writeOutputs(getenv, "tags="+strings.Join(tags, " "), fmt.Sprintf("final=%t", final))
+}
+
+// writeOutputs appends name=value lines to $GITHUB_OUTPUT.
+func writeOutputs(getenv func(string) string, lines ...string) error {
 	out := getenv("GITHUB_OUTPUT")
 	if out == "" {
 		return errors.New("GITHUB_OUTPUT is not set")
@@ -190,7 +219,7 @@ func previewTags(onMain bool, getenv func(string) string, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(f, "tags=%s\n", strings.Join(tags, " ")); err != nil {
+	if _, err := fmt.Fprintln(f, strings.Join(lines, "\n")); err != nil {
 		f.Close()
 		return err
 	}

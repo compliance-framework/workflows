@@ -1,6 +1,7 @@
-# Builds the caller's images and pushes them to ghcr.io/<owner>/<name>:<tag> for each given tag,
-# with GITHUB_TOKEN. Called by preview.yml (and by the release workflows); callers grant
-# contents: read and packages: write. Builds linux/amd64 only for now.
+# Builds the caller's images natively for linux/amd64 (ubuntu-latest) and linux/arm64
+# (ubuntu-24.04-arm), pushes each by digest, then merges each image's two into one manifest
+# list at ghcr.io/<owner>/<name>:<tag> for each given tag, with GITHUB_TOKEN. Called by
+# preview.yml and the release workflows; callers grant contents: read and packages: write.
 name: publish-image
 
 on:
@@ -18,9 +19,9 @@ on:
 permissions: {}
 
 jobs:
-  publish:
-    name: publish (${{ matrix.image.name || github.event.repository.name }})
-    runs-on: ubuntu-latest
+  build:
+    name: build (${{ matrix.image.name || github.event.repository.name }}, ${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -29,10 +30,63 @@ jobs:
       fail-fast: false
       matrix:
         image: ${{ fromJSON(inputs.images) }}
+        # A native runner for each architecture: no QEMU emulation.
+        platform:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Choose the image name
+        id: image
+        env:
+          OWNER: ${{ github.repository_owner }}
+          NAME: ${{ matrix.image.name || github.event.repository.name }}
+        run: echo "name=ghcr.io/${OWNER,,}/${NAME,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
+        with:
+          context: ${{ matrix.image.context || '.' }}
+          file: ${{ matrix.image.dockerfile || 'Dockerfile' }}
+          platforms: linux/${{ matrix.platform.arch }}
+          # Pushed by digest only: the merge job tags the manifest list.
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Save the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-${{ matrix.image.name || github.event.repository.name }}-${{ matrix.platform.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true # a re-run of the job replaces its digest
+
+  merge:
+    name: merge (${{ matrix.image.name || github.event.repository.name }})
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(inputs.images) }}
+    steps:
       - name: Choose the image references
         id: refs
         env:
@@ -47,27 +101,48 @@ jobs:
               echo "::error::invalid image tag '$tag'"
               exit 1
             fi
-            refs="$refs$image:$tag,"
+            refs="$refs $image:$tag"
           done
           if [ -z "$refs" ]; then
             echo "::error::no tags to publish"
             exit 1
           fi
-          echo "Publishing ${refs%,}"
-          echo "refs=${refs%,}" >> "$GITHUB_OUTPUT"
+          echo "Publishing$refs"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "refs=${refs# }" >> "$GITHUB_OUTPUT"
+      # One directory per artifact (digests-<name>-<arch>); the merge picks this image's two.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: ${{ matrix.image.context || '.' }}
-          file: ${{ matrix.image.dockerfile || 'Dockerfile' }}
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.refs.outputs.refs }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Merge the manifests
+        env:
+          NAME: ${{ matrix.image.name || github.event.repository.name }}
+          IMAGE: ${{ steps.refs.outputs.image }}
+          REFS: ${{ steps.refs.outputs.refs }}
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          args=()
+          for ref in $REFS; do
+            args+=(--tag "$ref")
+          done
+          for arch in amd64 arm64; do
+            digests=("$RUNNER_TEMP/digests/digests-$NAME-$arch"/*)
+            if [ "${#digests[@]}" -ne 1 ] || [ ! -f "${digests[0]}" ]; then
+              echo "::error::want one $arch digest for $NAME, found: ${digests[*]}"
+              exit 1
+            fi
+            args+=("$IMAGE@sha256:${digests[0]##*/}")
+          done
+          # GHCR links a multi-arch package to its repo through the index's source annotation.
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.source=$SOURCE" \
+            --annotation "index:org.opencontainers.image.revision=$GITHUB_SHA" \
+            "${args[@]}"
+          docker buildx imagetools inspect "${REFS%% *}"
