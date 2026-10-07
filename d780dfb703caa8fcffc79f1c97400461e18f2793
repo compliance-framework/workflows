@@ -1,0 +1,5 @@
+lisa-addressed:
+pass 1: README wording for on-main as an opt-out.
+
+lisa-selfreview:
+pass 2: approve, no findings (actionlint clean; go vet; go test ./... locally and in golang:1.26 for the bash-5 step tests).
