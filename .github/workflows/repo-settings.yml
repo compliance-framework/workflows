@@ -1,0 +1,87 @@
+name: repo-settings
+
+# Brings the manifest repos' merge settings, security settings and rulesets to the desired state
+# (internal/reposettings). Prints a per-repo diff; writes only with apply: true, which a human runs
+# after granting ccf-repo-admin Administration write (README: "Repo settings").
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Manifest to read the repos from
+        type: choice
+        options: [repos.yaml, repos.mock.yaml]
+        default: repos.yaml
+      repos:
+        description: Comma-separated subset of repos (default every repo with release true)
+        type: string
+        default: ""
+      apply:
+        description: Write the changes (default is a dry run)
+        type: boolean
+        default: false
+      release-bot-app-id:
+        description: ccf-release-bot app ID, the ccf-review bypass actor (default vars.RELEASE_BOT_APP_ID)
+        type: string
+        default: ""
+      required-check:
+        description: Status check context the ccf-required ruleset requires
+        type: string
+        default: ci / required
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-settings
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Only apply from main
+        if: inputs.apply && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::apply: true runs only from main (this run is on $GITHUB_REF)"
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Select repos
+        id: select
+        env:
+          MANIFEST: ${{ inputs.manifest }}
+          REPOS: ${{ inputs.repos }}
+        run: |
+          repos="$(go run ./cmd/repo-settings list --manifest "$MANIFEST" --repos "$REPOS")"
+          # An empty list would mint a token for every repo the app is installed on (all of them).
+          if [ -z "$repos" ]; then
+            echo "::error::no repos selected"
+            exit 1
+          fi
+          echo "repos=$repos" >> "$GITHUB_OUTPUT"
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: token
+        with:
+          app-id: ${{ secrets.REPO_ADMIN_APP_ID }}
+          private-key: ${{ secrets.REPO_ADMIN_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ steps.select.outputs.repos }}
+          permission-administration: ${{ inputs.apply && 'write' || 'read' }}
+      - name: Sync repo settings
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          MANIFEST: ${{ inputs.manifest }}
+          REPOS: ${{ steps.select.outputs.repos }}
+          APPLY: ${{ inputs.apply }}
+          BYPASS_APP_ID: ${{ inputs.release-bot-app-id || vars.RELEASE_BOT_APP_ID }}
+          REQUIRED_CHECK: ${{ inputs.required-check }}
+        run: |
+          go run ./cmd/repo-settings sync --manifest "$MANIFEST" --repos "$REPOS" --apply="$APPLY" \
+            --bypass-app-id "$BYPASS_APP_ID" --required-check "$REQUIRED_CHECK"

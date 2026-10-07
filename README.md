@@ -9,7 +9,8 @@ This repo is the single home for:
 - **Reusable GitHub Actions workflows** (`on: workflow_call`) that every CCF repo calls for CI and
   releases, so the rules live in one place instead of being copied into each repo.
 - **Go tools** that drive releases across repos: `ccf-bump` (dependency bumps), `train` (the
-  release train), `plugin-probe` and `repo-settings`. Later tasks add them.
+  release train), `plugin-probe` and `repo-settings` (see [Repo settings](#repo-settings)).
+  Later tasks add the others.
 - **The repo manifest** (`repos.yaml`), which lists the repos these workflows and tools act on,
   with each repo's kind and dependencies.
 
@@ -24,8 +25,9 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
+| `internal/reposettings` | The desired repo settings and rulesets, the current-vs-desired diff, and the GitHub client [`repo-settings.yml`](#repo-settings) uses. |
 | `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag, the preview tags, the release tags and the chart a helm release tag is for. |
-| `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`; `cmd/release` runs the `internal/release` rules for the release workflows. |
+| `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`; `cmd/release` runs the `internal/release` rules for the release workflows; `cmd/repo-settings` syncs repo settings. |
 | `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, the `ci-<kind>.yml` kind CI workflows and the [release workflows](#release-workflows)). |
 | `release-please/defaults.json` | The release-please settings every repo's `release-please-config.json` copies. |
 | `.golangci.yml`, `.regal/config.yaml` | Shared lint base configs, used by the CI workflows when the calling repo has none. |
@@ -655,6 +657,71 @@ The tail of every release workflow, called as a job with `needs` on every other 
 Inputs: `needs` (the caller's `toJSON(needs)`) and `images` (the packages to prune, as for
 `publish-image.yml`; only `name` is read). Secrets: `RELEASE_BOT_APP_ID` and
 `RELEASE_BOT_PRIVATE_KEY`. Permissions: `packages: write`.
+
+## Repo settings
+
+`repo-settings.yml` (`workflow_dispatch`, run in this repo) brings each repo's settings to one
+desired state, defined in `internal/reposettings`:
+
+- **Merges**: squash only, with the PR title and body as the commit title and message
+  (`PR_TITLE`, `PR_BODY`); auto-merge allowed; head branches deleted on merge.
+- **Security**: Dependabot alerts on; Dependabot security updates off (Renovate handles dependency updates).
+- **Ruleset `ccf-required`**, on the default branch, with no bypass: a pull request is required,
+  the status check `ci / required` must pass (reported by GitHub Actions, app 15368), and force
+  pushes and deletion are blocked.
+- **Ruleset `ccf-review`**, on the default branch: one approving review, bypassed by the
+  `ccf-release-bot` app only (its release and Renovate PRs).
+
+Rulesets are matched by name; other rulesets are left alone. Settings outside this list are not
+read or changed. A repo's required check exists once it calls the shared CI with a `required` job
+(the caller job is named `ci`, so the check is `ci / required`, as on the mocks); until then
+`ccf-required` blocks its merges.
+
+Inputs:
+
+| Input | Default | What |
+| --- | --- | --- |
+| `manifest` | `repos.yaml` | `repos.mock.yaml` for the mocks. |
+| `repos` | every repo with `release: true` | Comma-separated subset; each must be in the manifest with `release: true`. |
+| `apply` | `false` | `false` prints the diff and writes nothing; `true` writes it (from `main` only). |
+| `release-bot-app-id` | org variable `RELEASE_BOT_APP_ID` | `ccf-release-bot`'s app ID, the `ccf-review` bypass actor. Set the org variable (Settings, Secrets and variables, Actions, Variables) to the app's ID from its settings page, or pass the input; the run fails if both are empty. |
+| `required-check` | `ci / required` | The status check context `ccf-required` requires. |
+
+Secrets: `REPO_ADMIN_APP_ID` and `REPO_ADMIN_PRIVATE_KEY` (`ccf-repo-admin`). The app is installed
+on every org repo, so the job lists the selected repos first and mints a token scoped to exactly
+those (`repositories:`, with Administration `read`, or `write` when applying). It refuses an empty
+selection, and the tool checks the token reaches no other repo before reading anything.
+
+Output, per repo, is one line per differing setting, `key: current -> desired`, then a total:
+
+```console
+compliance-framework/mock-api: 28 change(s)
+  repo.allow_merge_commit: true -> false
+  security.dependabot_security_updates: enabled -> disabled
+  ruleset[ccf-required]: missing -> create
+  ruleset[ccf-review].rules.pull_request.required_approving_review_count: 0 -> 1
+  ...
+compliance-framework/mock-ui: up to date
+28 change(s) in 1 of 2 repo(s) (dry run, nothing written; re-run with apply to write)
+```
+
+How to run it:
+
+1. **Dry run** (anyone, any time): Actions, `repo-settings`, Run workflow, with `apply` off. Or
+   `gh workflow run repo-settings.yml -f manifest=repos.mock.yaml`. `ccf-repo-admin` has
+   Administration **read** only, so a dry run can't change anything. Review the diff.
+2. **Apply** (a human, never an agent): in the `ccf-repo-admin` app settings, temporarily grant
+   **Administration: Read and write** and accept the new permission on the org installation. Run
+   the workflow from `main` with the same inputs and `apply` on. Re-run the dry run: every repo
+   should be `up to date` (the sync is idempotent). Then set Administration back to **read**.
+   Do the mocks first.
+
+Locally, the same tool runs against a token in `GH_TOKEN` (a personal token isn't an
+installation token, so pass `--check-token-scope=false`):
+
+```sh
+go run ./cmd/repo-settings sync --manifest repos.mock.yaml --repos mock-api --bypass-app-id <id> --check-token-scope=false
+```
 
 ## Development
 
