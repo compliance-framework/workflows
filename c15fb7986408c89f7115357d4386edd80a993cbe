@@ -1,0 +1,16 @@
+lisa-design:
+- The preset is inlined into the generated global config (cmd/renovate-config config) instead of `extends: github>compliance-framework/workflows//renovate/default`: the run uses the preset at the ref it runs from, and needs no read of this repo with a token scoped to other repos. Repos' own renovate.json still merges on top.
+- Repo list = every repo in the manifest (not only release: true), optional `repos` subset; empty selection fails before minting a token (an unscoped token would reach every org repo).
+- OPA is disabled everywhere except api/mock-api (a superset of "agent and policy repos": plugins also follow api via ccf-bump); in api it is its own `renovate/opa` group, automerge false.
+- Internal packages off also covers `compliance-framework/**` (actions and reusable workflows such as this repo), since ccf-bump owns the `@v1` refs; spec named only the github.com/ and ghcr.io/ prefixes.
+- ccf-release-bot lacks Commit statuses; the generated config sets statusCheckWhen.minimumReleaseAge "never" (internalChecksFilter strict makes the status redundant). Reads of statuses work because all repos are public.
+- Dry runs mint a read-only token (no workflows permission); live runs get contents/PRs/issues/workflows write. dry_run and manifest fallbacks in job env cover scheduled runs (no inputs).
+- Grouped PR commit type: Renovate picks the highest type among a group's upgrades (fix > chore), so a group with any runtime dep is fix(deps). Runtime = require/dependencies + Dockerfile final stage + Go toolchain directive.
+- Renovate pinned to 44.145.1 via renovate-version (action default is the floating '44').
+
+lisa-selfreview:
+Pass 1 (strict), verdict request_changes:
+- [should-fix CORE-DUP-001 1a7343b88942] docs/renovate.md repeats the pinned Renovate version from renovate.yml.
+- [should-fix CORE-DUP-001 c77fdfefaea9] internal/renovate SelectRepos mirrors cmd/repo-settings selectRepos (without the release filter).
+- [nit vuln-pr-shape-undocumented 1a963a769f95] docs don't say vulnerability fixes get their own [SECURITY] PRs outside the group and limits.
+- [question automerge-vs-ccf-review afff65f87bf4] platformAutomerge vs the ccf-review approval ruleset (bot bypass may not apply to auto-merge) -> PR body open question.

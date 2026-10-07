@@ -1,0 +1,8 @@
+lisa-addressed:
+Self-review pass 1:
+- [CORE-DUP-001 1a7343b88942] docs/renovate.md no longer repeats the Renovate version; it points at renovate.yml's renovate-version input.
+- [nit 1a963a769f95] docs/renovate.md: vulnerability fixes get their own [SECURITY] PR outside the group and limits, and auto-merge unless major.
+Dismissed: [CORE-DUP-001 c77fdfefaea9] SelectRepos vs repo-settings selectRepos: different selection rule (all repos vs release: true), and the stage-3 preamble asks parallel PRs not to refactor shared code.
+
+lisa-selfreview:
+Pass 2 (strict): one nit: the pass-1 doc line said vulnerability PRs skip "the PR limits"; Renovate's vulnerabilityAlerts default only lifts prConcurrentLimit (prHourlyLimit still applies). Reworded to "the concurrent-PR limit". No other findings; verdict approve after this fix.
