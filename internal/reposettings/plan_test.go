@@ -12,7 +12,9 @@ import (
 
 // fakeRepo is one repo's state in fakeGitHub.
 type fakeRepo struct {
-	merge           MergeSettings
+	merge MergeSettings
+	// hideMerge reads the merge settings as a token with Administration read does: all unknown.
+	hideMerge       bool
 	alerts, updates bool
 	rulesets        map[int64]Ruleset
 }
@@ -44,12 +46,15 @@ func (f *fakeGitHub) InstallationRepos(context.Context) ([]string, error) {
 	return f.installation, nil
 }
 
-func (f *fakeGitHub) MergeSettings(_ context.Context, repo string) (MergeSettings, error) {
+func (f *fakeGitHub) MergeSettings(_ context.Context, repo string) (CurrentMergeSettings, error) {
 	r, err := f.repo("merge", repo, false)
-	if err != nil {
-		return MergeSettings{}, err
+	if err != nil || r.hideMerge {
+		return CurrentMergeSettings{}, err
 	}
-	return r.merge, nil
+	var s CurrentMergeSettings
+	b, _ := json.Marshal(r.merge)
+	_ = json.Unmarshal(b, &s)
+	return s, nil
 }
 
 func (f *fakeGitHub) VulnerabilityAlerts(_ context.Context, repo string) (bool, error) {
@@ -288,5 +293,98 @@ func TestRunContinuesAfterRepoError(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "o/a: applied") {
 		t.Errorf("o/a was not applied:\n%s", out.String())
+	}
+}
+
+func changeStrings(cs []Change) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.String()
+	}
+	return out
+}
+
+func TestPlanRepoUnknownMergeSettings(t *testing.T) {
+	visible, hidden := newFake("a"), newFake("a")
+	hidden.repos["o/a"].hideMerge = true
+	pv, err := PlanRepo(context.Background(), visible, "o/a", desired(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ph, err := PlanRepo(context.Background(), hidden, "o/a", desired(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"repo.allow_auto_merge: unknown (not readable with Administration read) -> true",
+		"repo.allow_merge_commit: unknown (not readable with Administration read) -> false",
+		"repo.allow_rebase_merge: unknown (not readable with Administration read) -> false",
+		"repo.allow_squash_merge: unknown (not readable with Administration read) -> true",
+		"repo.delete_branch_on_merge: unknown (not readable with Administration read) -> true",
+		`repo.squash_merge_commit_message: unknown (not readable with Administration read) -> "PR_BODY"`,
+		`repo.squash_merge_commit_title: unknown (not readable with Administration read) -> "PR_TITLE"`,
+	}
+	if got := changeStrings(ph.Unknown); !slices.Equal(got, want) {
+		t.Errorf("unknown = %v, want %v", got, want)
+	}
+	if len(pv.Unknown) > 0 {
+		t.Errorf("readable settings reported unknown: %v", pv.Unknown)
+	}
+	// Unknowns are not changes; the security and ruleset changes are the same either way.
+	var rest []string
+	for _, c := range changeStrings(pv.Changes) {
+		if !strings.HasPrefix(c, "repo.") {
+			rest = append(rest, c)
+		}
+	}
+	if got := changeStrings(ph.Changes); !slices.Equal(got, rest) {
+		t.Errorf("changes with hidden merge settings = %v, want %v", got, rest)
+	}
+	if ph.merge == nil || *ph.merge != desired(t).Merge {
+		t.Errorf("merge write = %v, want the full desired merge settings", ph.merge)
+	}
+}
+
+func TestRunApplyWritesUnknownMergeSettings(t *testing.T) {
+	f := newFake("a")
+	r := f.repos["o/a"]
+	r.merge, r.hideMerge = desired(t).Merge, true // already right, but the token can't see it
+
+	var out bytes.Buffer
+	opts := Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t)}
+	if err := Run(context.Background(), f, opts, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"o/a: 22 change(s), 7 unknown", "22 change(s), 7 unknown in 1 of 1 repo(s) (dry run", unknownHint} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+
+	opts.Apply = true
+	if err := Run(context.Background(), f, opts, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writes) == 0 || f.writes[0] != "PATCH repo o/a" {
+		t.Fatalf("writes = %v, want the merge settings patched first", f.writes)
+	}
+
+	// Still hidden: everything else is up to date, the merge settings stay unknown and are written again.
+	f.writes, out = nil, bytes.Buffer{}
+	if err := Run(context.Background(), f, opts, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.writes, []string{"PATCH repo o/a"}) || !strings.Contains(out.String(), "o/a: 0 change(s), 7 unknown") {
+		t.Errorf("writes = %v, output:\n%s", f.writes, out.String())
+	}
+
+	// Readable (a token with Administration write): up to date, no writes.
+	r.hideMerge = false
+	f.writes, out = nil, bytes.Buffer{}
+	if err := Run(context.Background(), f, opts, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writes) > 0 || !strings.Contains(out.String(), "o/a: up to date") || strings.Contains(out.String(), "unknown") {
+		t.Errorf("writes = %v, output:\n%s", f.writes, out.String())
 	}
 }
