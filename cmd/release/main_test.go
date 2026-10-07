@@ -47,13 +47,49 @@ func TestRun(t *testing.T) {
 				}
 				return ""
 			}
-			err := run(tc.args, getenv, &out)
+			err := run(tc.args, getenv, strings.NewReader(""), &out)
 			got := out.String()
 			if err != nil {
 				got = err.Error()
 			}
 			if (err != nil) != tc.fail || !strings.Contains(got, tc.want) {
 				t.Fatalf("err = %v, output %q; want fail=%v containing %q", err, out.String(), tc.fail, tc.want)
+			}
+		})
+	}
+}
+
+func TestNextRC(t *testing.T) {
+	var out strings.Builder
+	err := run([]string{"next-rc", "--version", "1.2.0"}, func(string) string { return "" }, strings.NewReader("v1.2.0-rc1\nv1.2.0-rc2\n"), &out)
+	if err != nil || out.String() != "v1.2.0-rc3\n" {
+		t.Fatalf("got %q, %v", out.String(), err)
+	}
+}
+
+func TestPreviewTags(t *testing.T) {
+	dir := t.TempDir()
+	repo := `"repository": {"full_name": "compliance-framework/mock-api", "default_branch": "main"}`
+	pr := func(head string) string {
+		return write(t, dir, strings.ReplaceAll(head, "/", "_")+".json", `{`+repo+`, "pull_request": {"number": 12, "labels": [{"name": "preview"}], "head": {"repo": {"full_name": "`+head+`"}}}}`)
+	}
+	for _, tc := range []struct {
+		name, eventName, ref, event, want string
+	}{
+		{"push to main", "push", "refs/heads/main", write(t, dir, "push.json", `{`+repo+`}`), "tags=main sha-0123456"},
+		{"labelled PR", "pull_request", "refs/pull/12/merge", pr("compliance-framework/mock-api"), "tags=pr-12"},
+		{"fork PR", "pull_request", "refs/pull/12/merge", pr("someone/mock-api"), "tags="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ghOut := filepath.Join(t.TempDir(), "out")
+			env := map[string]string{"GITHUB_EVENT_PATH": tc.event, "GITHUB_EVENT_NAME": tc.eventName, "GITHUB_REF": tc.ref, "GITHUB_SHA": "0123456789abcdef", "GITHUB_OUTPUT": ghOut}
+			var out strings.Builder
+			if err := run([]string{"preview-tags"}, func(k string) string { return env[k] }, strings.NewReader(""), &out); err != nil {
+				t.Fatal(err)
+			}
+			b, err := os.ReadFile(ghOut)
+			if err != nil || strings.TrimSpace(string(b)) != tc.want {
+				t.Fatalf("GITHUB_OUTPUT = %q, %v; want %q (output %q)", b, err, tc.want, out.String())
 			}
 		})
 	}

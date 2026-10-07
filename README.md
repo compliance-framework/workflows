@@ -24,7 +24,7 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/notify` | The CI-failure notification rules, dedupe key, Slack message and API clients. |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
-| `internal/release` | The release rules: the release-please PR checks. |
+| `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag and the preview tags. |
 | `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`; `cmd/release` runs the `internal/release` rules for the release workflows. |
 | `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, the `ci-<kind>.yml` kind CI workflows and the [release workflows](#release-workflows)). |
 | `release-please/defaults.json` | The release-please settings every repo's `release-please-config.json` copies. |
@@ -385,6 +385,86 @@ needs `contents: read`; no inputs or secrets.
     uses: compliance-framework/workflows/.github/workflows/release-checks.yml@v1
     permissions:
       contents: read
+```
+
+#### `preview.yml`
+
+Publishes preview images to `ghcr.io/compliance-framework/<name>` with `GITHUB_TOKEN`
+(rules in `internal/release`, `PreviewTags`):
+
+| Event | Tags |
+| --- | --- |
+| push to the default branch | `main` and `sha-<first 7 of the commit>`, unless `on-main` is `false` |
+| `pull_request` with the `preview` label (not from a fork) | `pr-<number>` |
+| anything else | none; the image job is skipped |
+
+It never publishes `latest`, which only final releases move. For now it builds container
+images only (kinds `go-service`, `ui`, `action`), for `linux/amd64`; plugin and policy OCI
+artifacts (gooci) come with the release workflows (T04b).
+
+| Input | Default | What |
+| --- | --- | --- |
+| `on-main` | `true` | Publish `:main` and `:sha-<7>` on pushes to the default branch. |
+| `images` | `[{}]` | JSON list of `{"name", "dockerfile", "context"}`, one image each; `name` defaults to the repo name, `dockerfile` to `Dockerfile`, `context` to `.`. |
+
+```yaml
+# .github/workflows/preview.yml in a consuming repo
+name: preview
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+permissions:
+  contents: read
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  preview:
+    uses: compliance-framework/workflows/.github/workflows/preview.yml@v1
+    with:  # agent's three images
+      images: >-
+        [{"name": "agent"}, {"name": "agent-ci", "dockerfile": "Dockerfile-ci"},
+         {"name": "agent-custodian", "dockerfile": "Dockerfile-custodian"}]
+    permissions:
+      contents: read
+      packages: write
+```
+
+The image build is a separate reusable workflow, `publish-image.yml`, that `preview.yml`
+calls as `./.github/workflows/publish-image.yml`, and that the release workflows are meant
+to call too: inputs `images` (as above) and `tags` (space-separated tag names without the
+repository, each checked against the registry's tag syntax), permissions `contents: read`
+and `packages: write`. It builds each image in a matrix and pushes
+`ghcr.io/<owner>/<name>:<tag>` for every tag, with the OCI `source` and `revision` labels.
+It publishes whatever tags it is given; the caller decides them.
+
+#### `cut-prerelease.yml`
+
+Cuts a release candidate on demand. It reads the next version from the open release-please
+PR's `.release-please-manifest.json` (package `path`, default `.`), lists the existing
+`<tag-prefix><version>-rcN` tags, and creates the GitHub prerelease
+`<tag-prefix><version>-rc<N+1>` (not marked latest), tagging the default branch's head. It
+fails when there isn't exactly one open release-please PR, or when the final tag already
+exists. It runs as ccf-release-bot with the same scoped token as `release-please.yml`
+(`contents: write`, `pull-requests: read`), so the prerelease triggers the caller's release
+workflows. Inputs: `path` and `tag-prefix` (default `v`). Output: `tag`. Secrets as for
+`release-please.yml`.
+
+```yaml
+# .github/workflows/cut-prerelease.yml in a consuming repo
+name: cut-prerelease
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cut:
+    uses: compliance-framework/workflows/.github/workflows/cut-prerelease.yml@v1
+    permissions:
+      contents: read
+    secrets: inherit
 ```
 
 ## Development

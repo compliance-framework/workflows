@@ -1,0 +1,66 @@
+# Publishes preview images to ghcr.io/compliance-framework: :main and :sha-<7> on pushes to the
+# default branch (unless on-main is false), :pr-<number> on PRs labelled `preview`. It never
+# touches :latest. Tag rules: internal/release (PreviewTags). The image build itself is
+# publish-image.yml, which the release workflows reuse; see README.
+name: preview
+
+on:
+  workflow_call:
+    inputs:
+      on-main:
+        description: "Publish :main and :sha-<7> on pushes to the default branch"
+        type: boolean
+        default: true
+      images:
+        description: 'JSON list of {"name", "dockerfile", "context"}; name defaults to the repo name, dockerfile to Dockerfile, context to .'
+        type: string
+        default: '[{}]'
+
+permissions: {}
+
+jobs:
+  tags:
+    name: tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tags: ${{ steps.tags.outputs.tags }}
+    steps:
+      - name: Check the tools ref
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so cmd/release can't be fetched"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Choose the tags
+        id: tags
+        env:
+          ON_MAIN: ${{ inputs.on-main }}
+        run: go run ./cmd/release preview-tags --on-main="$ON_MAIN"
+
+  image:
+    name: image
+    needs: [tags]
+    if: needs.tags.outputs.tags != ''
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      images: ${{ inputs.images }}
+      tags: ${{ needs.tags.outputs.tags }}
+    permissions:
+      contents: read
+      packages: write

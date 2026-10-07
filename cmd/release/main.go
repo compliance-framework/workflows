@@ -3,11 +3,14 @@
 //	release check internal-deps [--gomod go.mod]
 //	release check module-path [--gomod go.mod] [--manifest .release-please-manifest.json]
 //	release check version-guard --base base.json [--head .release-please-manifest.json]
+//	release next-rc --version X.Y.Z [--prefix v]    (existing tags on stdin, one per line)
+//	release preview-tags [--on-main=true|false]     (appends tags=... to $GITHUB_OUTPUT)
 //
-// version-guard reads the PR's labels from $GITHUB_EVENT_PATH.
+// version-guard and preview-tags read the PR from $GITHUB_EVENT_PATH.
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -21,15 +24,35 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Getenv, os.Stdout); err != nil {
+	if err := run(os.Args[1:], os.Getenv, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "::error::"+err.Error())
 		os.Exit(1)
 	}
 }
 
-const usage = "usage: release check internal-deps|module-path|version-guard [flags]"
+const usage = "usage: release check internal-deps|module-path|version-guard [flags] | next-rc [flags] | preview-tags [flags]"
 
-func run(args []string, getenv func(string) string, stdout io.Writer) error {
+func run(args []string, getenv func(string) string, stdin io.Reader, stdout io.Writer) error {
+	if len(args) == 0 {
+		return errors.New(usage)
+	}
+	switch args[0] {
+	case "next-rc":
+		fs := flag.NewFlagSet("release next-rc", flag.ContinueOnError)
+		version := fs.String("version", "", "version (X.Y.Z) to cut a release candidate of")
+		prefix := fs.String("prefix", "v", "tag prefix")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return nextRC(*prefix, *version, stdin, stdout)
+	case "preview-tags":
+		fs := flag.NewFlagSet("release preview-tags", flag.ContinueOnError)
+		onMain := fs.Bool("on-main", true, "publish previews on pushes to the default branch")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return previewTags(*onMain, getenv, stdout)
+	}
 	if len(args) < 2 || args[0] != "check" {
 		return errors.New(usage)
 	}
@@ -115,15 +138,63 @@ func checkVersionGuard(base, head string, getenv func(string) string, stdout io.
 		fmt.Fprintln(stdout, "No major version increase.")
 		return nil
 	}
-	labels, err := prLabels(getenv("GITHUB_EVENT_PATH"))
+	e, err := readEvent(getenv("GITHUB_EVENT_PATH"))
 	if err != nil {
 		return err
 	}
-	if !slices.Contains(labels, release.MajorApprovedLabel) {
+	if !slices.Contains(e.PullRequest.labels(), release.MajorApprovedLabel) {
 		return fmt.Errorf("major version increase (%s) needs the %q label", strings.Join(inc, ", "), release.MajorApprovedLabel)
 	}
 	fmt.Fprintf(stdout, "Major version increase (%s) approved by the %q label.\n", strings.Join(inc, ", "), release.MajorApprovedLabel)
 	return nil
+}
+
+func nextRC(prefix, version string, stdin io.Reader, stdout io.Writer) error {
+	var tags []string
+	sc := bufio.NewScanner(stdin)
+	for sc.Scan() {
+		tags = append(tags, strings.TrimSpace(sc.Text()))
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	tag, err := release.NextRC(prefix, version, tags)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, tag)
+	return nil
+}
+
+func previewTags(onMain bool, getenv func(string) string, stdout io.Writer) error {
+	e, err := readEvent(getenv("GITHUB_EVENT_PATH"))
+	if err != nil {
+		return err
+	}
+	pr := e.PullRequest
+	tags, reason := release.PreviewTags(release.Event{
+		Name: getenv("GITHUB_EVENT_NAME"), Ref: getenv("GITHUB_REF"), SHA: getenv("GITHUB_SHA"),
+		DefaultBranch: e.Repository.DefaultBranch, PRNumber: pr.Number, Labels: pr.labels(),
+		Fork: pr.Head.Repo.FullName != "" && pr.Head.Repo.FullName != e.Repository.FullName,
+	}, onMain)
+	if len(tags) == 0 {
+		fmt.Fprintln(stdout, "No preview: "+reason+".")
+	} else {
+		fmt.Fprintln(stdout, "Preview tags: "+strings.Join(tags, " "))
+	}
+	out := getenv("GITHUB_OUTPUT")
+	if out == "" {
+		return errors.New("GITHUB_OUTPUT is not set")
+	}
+	f, err := os.OpenFile(out, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "tags=%s\n", strings.Join(tags, " ")); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func readManifest(path string) (map[string]string, error) {
@@ -138,25 +209,43 @@ func readManifest(path string) (map[string]string, error) {
 	return m, nil
 }
 
-// prLabels reads the pull request's label names from a GitHub event payload.
-func prLabels(eventPath string) ([]string, error) {
-	var e struct {
-		PullRequest struct {
-			Labels []struct {
-				Name string `json:"name"`
-			} `json:"labels"`
-		} `json:"pull_request"`
-	}
-	b, err := os.ReadFile(eventPath)
-	if err != nil {
-		return nil, fmt.Errorf("event payload: %w", err)
-	}
-	if err := json.Unmarshal(b, &e); err != nil {
-		return nil, fmt.Errorf("event payload: %w", err)
-	}
+// event is the part of a GitHub event payload the commands read.
+type event struct {
+	Repository struct {
+		FullName      string `json:"full_name"`
+		DefaultBranch string `json:"default_branch"`
+	} `json:"repository"`
+	PullRequest pullRequest `json:"pull_request"`
+}
+
+type pullRequest struct {
+	Number int `json:"number"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	Head struct {
+		Repo struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
+	} `json:"head"`
+}
+
+func (pr pullRequest) labels() []string {
 	var out []string
-	for _, l := range e.PullRequest.Labels {
+	for _, l := range pr.Labels {
 		out = append(out, l.Name)
 	}
-	return out, nil
+	return out
+}
+
+func readEvent(path string) (event, error) {
+	var e event
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return e, fmt.Errorf("event payload: %w", err)
+	}
+	if err := json.Unmarshal(b, &e); err != nil {
+		return e, fmt.Errorf("event payload: %w", err)
+	}
+	return e, nil
 }
