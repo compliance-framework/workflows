@@ -16,7 +16,7 @@ on:
         options: [repos.mock.yaml, repos.yaml]
         default: repos.mock.yaml
       repos:
-        description: Comma-separated subset of repos (default every repo in the manifest)
+        description: Comma-separated subset of repos (default every repo in the manifest but workflows)
         type: string
         default: ""
       dry_run:
