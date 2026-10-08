@@ -8,3 +8,6 @@ lisa-design:
 - internal/notify's existing Slack client is NOT touched in this PR (a parallel fix branch edits internal/notify); later PRs in this stack move notify/attention/train onto slackkit.
 - No 429/Retry-After handling: every caller posts a handful of messages per run; add it if a caller ever bursts.
 - PR1 of the spec (kit + preview) is split into three stacked PRs (kit, cards, preview) to stay under lisa's 1000-line limit.
+
+lisa-selfreview:
+pass 1 (pre-commit, on the whole kit+cards+preview tree): fixed — Preview() could push a context block past Slack's 10 elements (now rebuilt via Context); incident "Opened at" had a leading " · " without a SHA; empty context block (invalid_blocks) -> Context returns nil; PR titles unescaped in fallback text. pass 2: no findings.
