@@ -4,3 +4,6 @@ lisa-design:
 - The needs-human record restore drops lookup-only (tiny file) so `closed` can read the card's channel/ts. The record is NOT re-saved after Handled: its key is fixed per PR and cache entries are immutable; a re-run just re-applies the same edit.
 - Error policy matches Handle: card edits (needs-human Handled, incident card) are ::warning:: and never fail the job; a failed thread reply fails it (state unsaved, retried on re-run).
 - Actor: pull_request.merged_by.login when merged, else the event sender.
+
+lisa-selfreview:
+pass 1: fixed — closed subcommand's no-token / untracked paths were untested (added); README caller snippet lacked labeled/unlabeled that notify.md requires. pass 2: no findings. Deferred (nit): a closed PR reopened later keeps its Handled card and won't be re-posted while the needs-human record is cached.
