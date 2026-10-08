@@ -4,3 +4,6 @@ lisa-design:
 - train.Slack is replaced by slackkit.API (Post/Reply/Update); cmd/train uses slackkit.Client directly, so the notify.Slack adapter is gone.
 - Digest card: posted once (Notified key "digest") from finish, before the chart issues; repos with no release or skipped are left out; highlights are the Features bullets (release-please markdown → mrkdwn: escaped, **x** → *x*, links converted), capped at 10 with "and N more". SLACK_CHANNEL_DIGESTS empty or no Slack → skipped quietly; the issue comment is unchanged.
 - Running stage = the first stage not all released/skipped.
+
+lisa-selfreview:
+pass 1: fixed — gofmt on engine.go; the unused State.stage helper left by the old start message was removed; cmd/train doc comment lacked SLACK_CHANNEL_DIGESTS. pass 2: no findings. Deferred (nit): a dry-run train's board keeps saying "running" with its dry-run marker after the plan run closes it.
