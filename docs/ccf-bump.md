@@ -144,8 +144,9 @@ them first is harmless.
 ## The `ccf-bump-sync` workflow
 
 `ccf-bump-sync.yml` runs `ccf-bump sync --batch 10 --pr` on the 8th and 22nd at 04:00 UTC, and on
-`workflow_dispatch` with inputs `manifest` (`repos.yaml` or `repos.mock.yaml`) and `dry_run`
-(default `true`). Scheduled runs use `repos.yaml` and are dry runs until the repo variable
+`workflow_dispatch` with inputs `manifest` (default `repos.mock.yaml`, or `repos.yaml`) and `dry_run`
+(default `true`). Scheduled runs read `repos.mock.yaml` until go-live (W1-S4-T03), like renovate,
+train and attention-digest (the fallback equals the input's default), and are dry runs until the repo variable
 `CCF_BUMP_SYNC_LIVE` is `true`. It lists the repos, then mints a `ccf-release-bot` token scoped to
 exactly those (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`): read-only for dry runs; contents,
 pull requests and workflows write otherwise (bumps edit workflow files), and checks read. Commits

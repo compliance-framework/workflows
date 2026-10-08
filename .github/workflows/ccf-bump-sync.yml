@@ -2,8 +2,8 @@ name: ccf-bump-sync
 
 # Bumps every manifest repo's internal dependencies to their latest final releases, one PR per repo
 # (cmd/ccf-bump, docs/ccf-bump.md), then merges the green ccf-bump:automerge ones (live runs only;
-# ccf-bump-merge.yml merges the rest daily). Scheduled runs are dry runs until the repo variable
-# CCF_BUMP_SYNC_LIVE is "true".
+# ccf-bump-merge.yml merges the rest daily). Scheduled runs read repos.mock.yaml until go-live
+# (W1-S4-T03) and are dry runs until the repo variable CCF_BUMP_SYNC_LIVE is "true".
 
 on:
   schedule:
@@ -13,8 +13,8 @@ on:
       manifest:
         description: Manifest to read the repos from
         type: choice
-        options: [repos.yaml, repos.mock.yaml]
-        default: repos.yaml
+        options: [repos.mock.yaml, repos.yaml]
+        default: repos.mock.yaml
       dry_run:
         description: Print the PRs instead of opening them
         type: boolean
@@ -43,7 +43,8 @@ jobs:
       - name: Select repos
         id: select
         env:
-          MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
+          # A scheduled run has no inputs: keep this fallback equal to the input's default.
+          MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
           DRY_RUN: ${{ github.event_name == 'schedule' && vars.CCF_BUMP_SYNC_LIVE != 'true' || github.event_name != 'schedule' && inputs.dry_run }}
         run: |
           repos="$(go run ./cmd/ccf-bump list --manifest "$MANIFEST")"
