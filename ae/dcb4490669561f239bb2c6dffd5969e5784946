@@ -1,0 +1,9 @@
+lisa-design:
+- Target = bump.WorkflowsPin(sha, tag) = "<sha> # vX.Y.Z"; sha from GitHub.TagCommit (GET commits/{tag}, peels annotated tags). Sync mode resolves the latest final of the manifest's kind-workflows repo (none or no release: pins untouched); train mode only with --set workflows=<release> (keeps the train from stalling on main->sha needs-human PRs). A --set ref that is not vX.Y.Z is used as given (old behaviour), dropping the version comment.
+- Scan is YAML per job (jobs.<id>.uses), edits are line-local so layout/comments stay; pins outside jobs.*.uses are no longer seen (reusable workflows can only be called there).
+- Rules: same sha -> comment fix (auto-merge); older same-major sha#ver or tag (v1, v1.0.0) -> move (auto-merge); main or a SHA without version comment -> move, needs a human (Major); another major (older or newer) -> CONFLICT, not moved (v2 may change inputs; also avoids sync force-pushing over a human's migration PR); newer same major -> conflict (never downgrade); other branch/short sha -> conflict.
+- Comment handling: `# <version> <rest>`: version replaced/added, other text kept after it (`# pinned` -> `# vX.Y.Z pinned`).
+- workflows-ref: DELETED (not rewritten), with its head comment and an emptied with:, only when the job's pin moves; flow-style with: or a multi-line entry fails that repo's bump for a human.
+
+lisa-addressed:
+pass 1 fixes in this PR: bumper.commits cache split from finals; reflowed files.go doc and docs/ccf-bump.md.
