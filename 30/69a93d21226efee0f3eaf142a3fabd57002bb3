@@ -1,0 +1,2 @@
+lisa-design:
+- Overseer decision on the #53 open question: release-please PRs (head release-please--) are excluded from the "bot PR open > StaleAfter" rule, since they wait for the monthly train by design. They are still listed via the release check, a failing required check (ci / required, as other bot PRs) or the needs-human label. TestReleasePRsAreNeverStale covers it.
