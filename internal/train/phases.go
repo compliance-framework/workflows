@@ -261,8 +261,12 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 // whose version is one this train released (any, when versions is empty). A release workflow
 // moves floating tags (v0, v1, latest) onto the same commit, and no release workflow runs for them.
 func releaseTags(tags []string, versions map[string]string) []string {
+	proposed := slices.Collect(maps.Values(versions))
 	return slices.DeleteFunc(tags, func(tag string) bool {
 		_, v, err := release.ComponentTag(tag)
-		return err != nil || len(versions) > 0 && !slices.Contains(slices.Collect(maps.Values(versions)), v)
+		if err != nil {
+			return true
+		}
+		return len(proposed) > 0 && !slices.Contains(proposed, v)
 	})
 }
