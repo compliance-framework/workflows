@@ -57,7 +57,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	owner := fs.String("owner", "compliance-framework", "the repos' owner")
 	trackerRepo := fs.String("tracker-repo", "workflows", "the repo of the tracking issues")
 	bumpPath := fs.String("ccf-bump", "ccf-bump", "the ccf-bump binary")
-	required := fs.String("required-check", "ci / required", "a check every merged PR must pass")
+	required := fs.String("required-check", train.CICheck, "a check every merged PR must pass")
 	rpWorkflow := fs.String("release-please-workflow", "release-please.yml", "the repos' release-please workflow file")
 	watch := fs.Duration("watch", 0, "start, reconcile: keep reconciling while the open train is waiting on GitHub, for up to this long")
 	interval := fs.Duration("interval", time.Minute, "start, reconcile: the pause between --watch runs")

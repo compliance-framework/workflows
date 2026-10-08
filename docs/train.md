@@ -11,13 +11,13 @@ train bumps its internal dependencies to what the earlier stages released, with
 | Status | What the train does, and what it waits for |
 | --- | --- |
 | `waiting` | An earlier stage isn't done. |
-| `bumping` | Runs `ccf-bump --repo <repo> --mode train --set <dep>=<version>... --pr` with every version the earlier stages released, then merges the bump PR once its checks pass. No release in an earlier stage, or nothing to move, skips the bump. |
+| `bumping` | Runs `ccf-bump --repo <repo> --mode train --set <dep>=<version>... --pr` with every version the earlier stages released, then merges the bump PR once its required checks pass (see What gates a merge). No release in an earlier stage, or nothing to move, skips the bump. |
 | `release-pr` | Waits for release-please's run on the default branch's head (the workflow file `release-please.yml`), then takes its PR (`release-please--branches--<default branch>`). No PR means nothing to release: the repo is `released` with no new version. The run is the signal because release-please leaves its PR behind the branch for commits that release nothing (`ci:`, `chore:`). |
-| `merging` | Merges the release PR (squash, as ccf-release-bot, the `ccf-review` bypass actor) once its checks pass, including `ci / required`, and unless `version-guard` would flag it: a major increase without the `release:major-approved` label. |
+| `merging` | Merges the release PR (squash, as ccf-release-bot, the `ccf-review` bypass actor) once its required checks pass (`ci / required` and `release-checks / release-checks`), and unless `version-guard` would flag it: a major increase without the `release:major-approved` label. |
 | `publishing` | Waits for release-please's tags on the merge commit and for every release workflow run of each tag (`event: release`) to succeed. Only release tags count (`vX.Y.Z[-pre]` or `<component>-vX.Y.Z[-pre]` with a version the release PR proposed); floating tags a release workflow moves there (`v0`, `latest`) are ignored. |
 | `released` | Done. |
 | `skipped` | An org owner commented `/skip <repo>`. The next stage doesn't wait for it, and its version isn't bumped anywhere. |
-| `blocked` | Something failed: the PR's checks, ccf-bump, release-please, a merge or a release workflow. |
+| `blocked` | Something failed: the PR's required checks, ccf-bump, release-please, a merge or a release workflow. |
 | `needs-human` | A decision: a major version, a bump PR without the `ccf-bump:automerge` label (ccf-bump leaves it off for a major update or an unversioned pin), or a closed bump PR. |
 
 Every run reads GitHub's current state, so running it again is always safe, and `blocked` and
@@ -25,11 +25,34 @@ Every run reads GitHub's current state, so running it again is always safe, and 
 on the next run. A failed `ccf-bump` stays blocked until `/retry`, because running it again would
 fail again. A blocked repo holds up the stages after it, never the other repos of its stage.
 
-A PR's checks are judged per name over every run on its head commit (a re-run, or a run for a
-`labeled` or `edited` event, adds one): a check with any run queued or in progress is pending,
-otherwise its newest run (by start time, then ID) decides. A merge GitHub refuses with 405
-"Required status check … is expected" (a run that started after the checks were read) is waiting,
-not `blocked`: the next run retries it.
+### What gates a merge
+
+Only the **required checks** gate a merge (`train.CICheck` and `train.ReleaseCheck` in
+`internal/train/api.go`): `ci / required`, the check the `ccf-required` ruleset requires, and on
+release PRs the `release-checks` job of each caller's `ci.yml` (version-guard), named too so that a
+release PR never merges before it reports:
+
+| PR | Required checks |
+| --- | --- |
+| bump PR | `ci / required` |
+| release PR (release-please) | `ci / required` and `release-checks / release-checks` |
+
+Every other check on the PR (`preview / *`, CodeRabbit, `osv-scanner`, `notify / notify`, the jobs
+`ci / required` sums up) never makes a merge wait or hold, whatever it reports.
+`--required-check` replaces `ci / required`.
+
+Each required check is judged over every run on the PR's head commit (a re-run, a run for a
+`labeled` or `edited` event, or one that superseded a cancelled run adds one):
+
+- a run queued or in progress: **pending**;
+- never reported on the head commit: **pending**, not green;
+- otherwise its newest run (by start time, then ID) decides: `success`, `skipped` or `neutral`
+  passes; `cancelled` (a caller's concurrency group, such as `preview.yml`'s, cancels an older run
+  when a newer one starts) or `stale` is **pending**, waiting for a newer run, never a failure; `failure`,
+  `timed_out`, `action_required` or `startup_failure` is **failing** and holds the repo `blocked`.
+
+A merge GitHub refuses with 405 "Required status check … is expected" (a run that started after
+the checks were read) is waiting, not `blocked`: the next run retries it.
 
 ## Tracking issue
 

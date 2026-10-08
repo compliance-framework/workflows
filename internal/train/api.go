@@ -2,7 +2,6 @@ package train
 
 import (
 	"context"
-	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -120,15 +119,37 @@ const (
 	ChecksFailing = "failing"
 )
 
-var failed = map[string]bool{"failure": true, "timed_out": true, "cancelled": true, "action_required": true, "startup_failure": true}
+// The checks that gate a train merge (docs/train.md, "What gates a merge"). Only these can make a
+// merge wait or hold; every other check on the PR (preview, CodeRabbit, osv-scanner, notify, the
+// jobs ci / required sums up) is ignored, so a cancelled preview run never blocks a release.
+const (
+	// CICheck is the `required` job of each repo's `ci` caller, required on every PR the train
+	// merges. cmd/train's --required-check overrides it.
+	CICheck = "ci / required"
+	// ReleaseCheck is the `release-checks` caller's job, required on release-please PRs too.
+	ReleaseCheck = "release-checks / release-checks"
+)
 
-// EvaluateChecks reduces a commit's checks to green, pending or failing (with the failing
-// names). A commit can have several runs of a check (a re-run, or a run for another event such as
-// labeled): a check with any run queued or in progress is pending, else its newest run (by start
-// time, then ID) decides. required must be present and pass.
-func EvaluateChecks(checks []Check, required string) (state, detail string) {
+// failed are the conclusions that fail a check. cancelled is not one: the run was superseded (a
+// caller's concurrency group cancels an older run when a newer one starts) or stopped by hand, so
+// the check waits for a newer run. skipped, neutral and success pass.
+var failed = map[string]bool{"failure": true, "timed_out": true, "action_required": true, "startup_failure": true}
+
+// waitFor are the conclusions that leave a check pending: a newer run is expected.
+var waitFor = map[string]bool{"cancelled": true, "stale": true}
+
+// EvaluateChecks reduces a commit's required checks to green, pending or failing (with the names
+// of the pending or failing ones); checks not in required are ignored. A commit can have several
+// runs of a check (a re-run, a run for another event such as labeled, or one that superseded a
+// cancelled run): a check with any run queued or in progress is pending, else its newest run (by
+// start time, then ID) decides, and a cancelled newest run is pending too. A required check that
+// never reported on the commit is pending, not green.
+func EvaluateChecks(checks []Check, required []string) (state, detail string) {
 	latest, running := map[string]Check{}, map[string]bool{}
 	for _, c := range checks {
+		if !slices.Contains(required, c.Name) {
+			continue
+		}
 		running[c.Name] = running[c.Name] || c.Status != "completed"
 		l, ok := latest[c.Name]
 		if !ok || c.StartedAt.After(l.StartedAt) || c.StartedAt.Equal(l.StartedAt) && c.ID > l.ID {
@@ -136,16 +157,14 @@ func EvaluateChecks(checks []Check, required string) (state, detail string) {
 		}
 	}
 	var failing, pending []string
-	for _, name := range slices.Sorted(maps.Keys(latest)) {
+	for _, name := range slices.Compact(slices.Sorted(slices.Values(required))) {
+		l, ok := latest[name]
 		switch {
-		case running[name]:
+		case !ok, running[name], waitFor[l.Conclusion]:
 			pending = append(pending, name)
-		case failed[latest[name].Conclusion]:
+		case failed[l.Conclusion]:
 			failing = append(failing, name)
 		}
-	}
-	if _, ok := latest[required]; required != "" && !ok {
-		pending = append(pending, required)
 	}
 	switch {
 	case len(failing) > 0:

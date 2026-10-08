@@ -102,7 +102,7 @@ func (e *Engine) planRepo(ctx context.Context, st *State, r *RepoState, details 
 		if err != nil {
 			return err
 		}
-		if state, detail := EvaluateChecks(checks, e.RequiredCheck); state != ChecksGreen {
+		if state, detail := EvaluateChecks(checks, e.requiredChecks(true)); state != ChecksGreen {
 			notes = append(notes, fmt.Sprintf("checks %s: %s", state, detail))
 		}
 	case bumped && r.From[RootPackage] != "":
