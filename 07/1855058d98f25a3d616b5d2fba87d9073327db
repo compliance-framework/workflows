@@ -1,2 +1,5 @@
 lisa-addressed:
 - docs/renovate.md: stated that the 8th/22nd schedule doesn't delay merges (updateNotScheduled / automergeSchedule defaults).
+
+lisa-selfreview:
+pass 2 (strict): approve, no findings.
