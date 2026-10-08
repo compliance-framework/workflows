@@ -142,3 +142,27 @@ Could not read: mock-gone
 		t.Errorf("one item:\n%s", got)
 	}
 }
+
+// Release-please PRs wait for the monthly train by design: their age never lists them, only the
+// release check, a failing required check or the needs-human label.
+func TestReleasePRsAreNeverStale(t *testing.T) {
+	const bot, day = "ccf-release-bot[bot]", 24 * time.Hour
+	f := &fake{
+		prs: map[string][]PR{"r": {
+			pr(1, bot, "release-please--branches--main", 20*day),
+			pr(2, bot, "release-please--branches--main--ci", 20*day),
+			pr(3, bot, "release-please--branches--main--label", 20*day, "needs-human"),
+			pr(4, bot, "renovate/old", 20*day),
+		}},
+		failed: map[string]bool{"r@release-please--branches--main--ci-sha:ci / required": true},
+	}
+	d := Collect(context.Background(), f, cfg, []string{"r"})
+	var got []string
+	for _, it := range d.Items {
+		got = append(got, strconv.Itoa(it.PR.Number)+": "+strings.Join(it.Reasons, "; "))
+	}
+	want := []string{"2: ci / required failed", "3: labelled needs-human", "4: open over 7d"}
+	if !slices.Equal(got, want) || len(d.Failed) != 0 {
+		t.Errorf("items %q, want %q; failed %+v", got, want, d.Failed)
+	}
+}

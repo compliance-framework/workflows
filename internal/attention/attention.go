@@ -53,7 +53,7 @@ type Config struct {
 	BotLogin       string        // the release bot, which opens Renovate, ccf-bump and release PRs
 	RequiredChecks []string      // the checks every PR must pass, e.g. "ci / required"
 	ReleaseCheck   string        // the release-checks check, e.g. "release-checks / release-checks"
-	StaleAfter     time.Duration // a bot PR open longer needs a human
+	StaleAfter     time.Duration // a bot PR open longer needs a human (release-please PRs excepted)
 	Now            time.Time
 }
 
@@ -81,9 +81,10 @@ func (c Config) IsBot(pr PR) bool {
 }
 
 // Collect reads every repo's open PRs and keeps those that need a human: labelled needs-human;
-// or a bot PR (IsBot) whose required check failed, or that is open longer than StaleAfter; or a
-// release-please PR whose release check failed (version-guard: a major increase without
-// release:major-approved, or another release check).
+// or a bot PR (IsBot) whose required check failed, or that is open longer than StaleAfter (but a
+// release-please PR, which waits for the monthly train by design); or a release-please PR whose
+// release check failed (version-guard: a major increase without release:major-approved, or
+// another release check).
 func Collect(ctx context.Context, c Client, cfg Config, repos []string) Digest {
 	var d Digest
 	for _, repo := range repos {
@@ -133,7 +134,8 @@ func (cfg Config) reasons(ctx context.Context, c Client, pr PR) ([]string, error
 			out = append(out, name+" failed")
 		}
 	}
-	if age := cfg.Now.Sub(pr.Created); age > cfg.StaleAfter {
+	// A release-please PR stays open until the monthly train merges it: its age says nothing.
+	if age := cfg.Now.Sub(pr.Created); age > cfg.StaleAfter && !strings.HasPrefix(pr.HeadRef, ReleaseBranchPrefix) {
 		out = append(out, fmt.Sprintf("open over %s", Age(cfg.StaleAfter)))
 	}
 	if len(errs) > 0 {
