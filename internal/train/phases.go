@@ -201,6 +201,7 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 	if err != nil {
 		return err
 	}
+	tags = releaseTags(tags, r.Versions)
 	slices.Sort(tags)
 	r.Tags = tags
 	if len(tags) < len(r.Versions) {
@@ -254,4 +255,18 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 	r.FailedRun = 0
 	r.next(Released)
 	return nil
+}
+
+// releaseTags keeps release-please's release tags among tags: [<component>-]vX.Y.Z[-<pre-release>]
+// whose version is one this train released (any, when versions is empty). A release workflow
+// moves floating tags (v0, v1, latest) onto the same commit, and no release workflow runs for them.
+func releaseTags(tags []string, versions map[string]string) []string {
+	proposed := slices.Collect(maps.Values(versions))
+	return slices.DeleteFunc(tags, func(tag string) bool {
+		_, v, err := release.ComponentTag(tag)
+		if err != nil {
+			return true
+		}
+		return len(proposed) > 0 && !slices.Contains(proposed, v)
+	})
 }
