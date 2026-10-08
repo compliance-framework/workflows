@@ -1,0 +1,10 @@
+lisa-design:
+- Read side uses a separate CurrentRuleset type (embeds Ruleset, shadows BypassActors with *[]BypassActor) instead of changing Ruleset: desired/write rulesets must always send bypass_actors (ccf-required: [], ccf-review: the bot), so the write type keeps a plain slice.
+- nil pointer = absent OR null = unknown; pointer to [] = known none. GitHub sends [] for "none" to a write token, so null is not treated as none.
+- Unknown bypass is one Plan.Unknown entry per ruleset (key ruleset[<name>].bypass, Current = the existing `unknown` constant, Desired = JSON of the desired bypass view), never a Change; the bypass key is removed from both views before diffing the rest.
+- A ruleset with unknown bypass is always scheduled for a full PUT (same idempotent pattern as the merge-settings PATCH); with an otherwise in-sync repo and a read-only token a dry run now shows 9 unknown (7 merge + 2 rulesets).
+- Reader.Rulesets now returns map[int64]CurrentRuleset; only reposettings implements/consumes it, so the interface change stays inside the package.
+- Test fixture githubDefaults now uses []BypassActor{} (present-and-empty) for the old ccf-review ruleset, matching what a write token reads; nil would now mean hidden.
+
+lisa-selfreview:
+- pass 1/4 (strict): approve, no findings. Checked core+go ccf-review rules: tests fail without the fix (interface + behaviour), known() guards the nil pointer, shadowed embedded field verified by TestGitHubRulesetBypassAbsentVsEmpty, README unknown section + in-sync dry-run count (9 unknown) updated, 228 lines.
