@@ -23,6 +23,7 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `repos.yaml` | Manifest of the product repos: `name`, `kind`, `depends_on`, `release`, `charts`, plus top-level `holidays`, `include_patterns` and `exclude`. |
 | `repos.mock.yaml` | The same schema for the `mock-*` repos, used to develop and test changes without touching product repos. |
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
+| `internal/slackkit` | The Block Kit message kit for the Slack messages: blocks, the status bar, and a client that posts, replies and edits in place ([docs/slack.md](docs/slack.md)). |
 | `internal/notify` | The CI incident rules (which runs, incident key, transitions), the Slack messages and the Slack client ([docs/notify.md](docs/notify.md)). |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
 | `internal/reposettings` | The desired repo settings and rulesets, the current-vs-desired diff, and the GitHub client [`repo-settings.yml`](#repo-settings) uses. |
@@ -810,6 +811,12 @@ daily in `ccf-bump-merge.yml`). See [docs/ccf-bump.md](docs/ccf-bump.md).
 `train.yml` releases the manifest's repos once a month, stage by stage: it bumps each repo's
 internal dependencies with `ccf-bump`, merges the release PRs, waits for the releases, and tracks it
 all in a `Release train YYYY-MM` issue and a Slack thread. See [docs/train.md](docs/train.md).
+
+## Slack messages
+
+`internal/slackkit` builds the Slack messages as Block Kit cards (header, fields, link buttons,
+context line, a colored status bar) and posts, replies to and edits them in place; the tools move
+to it one by one. See [docs/slack.md](docs/slack.md).
 
 ## Stack smoke test
 
