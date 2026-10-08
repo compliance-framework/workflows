@@ -4,3 +4,6 @@ lisa-design:
 - Token: ccf-release-bot scoped with repositories: to the listed manifest repos (workflows included), permissions pull-requests/checks/contents: read only; empty selection refused.
 - N == 0: logs "no PR needs a human ... nothing posted" and posts nothing; read failures still fail the run (after posting when there is something to post).
 - Default --repos selection includes the kind: workflows repo (spec: include `workflows` itself), unlike vuln-summary.
+
+lisa-selfreview:
+pass 1 (strict): approve, no findings. Checked DRY_RUN truth table (schedule live/not, dispatch true/false), token scoping + read-only perms, actionlint, tokens never printed (tested), N==0 silence, docs vs code (flags, defaults, check names).
