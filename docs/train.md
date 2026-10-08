@@ -14,7 +14,7 @@ train bumps its internal dependencies to what the earlier stages released, with
 | `bumping` | Runs `ccf-bump --repo <repo> --mode train --set <dep>=<version>... --pr` with every version the earlier stages released, then merges the bump PR once its checks pass. No release in an earlier stage, or nothing to move, skips the bump. |
 | `release-pr` | Waits for release-please's run on the default branch's head (the workflow file `release-please.yml`), then takes its PR (`release-please--branches--<default branch>`). No PR means nothing to release: the repo is `released` with no new version. The run is the signal because release-please leaves its PR behind the branch for commits that release nothing (`ci:`, `chore:`). |
 | `merging` | Merges the release PR (squash, as ccf-release-bot, the `ccf-review` bypass actor) once its checks pass, including `ci / required`, and unless `version-guard` would flag it: a major increase without the `release:major-approved` label. |
-| `publishing` | Waits for release-please's tags on the merge commit and for every release workflow run of each tag (`event: release`) to succeed. |
+| `publishing` | Waits for release-please's tags on the merge commit and for every release workflow run of each tag (`event: release`) to succeed. Only release tags count (`vX.Y.Z[-pre]` or `<component>-vX.Y.Z[-pre]` with a version the release PR proposed); floating tags a release workflow moves there (`v0`, `latest`) are ignored. |
 | `released` | Done. |
 | `skipped` | An org owner commented `/skip <repo>`. The next stage doesn't wait for it, and its version isn't bumped anywhere. |
 | `blocked` | Something failed: the PR's checks, ccf-bump, release-please, a merge or a release workflow. |
