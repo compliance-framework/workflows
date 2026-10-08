@@ -30,6 +30,12 @@
       "semanticCommitType": "fix"
     },
     {
+      "description": "Indirect Go modules (depType indirect, chore(deps) by default) are linked into the binary too, so their updates (security fixes included) are fix(deps) and release.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["indirect"],
+      "semanticCommitType": "fix"
+    },
+    {
       "description": "One PR per repo for every non-major update (Go toolchain and golang image included), merged by Renovate as ccf-release-bot on its next run once the required check passes.",
       "matchPackageNames": ["*"],
       "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
