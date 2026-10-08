@@ -1,0 +1,6 @@
+lisa-design:
+- Builds on the merged closed-PR guard (W1-S3-FIX-TRAIN-BUGS): Decide still returns ReasonNone for closed PRs, so post/needs-human do no failure logic. A new ClosedReason (the open-PR rule applied to a closed PR) drives a separate `notify closed` subcommand; the CI kind workflows' skip-on-closed guard is kept unchanged.
+- plan sets notify=true and needs-human=true (when the channel is set) for a tracked closed PR, only so the workflow restores the incident state and the needs-human record; the existing post/needs-human steps then no-op.
+- The needs-human record restore drops lookup-only (tiny file) so `closed` can read the card's channel/ts. The record is NOT re-saved after Handled: its key is fixed per PR and cache entries are immutable; a re-run just re-applies the same edit.
+- Error policy matches Handle: card edits (needs-human Handled, incident card) are ::warning:: and never fail the job; a failed thread reply fails it (state unsaved, retried on re-run).
+- Actor: pull_request.merged_by.login when merged, else the event sender.
