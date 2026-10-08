@@ -215,3 +215,98 @@ func TestErrors(t *testing.T) {
 		})
 	}
 }
+
+func releasePR(labels string) string {
+	return `{"pull_request":{"number":7,"title":"chore(main): release 2.0.0","user":{"login":"ccf-release-bot[bot]"},` +
+		`"head":{"ref":"release-please--branches--main","sha":"abc"},"labels":` + labels + `}}`
+}
+
+const releaseChecksFailed = `{"ci":{"result":"success"},"release-checks":{"result":"failure"}}`
+
+func TestPlanNeedsHuman(t *testing.T) {
+	majorPR := `{"pull_request":{"number":13,"title":"chore(deps): update typescript to v7","user":{"login":"ccf-release-bot[bot]"},` +
+		`"head":{"ref":"renovate/typescript-7.x","sha":"abc"},"labels":[{"name":"needs-human"}]}}`
+	tests := []struct {
+		name, eventJSON, needs, channel string
+		want                            []string
+	}{
+		{"labelled bot PR", majorPR, passed, "C0HUMAN", []string{"notify=true\n", "needs-human=true\nneeds-human-key=ccf-notify-needs-human-"}},
+		{"release PR blocked: no incident", releasePR("[]"), releaseChecksFailed, "C0HUMAN", []string{"notify=false\n", "needs-human=true\n"}},
+		{"no channel: an incident as before", releasePR("[]"), releaseChecksFailed, "", []string{"notify=true\n", "needs-human=false\n"}},
+		{"human PR", `{"pull_request":{"number":6,"user":{"login":"octocat"},"head":{"ref":"fix","sha":"abc"},"labels":[{"name":"needs-human"}]}}`,
+			failed, "C0HUMAN", []string{"notify=false\n", "needs-human=false\n"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env, _ := setup(t, "pull_request", "refs/pull/7/merge", tt.eventJSON)
+			env["NEEDS"], env["NEEDS_HUMAN_CHANNEL"] = tt.needs, tt.channel
+			if _, err := runCmd(t, env, "plan"); err != nil {
+				t.Fatal(err)
+			}
+			out := outputs(t, env)
+			for _, w := range tt.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("outputs = %q, want %q in it", out, w)
+				}
+			}
+		})
+	}
+}
+
+func TestNeedsHumanPost(t *testing.T) {
+	env, posts := setup(t, "pull_request", "refs/pull/7/merge", releasePR("[]"))
+	env["NEEDS"], env["NEEDS_HUMAN_CHANNEL"] = releaseChecksFailed, "C0HUMAN"
+	env["NEEDS_HUMAN_STATE_FILE"] = filepath.Join(t.TempDir(), "needs-human.json")
+
+	// The incident rules leave a release-checks-only failure to the needs-human rule.
+	if _, err := runCmd(t, env, "post"); err != nil {
+		t.Fatal(err)
+	}
+	if out := outputs(t, env); out != "save=false\n" || len(*posts) != 0 {
+		t.Fatalf("post: outputs %q, posts %v", out, *posts)
+	}
+
+	stdout, err := runCmd(t, env, "needs-human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := outputs(t, env); out != "save=true\n" {
+		t.Errorf("outputs = %q", out)
+	}
+	want := ":raising_hand: <https://github.com/o/r/pull/7|r#7> chore(main): release 2.0.0 — needs a human: release PR blocked by release-checks"
+	if len(*posts) != 1 || (*posts)[0]["channel"] != "C0HUMAN" || !strings.HasPrefix((*posts)[0]["text"].(string), want) {
+		t.Fatalf("posts = %v, want %q", *posts, want)
+	}
+	if strings.Contains(stdout, "xoxb-test") {
+		t.Error("the token was printed")
+	}
+	data, err := os.ReadFile(env["NEEDS_HUMAN_STATE_FILE"])
+	if err != nil || !strings.Contains(string(data), `"key":"ccf-notify-needs-human-`) {
+		t.Errorf("record %q, %v", data, err)
+	}
+}
+
+func TestNeedsHumanNoop(t *testing.T) {
+	for name, tc := range map[string]struct{ channel, token, event string }{
+		"no channel":      {"", "xoxb-test", releasePR("[]")},
+		"no token":        {"C0HUMAN", "", releasePR("[]")},
+		"nothing to post": {"C0HUMAN", "xoxb-test", renovatePR("abc")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env, posts := setup(t, "pull_request", "refs/pull/7/merge", tc.event)
+			env["NEEDS"], env["NEEDS_HUMAN_CHANNEL"], env["SLACK_BOT_TOKEN"] = releaseChecksFailed, tc.channel, tc.token
+			env["NEEDS_HUMAN_STATE_FILE"] = filepath.Join(t.TempDir(), "needs-human.json")
+			if stdout, err := runCmd(t, env, "needs-human"); err != nil || !strings.Contains(stdout, "nothing to post") {
+				t.Errorf("stdout %q, err %v", stdout, err)
+			}
+			if out := outputs(t, env); out != "save=false\n" || len(*posts) != 0 {
+				t.Errorf("outputs %q, posts %v", out, *posts)
+			}
+		})
+	}
+	env, _ := setup(t, "pull_request", "refs/pull/7/merge", releasePR("[]"))
+	env["NEEDS"], env["NEEDS_HUMAN_CHANNEL"] = releaseChecksFailed, "C0HUMAN"
+	if _, err := runCmd(t, env, "needs-human"); err == nil || !strings.Contains(err.Error(), "NEEDS_HUMAN_STATE_FILE") {
+		t.Errorf("err = %v, want NEEDS_HUMAN_STATE_FILE", err)
+	}
+}

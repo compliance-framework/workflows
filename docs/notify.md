@@ -78,6 +78,37 @@ Limits:
 - A state that can't be read (bad JSON, another key) is reported in the log and treated as
   no incident.
 
+## Needs a human
+
+A second rule, separate from incidents, posts a tracked bot PR that waits for a person to the
+channel in the `SLACK_CHANNEL_NEEDS_HUMAN` variable, once per PR (see
+[attention.md](attention.md)). With the variable empty the rule is off: nothing is posted, the
+incidents work as before, and nothing fails.
+
+For a `pull_request` run tracked by rule (a) (`notify.Route`):
+
+| The PR | Posts to `SLACK_CHANNEL_NEEDS_HUMAN` | Incident |
+| --- | --- | --- |
+| carries the `needs-human` label (in the event payload) | `needs a human: <reason>`: `major update` (`renovate/*`), `OPA update in the api (never auto-merged)` (`renovate/opa`), `auto-merge off (...)` (`ccf-bump/*`), or `labelled needs-human` | as usual |
+| a release-please PR (`release-please--*`) whose `release-checks` job failed | `release PR blocked by release-checks (e.g. needs release:major-approved, or an internal dep isn't final)` | none when `release-checks` is the only failed job (the incident sees the run as cancelled and stays as it is); as usual when other jobs failed too |
+| anything else, or a human's PR | nothing | as usual |
+
+```text
+:raising_hand: mock-ui#13 chore(deps): update typescript to v7 — needs a human: major update
+```
+
+Once per PR: the job looks up the cache key `ccf-notify-needs-human-<hash of repo + PR>`
+(`lookup-only`), posts only on a miss, and then saves a small record under that key. Re-runs,
+pushes and other workflows of the same PR find it and post nothing. Like incident state, the
+record is evicted after 7 days without use, so a PR idle for a week may be posted again; two
+runs of one PR finishing at the same moment may both post. The weekly
+[attention digest](attention.md) lists every PR still waiting either way.
+
+The callers must run CI on `labeled` (`pull_request` `types: [opened, edited, synchronize,
+reopened, labeled, unlabeled]`, as every mock and the caller templates do), because Renovate and
+ccf-bump add the label after opening the PR: the `labeled` run is the one that sees it. The job's
+`needs` must include the `release-checks` job under that name.
+
 ## Calling it
 
 ```yaml
@@ -100,7 +131,9 @@ Limits:
 | `workflows-ref` | `""` | Ref of this repo to build `cmd/notify` from, to test another ref; empty means the commit the workflow is called at. Callers don't pass it: ccf-bump deletes it when it moves the job's pin. |
 
 Secret: `SLACK_BOT_TOKEN` (optional, `chat:write`), via `secrets: inherit`. Without it (forks,
-repos outside the secret's scope) the job does nothing and succeeds.
+repos outside the secret's scope) the job does nothing and succeeds. Variables:
+`SLACK_CHANNEL_CI_FAILURES` (incidents, unless `channel` is given) and `SLACK_CHANNEL_NEEDS_HUMAN`
+(optional, [Needs a human](#needs-a-human)).
 
 The job now runs after every CI run, so passes also pay for building `cmd/notify`; runs that
 aren't tracked stop right after the build.

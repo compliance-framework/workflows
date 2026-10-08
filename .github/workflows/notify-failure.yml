@@ -1,5 +1,7 @@
 # Keeps one Slack thread per CI incident (rules: internal/notify): a failure opens a thread
-# or replies in the open one, a pass after a failure replies and closes it.
+# or replies in the open one, a pass after a failure replies and closes it. With the
+# SLACK_CHANNEL_NEEDS_HUMAN variable set, it also posts a tracked bot PR that needs a human
+# (the needs-human label, or a release PR's failed release-checks) there, once per PR.
 # Call it from a job with `needs: <CI jobs>`, `if: always()`, `with: {needs: ${{ toJSON(needs) }}}`,
 # `secrets: inherit` and `permissions: {contents: read}`; see docs/notify.md.
 name: notify-failure
@@ -37,6 +39,9 @@ jobs:
       TOOLS_DIR: ${{ github.workspace }}/.ccf-workflows
       STATE_FILE: .ccf-notify-incident.json
       NEEDS: ${{ inputs.needs }}
+      # Empty turns the needs-human rule off (docs/attention.md).
+      NEEDS_HUMAN_CHANNEL: ${{ vars.SLACK_CHANNEL_NEEDS_HUMAN }}
+      NEEDS_HUMAN_STATE_FILE: .ccf-notify-needs-human.json
     steps:
       - name: Check for the Slack token
         id: token
@@ -105,3 +110,27 @@ jobs:
         with:
           path: ${{ env.STATE_FILE }}
           key: ${{ steps.plan.outputs.key }}
+
+      # A PR is posted once: the record's key is per repo + PR, and only a miss posts.
+      - name: Look up the needs-human post
+        id: needs-human-state
+        if: ${{ !cancelled() && steps.plan.outputs.needs-human == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.NEEDS_HUMAN_STATE_FILE }}
+          key: ${{ steps.plan.outputs.needs-human-key }}
+          lookup-only: true
+
+      - name: Post the PR that needs a human
+        id: needs-human
+        if: ${{ !cancelled() && steps.plan.outputs.needs-human == 'true' && steps.needs-human-state.outputs.cache-hit != 'true' }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: '"$RUNNER_TEMP/notify" needs-human'
+
+      - name: Save the needs-human post
+        if: ${{ !cancelled() && steps.needs-human.outputs.save == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.NEEDS_HUMAN_STATE_FILE }}
+          key: ${{ steps.plan.outputs.needs-human-key }}

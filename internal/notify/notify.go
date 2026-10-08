@@ -53,6 +53,7 @@ type Run struct {
 	PRNumber      int
 	PRTitle       string
 	PRAuthor      string
+	PRNeedsHuman  bool // the PR carries NeedsHumanLabel (from the event payload)
 }
 
 // RunFromEnv builds a Run from a workflow step's GITHUB_* variables and the event payload
@@ -90,6 +91,9 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 				Ref string `json:"ref"`
 				SHA string `json:"sha"`
 			} `json:"head"`
+			Labels []struct {
+				Name string `json:"name"`
+			} `json:"labels"`
 		} `json:"pull_request"`
 		Repository struct {
 			DefaultBranch string `json:"default_branch"`
@@ -110,6 +114,9 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 	}
 	if pr := ev.PullRequest; pr != nil {
 		r.PRNumber, r.PRTitle, r.PRAuthor, r.Branch = pr.Number, pr.Title, pr.User.Login, pr.Head.Ref
+		for _, l := range pr.Labels {
+			r.PRNeedsHuman = r.PRNeedsHuman || l.Name == NeedsHumanLabel
+		}
 		// GITHUB_SHA is the test merge commit, which changes whenever the base moves; the
 		// head is the commit that was pushed, so every run for it sees the same commit.
 		if pr.Head.SHA != "" {

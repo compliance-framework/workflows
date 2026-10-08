@@ -1,7 +1,10 @@
 # ccf-bump
 
 `ccf-bump` (`cmd/ccf-bump`, logic in `internal/bump`) moves the pinned versions of internal
-dependencies in the manifest's repos and opens one PR per repo, titled `fix(deps): bump <list>`.
+dependencies in the manifest's repos and opens one PR per repo, titled `fix(deps): bump <list>`, or
+`ci(deps): bump workflows to vX.Y.Z` when it moves only shared-workflow pins: `ci` is a hidden
+section in `release-please/defaults.json`, so such a PR proposes no release. A PR that also moves
+anything that ships (Go modules, images, helm, the action's Dockerfile, OPA) stays `fix(deps)`.
 
 ```text
 ccf-bump --repo NAME [--set dep=version]... [--mode sync|train] [--pr] [--dry-run] [flags]
@@ -70,6 +73,8 @@ Files are edited in place, so comments and layout stay. Chart versions are left 
 - **Auto-merge** (squash) is enabled when every change stays within its major version. A move from
   a pin that is not a version, or whose current version is unknown (the ui conformance file),
   needs a human.
+- **A PR that needs a human** (auto-merge off, or refused by GitHub) gets the `needs-human` label,
+  created in the repo when missing; a failure is a warning. See [attention.md](attention.md).
 - Shared-workflow pins follow their own rules, below.
 
 ## Shared-workflow pins

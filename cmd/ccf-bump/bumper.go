@@ -276,6 +276,9 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	branch := "ccf-bump/" + b.o.mode + "-" + b.e.now().UTC().Format("2006-01-02")
 	if b.o.dryRun {
 		fmt.Fprintf(out, "  dry run: would push %s and open %q\n%s", branch, title, indent(body))
+		if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
+			fmt.Fprintf(out, "  dry run: auto-merge off; would add label %s\n", bump.NeedsHumanLabel)
+		}
 		// Nothing was opened to tell who ccf-bump runs as, so any bot's ccf-bump PR is listed.
 		old, err := b.superseded(ctx, name, branch, func(p bump.PR) bool { return p.User.Type == "Bot" })
 		if err != nil {
@@ -318,16 +321,28 @@ func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, p
 	b.closeSuperseded(ctx, repo, branch, pr)
 	if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
 		fmt.Fprintln(b.e.stdout, "  auto-merge: off (a major update, or a pin that was not a version)")
+		b.needsHuman(ctx, repo, pr)
 		return nil
 	}
 	if err := b.e.gh.EnableAutoMerge(ctx, pr.NodeID); err != nil {
 		// e.g. the base branch has no protection rules, or the PR is already mergeable ("clean
 		// status"). The PR is open either way; a human merges it.
 		b.warn("%s#%d: %v", repo, pr.Number, err)
+		b.needsHuman(ctx, repo, pr)
 		return nil
 	}
 	fmt.Fprintln(b.e.stdout, "  auto-merge: on")
 	return nil
+}
+
+// needsHuman labels a PR with auto-merge off needs-human, which notify-failure.yml posts to Slack
+// (docs/attention.md). A failure is a warning: the PR is open either way.
+func (b *bumper) needsHuman(ctx context.Context, repo string, pr *bump.PR) {
+	if err := b.e.gh.LabelNeedsHuman(ctx, repo, pr.Number); err != nil {
+		b.warn("%s#%d: label %s: %v", repo, pr.Number, bump.NeedsHumanLabel, err)
+		return
+	}
+	fmt.Fprintf(b.e.stdout, "  label: %s\n", bump.NeedsHumanLabel)
 }
 
 // superseded returns repo's other open PRs that ccf-bump opened in this mode: head branch
@@ -405,8 +420,19 @@ func releaseURL(owner string, c bump.Change) string {
 	return "https://github.com/" + owner + "/" + c.Dep + "/releases/tag/" + c.To
 }
 
+// commitType is the PR title's (and squash commit's) conventional type: ci when the bump moves
+// only shared-workflow pins, which release-please hides and never releases for; fix when it
+// moves anything that ships (go.mod, images, helm, the action's Dockerfile, OPA), even with
+// workflow pins in the same PR.
+func commitType(plan bump.Plan) string {
+	if len(plan.Changes) > 0 && !slices.ContainsFunc(plan.Changes, func(c bump.Change) bool { return c.Dep != bump.DepWorkflows }) {
+		return "ci"
+	}
+	return "fix"
+}
+
 func prText(o options, plan bump.Plan) (string, string) {
-	title := "fix(deps): bump " + strings.Join(targetsOf(plan), ", ")
+	title := commitType(plan) + "(deps): bump " + strings.Join(targetsOf(plan), ", ")
 	var b strings.Builder
 	fmt.Fprintf(&b, "Bumps internal dependencies (ccf-bump, %s mode).\n\n| Dependency | From | To | Where |\n| --- | --- | --- | --- |\n", o.mode)
 	for _, c := range plan.Changes {

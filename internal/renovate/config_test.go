@@ -146,13 +146,16 @@ func TestSharedPreset(t *testing.T) {
 			MinimumReleaseAge json.RawMessage `json:"minimumReleaseAge"`
 		} `json:"vulnerabilityAlerts"`
 		PackageRules []struct {
-			MatchPackageNames []string `json:"matchPackageNames"`
-			MatchRepositories []string `json:"matchRepositories"`
-			MatchUpdateTypes  []string `json:"matchUpdateTypes"`
-			GroupName         string   `json:"groupName"`
-			Automerge         *bool    `json:"automerge"`
-			AutomergeType     string   `json:"automergeType"`
-			Enabled           *bool    `json:"enabled"`
+			MatchManagers      []string `json:"matchManagers"`
+			MatchDepTypes      []string `json:"matchDepTypes"`
+			SemanticCommitType string   `json:"semanticCommitType"`
+			MatchPackageNames  []string `json:"matchPackageNames"`
+			MatchRepositories  []string `json:"matchRepositories"`
+			MatchUpdateTypes   []string `json:"matchUpdateTypes"`
+			GroupName          string   `json:"groupName"`
+			Automerge          *bool    `json:"automerge"`
+			AutomergeType      string   `json:"automergeType"`
+			Enabled            *bool    `json:"enabled"`
 		} `json:"packageRules"`
 	}
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -190,10 +193,14 @@ func TestSharedPreset(t *testing.T) {
 		}
 	}
 
-	var internalOff, grouped, opaOff, opaAPI bool
+	var internalOff, grouped, opaOff, opaAPI, indirectFix bool
 	for _, r := range p.PackageRules {
 		off := r.Enabled != nil && !*r.Enabled
 		switch {
+		// Indirect modules are linked into the binary: their updates must release (fix), not
+		// chore(deps), which :semanticPrefixFixDepsChoreOthers gives depType indirect.
+		case slices.Equal(r.MatchDepTypes, []string{"indirect"}):
+			indirectFix = slices.Equal(r.MatchManagers, []string{"gomod"}) && r.SemanticCommitType == "fix" && r.Enabled == nil
 		case off && slices.Contains(r.MatchPackageNames, "github.com/compliance-framework/**") && slices.Contains(r.MatchPackageNames, "ghcr.io/compliance-framework/**"):
 			internalOff = len(r.MatchRepositories) == 0
 		case r.GroupName != "" && slices.Contains(r.MatchPackageNames, "*"):
@@ -207,8 +214,8 @@ func TestSharedPreset(t *testing.T) {
 			}
 		}
 	}
-	if !internalOff || !grouped || !opaOff || !opaAPI {
-		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v",
-			internalOff, grouped, opaOff, opaAPI)
+	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix {
+		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v",
+			internalOff, grouped, opaOff, opaAPI, indirectFix)
 	}
 }

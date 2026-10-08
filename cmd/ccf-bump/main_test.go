@@ -25,6 +25,7 @@ type fakeGH struct {
 	nextPR   int
 	autoErr  error
 	closeErr error
+	labelErr error
 	anon     bool // CreatePR returns a PR without its author
 }
 
@@ -110,6 +111,10 @@ func (f *fakeGH) DeleteBranch(_ context.Context, repo, branch string) error {
 	f.calls = append(f.calls, "delete "+repo+" "+branch)
 	return nil
 }
+func (f *fakeGH) LabelNeedsHuman(_ context.Context, repo string, n int) error {
+	f.calls = append(f.calls, fmt.Sprintf("label %s#%d", repo, n))
+	return f.labelErr
+}
 
 const testManifest = `repos:
   - {name: mock-api, kind: go-service, release: true}
@@ -189,6 +194,7 @@ func TestSyncAllPR(t *testing.T) {
 		`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
 		"automerge PR_1",
 		`create mock-agent-action main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-agent to v0.2.0"`,
+		"label mock-agent-action#2",
 		`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0"`,
 		"automerge PR_3",
 		`create mock-plugin-policies-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump opa to v1.15.0"`,
@@ -272,7 +278,8 @@ func TestWorkflowsPins(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", s, out)
 		}
 	}
-	if want := []string{`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0, workflows to v1.1.0"`}; !slices.Equal(gh.calls, want) {
+	if want := []string{`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0, workflows to v1.1.0"`,
+		"label mock-plugin-1#1"}; !slices.Equal(gh.calls, want) {
 		t.Errorf("calls %q, want %q", gh.calls, want)
 	}
 	got := git(t, root, "--git-dir", filepath.Join("remotes", "mock-plugin-1.git"), "show", "ccf-bump/sync-2026-10-08:.github/workflows/ci.yaml")
@@ -463,5 +470,79 @@ func TestWithoutTokens(t *testing.T) {
 	got := withoutTokens([]string{"PATH=/bin", "GH_TOKEN=x", "GITHUB_TOKEN=y", "GH_TOKENS=z"})
 	if !slices.Equal(got, []string{"PATH=/bin", "GH_TOKENS=z"}) {
 		t.Errorf("withoutTokens = %q", got)
+	}
+}
+
+func TestNeedsHuman(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fake  func(*fakeGH)
+		calls []string
+		out   string
+	}{
+		"auto-merge refused": {
+			fake:  func(f *fakeGH) { f.autoErr = fmt.Errorf("enable auto-merge: clean status") },
+			calls: []string{"automerge PR_1", "label mock-ui#1"},
+			out:   "  label: needs-human\n",
+		},
+		"label fails": {
+			fake:  func(f *fakeGH) { f.autoErr, f.labelErr = fmt.Errorf("refused"), fmt.Errorf("403 Forbidden") },
+			calls: []string{"automerge PR_1", "label mock-ui#1"},
+			out:   "::warning::ccf-bump: mock-ui#1: label needs-human: 403 Forbidden",
+		},
+		"auto-merge on": {
+			fake:  func(*fakeGH) {},
+			calls: []string{"automerge PR_1"},
+			out:   "auto-merge: on",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, e, gh, out := setup(t)
+			tc.fake(gh)
+			args := []string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}
+			if err := run(context.Background(), args, e); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if got := gh.calls[1:]; !slices.Equal(got, tc.calls) { // [0] is the create
+				t.Errorf("calls %q, want %q", got, tc.calls)
+			}
+			if !strings.Contains(out.String(), tc.out) {
+				t.Errorf("output lacks %q:\n%s", tc.out, out)
+			}
+		})
+	}
+}
+
+func TestNeedsHumanDryRun(t *testing.T) {
+	root, e, gh, out := setup(t)
+	args := []string{"--repo", "mock-agent-action", "--manifest", filepath.Join(root, "repos.yaml"), "--pr", "--dry-run"}
+	if err := run(context.Background(), args, e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(gh.calls) != 0 {
+		t.Errorf("dry run called the API: %q", gh.calls)
+	}
+	if s := "dry run: auto-merge off; would add label needs-human"; !strings.Contains(out.String(), s) {
+		t.Errorf("output lacks %q:\n%s", s, out)
+	}
+}
+
+func TestPRTitleType(t *testing.T) {
+	const sha = "89abcdef0123456789abcdef0123456789abcdef"
+	wf := func(file string) bump.Change {
+		return bump.Change{Ref: bump.Ref{Dep: bump.DepWorkflows, File: file, Current: "main"}, To: bump.WorkflowsPin(sha, "v1.1.0")}
+	}
+	gomod := bump.Change{Ref: bump.Ref{Dep: "mock-api", File: "go.mod", Current: "v0.1.0"}, To: "v0.2.0"}
+	for name, tc := range map[string]struct {
+		changes []bump.Change
+		want    string
+	}{
+		"only workflow pins":    {[]bump.Change{wf(".github/workflows/ci.yml"), wf(".github/workflows/release.yml")}, "ci(deps): bump workflows to v1.1.0"},
+		"a runtime dep too":     {[]bump.Change{wf(".github/workflows/ci.yml"), gomod}, "fix(deps): bump mock-api to v0.2.0, workflows to v1.1.0"},
+		"only a runtime dep":    {[]bump.Change{gomod}, "fix(deps): bump mock-api to v0.2.0"},
+		"OPA counts as runtime": {[]bump.Change{{Ref: bump.Ref{Dep: bump.DepOPA, File: ".github/workflows/release.yml"}, To: "v1.15.0"}, wf("x")}, "fix(deps): bump opa to v1.15.0, workflows to v1.1.0"},
+	} {
+		if title, _ := prText(options{owner: "compliance-framework", mode: "sync"}, bump.Plan{Changes: tc.changes}); title != tc.want {
+			t.Errorf("%s: title %q, want %q", name, title, tc.want)
+		}
 	}
 }

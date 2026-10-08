@@ -41,6 +41,7 @@ type GitHub interface {
 	OpenPRs(ctx context.Context, repo string) ([]bump.PR, error)
 	ClosePR(ctx context.Context, repo string, number int, comment string) error
 	DeleteBranch(ctx context.Context, repo, branch string) error
+	LabelNeedsHuman(ctx context.Context, repo string, number int) error
 }
 
 // env is everything run depends on, so tests can fake it.

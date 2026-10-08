@@ -187,6 +187,43 @@ func (g *GitHub) EnableAutoMerge(ctx context.Context, id string) error {
 	return nil
 }
 
+// NeedsHumanLabel marks a bot PR waiting for a person (also the train's hold, docs/attention.md).
+const (
+	NeedsHumanLabel       = "needs-human"
+	needsHumanColor       = "d93f0b"
+	needsHumanDescription = "A bot PR waiting for a person"
+)
+
+// LabelNeedsHuman adds the needs-human label to the PR, creating the label in repo first when
+// it is missing.
+func (g *GitHub) LabelNeedsHuman(ctx context.Context, repo string, number int) error {
+	err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/labels/%s", g.Owner, repo, url.PathEscape(NeedsHumanLabel)), nil, nil)
+	if se := (*StatusError)(nil); errors.As(err, &se) && se.Code == http.StatusNotFound {
+		in := map[string]string{"name": NeedsHumanLabel, "color": needsHumanColor, "description": needsHumanDescription}
+		err = g.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/labels", g.Owner, repo), in, nil)
+		// 422: created meanwhile (already_exists).
+		if se := (*StatusError)(nil); errors.As(err, &se) && se.Code == http.StatusUnprocessableEntity {
+			err = nil
+		}
+	}
+	if err != nil {
+		return err
+	}
+	in := map[string][]string{"labels": {NeedsHumanLabel}}
+	return g.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/labels", g.Owner, repo, number), in, nil)
+}
+
+// StatusError is a non-2xx API response.
+type StatusError struct {
+	Method, Path string
+	Code         int
+	Body         []byte
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s %s: %d %s: %.200s", e.Method, e.Path, e.Code, http.StatusText(e.Code), e.Body)
+}
+
 func (g *GitHub) do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
@@ -219,7 +256,7 @@ func (g *GitHub) do(ctx context.Context, method, path string, in, out any) error
 		return err
 	}
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("%s %s: %d %s: %.200s", method, path, resp.StatusCode, http.StatusText(resp.StatusCode), data)
+		return &StatusError{Method: method, Path: path, Code: resp.StatusCode, Body: data}
 	}
 	if out == nil || len(data) == 0 {
 		return nil
