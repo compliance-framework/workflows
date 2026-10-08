@@ -43,7 +43,7 @@ repos:
   - name: agent
     kind: go-service          # go-service | go-plugin | go-lib | policies | ui | helm | action | workflows
     depends_on: [api, gooci]  # repos that release before this one
-    release: true             # required; whether the release tooling acts on it
+    release: true             # required; whether the release tooling acts on it (repo-settings manages every repo)
   - name: helm-charts
     kind: helm
     depends_on: [api, ui, agent]
@@ -692,23 +692,36 @@ desired state, defined in `internal/reposettings`:
 - **Merges**: squash only, with the PR title and body as the commit title and message
   (`PR_TITLE`, `PR_BODY`); auto-merge allowed; head branches deleted on merge.
 - **Security**: Dependabot alerts on; Dependabot security updates off (Renovate handles dependency updates).
+- **Actions**: GitHub Actions can't approve pull requests (`can_approve_pull_request_reviews`
+  off: otherwise a workflow of the PR author's could approve their PR and satisfy `ccf-review`);
+  fork PR workflows of every outside contributor wait for a maintainer's approval
+  (`all_external_contributors`; a private repo has no such setting and is skipped). The default
+  `GITHUB_TOKEN` permissions are not changed: workflows that don't declare theirs rely on them.
 - **Ruleset `ccf-required`**, on the default branch, with no bypass: a pull request is required,
   the status check `ci / required` must pass (reported by GitHub Actions, app 15368), and force
   pushes and deletion are blocked.
 - **Ruleset `ccf-review`**, on the default branch: one approving review, bypassed by the
-  `ccf-release-bot` app only (its release and Renovate PRs).
+  `ccf-release-bot` app only (its release and Renovate PRs). A new push dismisses earlier
+  approvals, and the last push must be approved by someone other than its pusher, so a reviewed
+  PR can't change before it merges.
+- **Ruleset `ccf-release-tags`**, on the tags `v*.*.*` and `*-v*.*.*` (release-please's, with or
+  without a prerelease suffix): only `ccf-release-bot` creates, moves or deletes them. Release
+  workflows run from the tag, so nobody else can start one on an unreviewed commit. Floating major
+  tags (`v1`) don't match.
 
-Rulesets are matched by name; other rulesets are left alone. Settings outside this list are not
-read or changed. A repo's required check exists once it calls the shared CI with a `required` job
-(the caller job is named `ci`, so the check is `ci / required`, as on the mocks); until then
-`ccf-required` blocks its merges.
+Every repo in the manifest gets these settings, the `workflows` repo (`release: false`) too: every
+caller's CI and releases run its code. Rulesets are matched by name; other rulesets are left alone.
+Settings outside this list are not read or changed. A repo's required check exists once it calls
+the shared CI with a `required` job (the caller job is named `ci`, so the check is `ci / required`,
+as on the mocks); until then `ccf-required` blocks its merges. This repo's own `ci.yml` has a
+`required` job named `ci / required` for the same check.
 
 Inputs:
 
 | Input | Default | What |
 | --- | --- | --- |
 | `manifest` | `repos.yaml` | `repos.mock.yaml` for the mocks. |
-| `repos` | every repo with `release: true` | Comma-separated subset; each must be in the manifest with `release: true`. |
+| `repos` | every repo in the manifest | Comma-separated subset; each must be in the manifest. |
 | `apply` | `false` | `false` prints the diff and writes nothing; `true` writes it (from `main` only). |
 | `release-bot-app-id` | org variable `RELEASE_BOT_APP_ID` | `ccf-release-bot`'s app ID, the `ccf-review` bypass actor. Set the org variable (Settings, Secrets and variables, Actions, Variables) to the app's ID from its settings page, or pass the input; the run fails if both are empty. |
 | `required-check` | `ci / required` | The status check context `ccf-required` requires. |
@@ -721,14 +734,16 @@ selection, and the tool checks the token reaches no other repo before reading an
 Output, per repo, is one line per differing setting, `key: current -> desired`, then a total:
 
 ```console
-compliance-framework/mock-api: 28 change(s)
+compliance-framework/mock-api: 41 change(s)
   repo.allow_merge_commit: true -> false
   security.dependabot_security_updates: enabled -> disabled
+  actions.can_approve_pull_request_reviews: true -> false
   ruleset[ccf-required]: missing -> create
   ruleset[ccf-review].rules.pull_request.required_approving_review_count: 0 -> 1
+  ruleset[ccf-release-tags]: missing -> create
   ...
 compliance-framework/mock-ui: up to date
-28 change(s) in 1 of 2 repo(s) (dry run, nothing written; re-run with apply to write)
+41 change(s) in 1 of 2 repo(s) (dry run, nothing written; re-run with apply to write)
 ```
 
 GitHub leaves the merge settings out of `GET /repos/{owner}/{repo}` for a token with
@@ -753,7 +768,7 @@ if it sets another value it prints a warning (`... wants disabled, org enforces 
 in the org configuration`), counted as `N warning(s)`, which doesn't fail the run. Change those in
 the org configuration, not here.
 
-Apply runs each step on its own: the merge settings, each ruleset, then the security settings. A
+Apply runs each step on its own: the merge settings, each ruleset, the Actions settings, then the security settings. A
 failed step (say a 422) is printed (`<repo>: <step> failed: ...`) and doesn't stop the others; the
 repo ends with `applied N step(s)` or `partly applied: F of N step(s) failed`, and the run fails at
 the end if any step failed.
@@ -768,7 +783,7 @@ How to run it:
    the workflow from `main` with the same inputs and `apply` on. Run it again with `apply` on:
    every repo should be `up to date` and nothing is written (the sync is idempotent). A dry run
    can't show this, since its token is always read-only: a repo that is otherwise in sync shows
-   `0 change(s), 9 unknown` (7 merge settings, 2 ruleset bypass lists). Then set Administration back to **read**.
+   `0 change(s), 10 unknown` (7 merge settings, 3 ruleset bypass lists). Then set Administration back to **read**.
    Do the mocks first.
 
 The workflow calls `go run ./cmd/repo-settings sync`. Flags it doesn't expose: `--owner`

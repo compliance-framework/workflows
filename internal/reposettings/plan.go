@@ -26,6 +26,10 @@ type Reader interface {
 	// Rulesets returns the repo's own rulesets (not inherited ones) by ID; nil bypass actors are
 	// ones the token can't read.
 	Rulesets(ctx context.Context, repo string) (map[int64]CurrentRuleset, error)
+	WorkflowPermissions(ctx context.Context, repo string) (WorkflowPermissions, error)
+	// ForkPRApproval returns the fork PR contributor approval policy, or "" if the repo has none
+	// (a private repo).
+	ForkPRApproval(ctx context.Context, repo string) (string, error)
 }
 
 // SecurityConfiguration is the part of an org code security configuration this tool checks. Each
@@ -45,6 +49,8 @@ type Writer interface {
 	SetSecurityUpdates(ctx context.Context, repo string, enabled bool) error
 	CreateRuleset(ctx context.Context, repo string, r Ruleset) error
 	UpdateRuleset(ctx context.Context, repo string, id int64, r Ruleset) error
+	SetWorkflowPermissions(ctx context.Context, repo string, p WorkflowPermissions) error
+	SetForkPRApproval(ctx context.Context, repo, policy string) error
 }
 
 // Client reads and writes repo settings.
@@ -82,8 +88,8 @@ type Plan struct {
 	// Unknown are settings the token can't read (merge settings, ruleset bypass actors, Dependabot
 	// security updates), so whether they differ isn't known. They are not counted as changes, but Apply writes them.
 	Unknown []Change
-	// Managed are security settings an enforced org code security configuration already sets to
-	// the desired value. They are skipped.
+	// Managed are settings left alone: security settings an enforced org code security
+	// configuration already sets to the desired value, and settings the repo doesn't have.
 	Managed []string
 	// Warnings are security settings an enforced org code security configuration sets to another
 	// value. They are skipped, not failed: only the org configuration can change them.
@@ -92,6 +98,8 @@ type Plan struct {
 	merge               *MergeSettings
 	vulnerabilityAlerts *bool
 	securityUpdates     *bool
+	workflowPermissions *WorkflowPermissions
+	forkPRApproval      *string
 	rulesets            []rulesetWrite
 }
 
@@ -152,6 +160,10 @@ func PlanRepo(ctx context.Context, r Reader, repo string, d Desired) (*Plan, err
 		p.securityUpdates = p.compareSecurity("security.dependabot_security_updates", updates, d.SecurityUpdates)
 	}
 
+	if err := p.planActions(ctx, r, d.Actions); err != nil {
+		return nil, err
+	}
+
 	current, err := r.Rulesets(ctx, repo)
 	if err != nil {
 		return nil, err
@@ -188,6 +200,34 @@ func PlanRepo(ctx context.Context, r Reader, repo string, d Desired) (*Plan, err
 		}
 	}
 	return p, nil
+}
+
+// planActions compares the Actions settings with want.
+func (p *Plan) planActions(ctx context.Context, r Reader, want ActionsSettings) error {
+	perms, err := r.WorkflowPermissions(ctx, p.Repo)
+	if err != nil {
+		return err
+	}
+	if perms.CanApprovePullRequestReviews != want.CanApprovePullRequestReviews {
+		p.Changes = append(p.Changes, Change{Key: "actions.can_approve_pull_request_reviews",
+			Current: fmt.Sprint(perms.CanApprovePullRequestReviews), Desired: fmt.Sprint(want.CanApprovePullRequestReviews)})
+		perms.CanApprovePullRequestReviews = want.CanApprovePullRequestReviews
+		p.workflowPermissions = &perms // keeps the default permissions as they are
+	}
+	if want.ForkPRApproval == "" {
+		return nil
+	}
+	policy, err := r.ForkPRApproval(ctx, p.Repo)
+	switch {
+	case err != nil:
+		return err
+	case policy == "":
+		p.Managed = append(p.Managed, "actions.fork_pr_approval: the repo has no such setting (private); skipped")
+	case policy != want.ForkPRApproval:
+		p.Changes = append(p.Changes, Change{Key: "actions.fork_pr_approval", Current: policy, Desired: want.ForkPRApproval})
+		p.forkPRApproval = &want.ForkPRApproval
+	}
+	return nil
 }
 
 // stateName names a bool security setting as GitHub does.
@@ -242,8 +282,8 @@ type StepResult struct {
 	Err  error
 }
 
-// Apply writes the changes in p, one step per setting: the merge settings, each ruleset, then the
-// security settings, which an org configuration can refuse. Steps are independent: a failed step
+// Apply writes the changes in p, one step per setting: the merge settings, each ruleset, the
+// Actions settings, then the security settings, which an org configuration can refuse. Steps are independent: a failed step
 // doesn't stop the others. Apply returns every step's result, in order.
 func Apply(ctx context.Context, w Writer, p *Plan) []StepResult {
 	var results []StepResult
@@ -258,6 +298,12 @@ func Apply(ctx context.Context, w Writer, p *Plan) []StepResult {
 		} else {
 			step(name, w.UpdateRuleset(ctx, p.Repo, rw.id, rw.ruleset))
 		}
+	}
+	if p.workflowPermissions != nil {
+		step("actions.workflow_permissions", w.SetWorkflowPermissions(ctx, p.Repo, *p.workflowPermissions))
+	}
+	if p.forkPRApproval != nil {
+		step("actions.fork_pr_approval", w.SetForkPRApproval(ctx, p.Repo, *p.forkPRApproval))
 	}
 	if p.vulnerabilityAlerts != nil {
 		step("security.vulnerability_alerts", w.SetVulnerabilityAlerts(ctx, p.Repo, *p.vulnerabilityAlerts))

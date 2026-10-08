@@ -1,12 +1,14 @@
-// Command repo-settings brings the merge settings, security settings and rulesets of the manifest's
-// repos to the desired state in internal/reposettings, for the repo-settings workflow:
+// Command repo-settings brings the merge settings, security settings, Actions settings and rulesets
+// of the manifest's repos to the desired state in internal/reposettings, for the repo-settings
+// workflow:
 //
 //	repo-settings list [--manifest repos.yaml] [--repos a,b]
 //	repo-settings sync [--manifest repos.yaml] [--repos a,b] --bypass-app-id ID [--apply] [flags]
 //
 // list prints the selected repo names, comma-separated, to scope the token. sync prints each repo's
 // diff of current vs desired settings, and writes the changes only with --apply. Both select every
-// repo with release: true unless --repos names a subset. sync reads the token from GH_TOKEN.
+// repo in the manifest (the workflows repo too, whatever its release flag) unless --repos names a
+// subset. sync reads the token from GH_TOKEN.
 package main
 
 import (
@@ -47,7 +49,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	}
 	fs := flag.NewFlagSet("repo-settings "+args[0], flag.ContinueOnError)
 	path := fs.String("manifest", manifest.DefaultPath, "path to the repo manifest")
-	repos := fs.String("repos", "", "comma- or space-separated repo names (default: every repo with release: true)")
+	repos := fs.String("repos", "", "comma- or space-separated repo names (default: every repo in the manifest)")
 	owner := fs.String("owner", "compliance-framework", "the repos' owner")
 	apply := fs.Bool("apply", false, "write the changes (default: dry run)")
 	check := fs.String("required-check", reposettings.DefaultRequiredCheck, "status check context ccf-required requires")
@@ -89,24 +91,23 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	}, stdout)
 }
 
-// selectRepos returns the repos named in list (comma- or space-separated), or every repo with
-// release: true if list is empty, in manifest order. Named repos must be in the manifest with
-// release: true.
+// selectRepos returns the repos named in list (comma- or space-separated), or every repo in the
+// manifest if list is empty, in manifest order. Every repo gets the same settings, including the
+// workflows repo (release: false): it holds the code every other repo's CI and releases run.
 func selectRepos(m *manifest.Manifest, list string) ([]string, error) {
 	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
 	var unknown []string
 	for _, n := range names {
-		i := slices.IndexFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n })
-		if i < 0 || !m.Repos[i].Release {
+		if !slices.ContainsFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n }) {
 			unknown = append(unknown, n)
 		}
 	}
 	if len(unknown) > 0 {
-		return nil, fmt.Errorf("not in the manifest with release: true: %s", strings.Join(unknown, ", "))
+		return nil, fmt.Errorf("not in the manifest: %s", strings.Join(unknown, ", "))
 	}
 	var out []string
 	for _, r := range m.Repos {
-		if r.Release && (len(names) == 0 || slices.Contains(names, r.Name)) {
+		if len(names) == 0 || slices.Contains(names, r.Name) {
 			out = append(out, r.Name)
 		}
 	}

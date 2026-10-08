@@ -21,11 +21,11 @@ func TestSelectRepos(t *testing.T) {
 		want []string
 		err  string
 	}{
-		{list: "", want: []string{"a", "c"}},
+		{list: "", want: []string{"a", "b", "c"}},
 		{list: " c, a\n", want: []string{"a", "c"}},
 		{list: "c c", want: []string{"c"}},
-		{list: "a,b", err: "b"},
-		{list: "x", err: "x"},
+		{list: "a,b", want: []string{"a", "b"}},
+		{list: "a,x", err: "x"},
 	} {
 		got, err := selectRepos(m, tc.list)
 		if tc.err != "" {
@@ -101,6 +101,10 @@ func TestRunSyncFailedStepFailsRun(t *testing.T) {
 			_, _ = io.WriteString(w, `{"enabled":false,"paused":false}`)
 		case repo + "/rulesets":
 			_, _ = io.WriteString(w, `[]`)
+		case repo + "/actions/permissions/workflow":
+			_, _ = io.WriteString(w, `{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}`)
+		case repo + "/actions/permissions/fork-pr-contributor-approval":
+			_, _ = io.WriteString(w, `{"approval_policy":"first_time_contributors"}`)
 		default: // vulnerability-alerts on; no code security configuration
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -115,10 +119,12 @@ func TestRunSyncFailedStepFailsRun(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "repo merge settings") {
 		t.Fatalf("err = %v, want the failed merge settings step", err)
 	}
-	if want := []string{"PATCH /repos/compliance-framework/mock-api", "POST /repos/compliance-framework/mock-api/rulesets", "POST /repos/compliance-framework/mock-api/rulesets"}; !slices.Equal(writes, want) {
+	if want := []string{"PATCH /repos/compliance-framework/mock-api", "POST /repos/compliance-framework/mock-api/rulesets", "POST /repos/compliance-framework/mock-api/rulesets",
+		"POST /repos/compliance-framework/mock-api/rulesets", "PUT /repos/compliance-framework/mock-api/actions/permissions/workflow",
+		"PUT /repos/compliance-framework/mock-api/actions/permissions/fork-pr-contributor-approval"}; !slices.Equal(writes, want) {
 		t.Errorf("writes = %v, want %v", writes, want)
 	}
-	if !strings.Contains(out.String(), "partly applied: 1 of 3 step(s) failed") {
+	if !strings.Contains(out.String(), "partly applied: 1 of 6 step(s) failed") {
 		t.Errorf("output:\n%s", out.String())
 	}
 }
