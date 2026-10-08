@@ -58,3 +58,10 @@ repos:
     depends_on: [mock-api, mock-ui, mock-agent]
     release: true
     charts: [mock-agent, mock-app]
+
+  # This repo: the source of the shared-workflow pins ccf-bump moves
+  # (`uses: compliance-framework/workflows/.github/workflows/<f>@<sha> # vX.Y.Z`).
+  # It releases itself (self-release.yml), outside the train.
+  - name: workflows
+    kind: workflows
+    release: false

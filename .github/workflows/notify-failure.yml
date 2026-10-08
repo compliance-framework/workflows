@@ -16,9 +16,9 @@ on:
         type: string
         default: ""
       workflows-ref:
-        description: "Ref of compliance-framework/workflows to run cmd/notify from; keep it equal to the ref this workflow is called at"
+        description: "Ref of compliance-framework/workflows to run cmd/notify from, to test another ref; empty means the commit this workflow is called at"
         type: string
-        default: v1
+        default: ""
     secrets:
       SLACK_BOT_TOKEN:
         description: "Slack bot token (chat:write). Without it the job does nothing, so forks don't fail."
@@ -50,12 +50,22 @@ jobs:
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check the tools ref
+        if: steps.token.outputs.enabled == 'true'
+        env:
+          REF: ${{ inputs.workflows-ref || job.workflow_sha }}
+        run: |
+          if [ -z "$REF" ]; then
+            echo "::error::job.workflow_sha is empty, so cmd/notify can't be fetched"
+            exit 1
+          fi
       - name: Check out cmd/notify
         if: steps.token.outputs.enabled == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: compliance-framework/workflows
-          ref: ${{ inputs.workflows-ref }}
+          # By default the commit this workflow file was called at (a caller's @<sha> pin).
+          ref: ${{ inputs.workflows-ref || job.workflow_sha }}
           path: .ccf-workflows
           persist-credentials: false
 

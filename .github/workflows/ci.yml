@@ -2,6 +2,8 @@ name: ci
 
 on:
   pull_request:
+    # labeled/unlabeled: release-checks reads the labels from the event (release:major-approved).
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -55,3 +57,12 @@ jobs:
       - name: actionlint
         # Built from source at a pinned version; shellcheck is preinstalled on the runner.
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+  # On this repo's release-please PRs: a new major (v2) needs the release:major-approved label.
+  # The module path keeps no /vN suffix: the major is the workflows' interface, not a Go API.
+  release-checks:
+    uses: ./.github/workflows/release-checks.yml
+    with:
+      module-path: false
+    permissions:
+      contents: read

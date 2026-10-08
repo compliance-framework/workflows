@@ -19,6 +19,7 @@ type fakeGH struct {
 	failFor  string // LatestFinal fails for this repo
 	finals   map[string]string
 	files    map[string]string // "repo@ref:path" -> content
+	commits  map[string]string // "repo@tag" -> commit SHA
 	open     map[string]*bump.PR
 	calls    []string
 	nextPR   int
@@ -35,6 +36,13 @@ func (f *fakeGH) LatestFinal(_ context.Context, repo string) (string, error) {
 }
 func (f *fakeGH) TagTime(context.Context, string, string) (time.Time, error) {
 	return time.Time{}, nil
+}
+func (f *fakeGH) TagCommit(_ context.Context, repo, tag string) (string, error) {
+	c, ok := f.commits[repo+"@"+tag]
+	if !ok {
+		return "", fmt.Errorf("no tag %s %s", repo, tag)
+	}
+	return c, nil
 }
 func (f *fakeGH) File(_ context.Context, repo, ref, path string) ([]byte, error) {
 	c, ok := f.files[repo+"@"+ref+":"+path]
@@ -111,6 +119,7 @@ const testManifest = `repos:
   - {name: mock-plugin-1, kind: go-plugin, depends_on: [mock-agent], release: true}
   - {name: mock-plugin-policies-1, kind: policies, depends_on: [mock-agent], release: true}
   - {name: old, kind: go-lib, release: false}
+  - {name: workflows, kind: workflows, release: false}
 `
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -242,6 +251,55 @@ func TestTrainDryRun(t *testing.T) {
 	}
 	if b := git(t, root, "--git-dir", filepath.Join("remotes", "mock-agent-action.git"), "branch", "--list", "ccf-bump/*"); b != "" {
 		t.Errorf("dry run pushed %s", b)
+	}
+}
+
+func TestWorkflowsPins(t *testing.T) {
+	const sha = "89abcdef0123456789abcdef0123456789abcdef"
+	root, e, gh, out := setup(t)
+	m := filepath.Join(root, "repos.yaml")
+	gh.finals["workflows"], gh.commits = "v1.1.0", map[string]string{"workflows@v1.1.0": sha}
+	if err := run(context.Background(), []string{"sync", "--repos", "mock-plugin-1", "--manifest", m, "--pr"}, e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, s := range []string{
+		"bump      workflows    0123456789abcdef0123456789abcdef01234567 -> " + sha + " # v1.1.0",
+		"conflict  workflows    pinned v1.2.0 is newer than v1.1.0; ccf-bump never downgrades",
+		"conflict  workflows    pinned to ra/some-branch, not main, a commit SHA or a release: a human decides",
+		"auto-merge: off",
+	} {
+		if !strings.Contains(out.String(), s) {
+			t.Errorf("output lacks %q:\n%s", s, out)
+		}
+	}
+	if want := []string{`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0, workflows to v1.1.0"`}; !slices.Equal(gh.calls, want) {
+		t.Errorf("calls %q, want %q", gh.calls, want)
+	}
+	got := git(t, root, "--git-dir", filepath.Join("remotes", "mock-plugin-1.git"), "show", "ccf-bump/sync-2026-10-08:.github/workflows/ci.yaml")
+	if !strings.Contains(got, "ci-go-plugin.yml@"+sha+" # v1.1.0 pinned\n") {
+		t.Errorf("ci.yaml:\n%s", got)
+	}
+
+	// Train mode with a given release (with or without the v) resolves its commit too.
+	out.Reset()
+	args := []string{"--repo", "mock-plugin-1", "--mode", "train", "--set", "workflows=1.1.0", "--manifest", m, "--clones", filepath.Join(root, "clones")}
+	if err := run(context.Background(), args, e); err != nil || !strings.Contains(out.String(), "-> "+sha+" # v1.1.0") {
+		t.Errorf("train --set workflows=1.1.0: %v\n%s", err, out)
+	}
+
+	// Train mode moves the pins only when asked; sync mode without a workflows release leaves them.
+	for _, args := range [][]string{
+		{"--repo", "mock-plugin-1", "--mode", "train", "--set", "mock-gooci=0.3.0"},
+		{"sync", "--repos", "mock-plugin-1"},
+	} {
+		out.Reset()
+		gh.finals["workflows"] = ""
+		if err := run(context.Background(), append(args, "--manifest", m, "--clones", filepath.Join(root, "clones")), e); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "no target workflows    3 pin(s) left as they are") {
+			t.Errorf("%q: output:\n%s", args, out)
+		}
 	}
 }
 

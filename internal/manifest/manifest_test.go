@@ -42,6 +42,9 @@ func TestLoadRepoManifests(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.stages) {
 				t.Errorf("Stages() = %v, want %v", got, tt.stages)
 			}
+			if w := m.Workflows(); w == nil || w.Name != "workflows" || w.Release {
+				t.Errorf("Workflows() = %+v, want the release: false workflows repo", w)
+			}
 			if got := m.NextWorkingWeekday(date(t, "2027-01-01")).Format(dateLayout); got != "2027-01-04" {
 				t.Errorf("NextWorkingWeekday(2027-01-01) = %s, want 2027-01-04", got)
 			}
@@ -83,6 +86,7 @@ repos:
 
 func TestParseErrors(t *testing.T) {
 	const api = "  - {name: api, kind: go-service, release: true}\n"
+	const wfs = "  - {name: workflows, kind: workflows, release: false}\n"
 	tests := []struct {
 		name, yaml, wantErr string
 	}{
@@ -100,6 +104,11 @@ func TestParseErrors(t *testing.T) {
 		{"duplicate dependency", "repos:\n" + api + "  - {name: ui, kind: ui, release: true, depends_on: [api, api]}\n", `dependency "api" more than once`},
 		{"non-helm depends on helm", "repos:\n  - {name: c, kind: helm, release: true}\n  - {name: ui, kind: ui, release: true, depends_on: [c]}\n", `depends on helm repo "c"`},
 		{"cycle", "repos:\n  - {name: a, kind: go-lib, release: true, depends_on: [b]}\n  - {name: b, kind: go-lib, release: true, depends_on: [a]}\n", "dependency cycle: cannot order repos a, b"},
+		{"cycle among release: false repos", "repos:\n" + api + "  - {name: a, kind: go-lib, release: false, depends_on: [b]}\n  - {name: b, kind: go-lib, release: false, depends_on: [a]}\n", "dependency cycle: cannot order repos a, b"},
+		{"two workflows repos", "repos:\n" + wfs + "  - {name: w2, kind: workflows, release: false}\n", `only one repo may be of kind "workflows"`},
+		{"released workflows repo", "repos:\n  - {name: workflows, kind: workflows, release: true}\n", "needs release: false"},
+		{"workflows repo with dependencies", "repos:\n" + api + "  - {name: workflows, kind: workflows, release: false, depends_on: [api]}\n", "needs release: false and no depends_on"},
+		{"dependency on the workflows repo", "repos:\n" + wfs + "  - {name: ui, kind: ui, release: true, depends_on: [workflows]}\n", "not release dependencies"},
 		{"bad holiday", "holidays: [25/12/2026]\nrepos:\n" + api, "not an ISO date"},
 		{"bad include pattern", "include_patterns: [\"plugin-[\"]\nrepos:\n" + api, "include pattern"},
 	}
@@ -114,8 +123,13 @@ func TestParseErrors(t *testing.T) {
 }
 
 func TestStages(t *testing.T) {
-	repo := func(name string, deps ...string) Repo { return Repo{Name: name, Kind: KindGoLib, DependsOn: deps} }
-	helm := func(name string, deps ...string) Repo { return Repo{Name: name, Kind: KindHelm, DependsOn: deps} }
+	repo := func(name string, deps ...string) Repo {
+		return Repo{Name: name, Kind: KindGoLib, DependsOn: deps, Release: true}
+	}
+	helm := func(name string, deps ...string) Repo {
+		return Repo{Name: name, Kind: KindHelm, DependsOn: deps, Release: true}
+	}
+	off := func(r Repo) Repo { r.Release = false; return r }
 	tests := []struct {
 		name    string
 		repos   []Repo
@@ -130,6 +144,8 @@ func TestStages(t *testing.T) {
 		{"helm releases after every non-helm repo", []Repo{repo("a"), repo("b", "a"), helm("charts", "a")}, [][]string{{"a"}, {"b"}, {"charts"}}, ""},
 		{"helm without depends_on still last", []Repo{helm("charts"), repo("a"), repo("b", "a")}, [][]string{{"a"}, {"b"}, {"charts"}}, ""},
 		{"helm-only manifest", []Repo{helm("x"), helm("y", "x")}, [][]string{{"x"}, {"y"}}, ""},
+		{"release: false repos are left out", []Repo{repo("a"), off(repo("old")), repo("b", "a", "old"), helm("charts"),
+			{Name: "workflows", Kind: KindWorkflows}}, [][]string{{"a"}, {"b"}, {"charts"}}, ""},
 		{"two-repo cycle", []Repo{repo("a", "b"), repo("b", "a")}, nil, "dependency cycle: cannot order repos a, b"},
 		{"cycle reports dependents too", []Repo{repo("root"), repo("x", "root", "z"), repo("y", "x"), repo("z", "y"), repo("leaf", "z")}, nil, "dependency cycle: cannot order repos leaf, x, y, z"},
 		{"self cycle", []Repo{repo("a", "a")}, nil, "dependency cycle: cannot order repos a"},

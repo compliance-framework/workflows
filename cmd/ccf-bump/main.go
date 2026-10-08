@@ -31,6 +31,7 @@ import (
 type GitHub interface {
 	LatestFinal(ctx context.Context, repo string) (string, error)
 	TagTime(ctx context.Context, repo, tag string) (time.Time, error)
+	TagCommit(ctx context.Context, repo, tag string) (string, error)
 	File(ctx context.Context, repo, ref, path string) ([]byte, error)
 	DefaultBranch(ctx context.Context, repo string) (string, error)
 	OpenPR(ctx context.Context, repo, branch string) (*bump.PR, error)
@@ -102,7 +103,7 @@ func run(ctx context.Context, args []string, e env) error {
 	fs.StringVar(&o.owner, "owner", "compliance-framework", "the repos' owner")
 	fs.StringVar(&o.mode, "mode", "sync", "sync (latest final releases) or train (only --set versions)")
 	fs.Var(o.set, "set", "dep=version target (repeatable); dep is a repo, a github.com/<owner>/ module path, opa or workflows")
-	fs.StringVar(&o.workflowsRef, "workflows-ref", "", "move compliance-framework/workflows refs to this ref (same as --set workflows=REF)")
+	fs.StringVar(&o.workflowsRef, "workflows-ref", "", "move compliance-framework/workflows pins to this release (vX.Y.Z, pinned by its commit SHA) or ref (same as --set workflows=REF)")
 	fs.StringVar(&o.clones, "clones", "", "directory of local clones (<dir>/<repo>) to read instead of cloning from GitHub")
 	fs.BoolVar(&o.pr, "pr", false, "push a branch and open or update a PR per repo")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "with --pr: print the PR instead of pushing")
@@ -151,7 +152,7 @@ func run(ctx context.Context, args []string, e env) error {
 	if cmd == "sync" && o.mode != "sync" {
 		return errors.New("sync runs in sync mode; use --repo with --mode train")
 	}
-	b := &bumper{e: e, o: o, m: m, finals: map[string]string{}}
+	b := &bumper{e: e, o: o, m: m, finals: map[string]string{}, commits: map[string]string{}}
 	inWindow, windowStart := 0, e.now() // PRs opened in the current hour (--batch)
 	var failed []error
 	for _, r := range selected {

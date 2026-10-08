@@ -1,0 +1,24 @@
+# Releases this repo with release-please (release-please-config.json, .release-please-manifest.json):
+# on each push to main it opens or updates the release PR, and once that merges it tags vX.Y.Z and
+# creates the GitHub release, as ccf-release-bot. No tag ever moves: callers pin a release's commit
+# SHA (`@<sha> # vX.Y.Z`) and ccf-bump moves the pins. See README, "Releasing workflows".
+name: self-release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: self-release
+
+jobs:
+  release-please:
+    # The called workflow is the one at this same commit.
+    uses: ./.github/workflows/release-please.yml
+    permissions:
+      contents: read
+    secrets:
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}

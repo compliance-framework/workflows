@@ -11,7 +11,7 @@ import (
 )
 
 func TestSelectRepos(t *testing.T) {
-	m := &manifest.Manifest{Repos: []manifest.Repo{{Name: "a", Release: true}, {Name: "b", Release: false}, {Name: "c", Release: true}}}
+	m := &manifest.Manifest{Repos: []manifest.Repo{{Name: "a", Release: true}, {Name: "b", Release: false}, {Name: "c", Release: true}, {Name: "w", Kind: manifest.KindWorkflows}}}
 	for _, tc := range []struct {
 		list string
 		want []string
@@ -21,6 +21,7 @@ func TestSelectRepos(t *testing.T) {
 		{list: " c, a\n", want: []string{"a", "c"}},
 		{list: "c c", want: []string{"c"}},
 		{list: "b", want: []string{"b"}},
+		{list: "w", want: []string{"w"}}, // the workflows repo only when named
 		{list: "a,x", err: "x"},
 	} {
 		got, err := SelectRepos(m, tc.list)

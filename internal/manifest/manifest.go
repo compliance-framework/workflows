@@ -33,6 +33,10 @@ const (
 	KindUI        Kind = "ui"
 	KindHelm      Kind = "helm"
 	KindAction    Kind = "action"
+	// KindWorkflows is this repo, compliance-framework/workflows: the source of the
+	// `uses: compliance-framework/workflows/...@<ref>` pins ccf-bump moves. It releases itself
+	// (self-release.yml), so it must have release: false; no tool acts on it as a repo.
+	KindWorkflows Kind = "workflows"
 )
 
 var validKinds = map[Kind]bool{
@@ -43,6 +47,7 @@ var validKinds = map[Kind]bool{
 	KindUI:        true,
 	KindHelm:      true,
 	KindAction:    true,
+	KindWorkflows: true,
 }
 
 // Repo is one repository entry in the manifest.
@@ -142,7 +147,8 @@ func Parse(data []byte) (*Manifest, error) {
 
 // Validate checks the manifest's invariants: unique names, known kinds,
 // dependencies that exist and form no cycle (and none on a helm repo from a
-// non-helm repo, since helm repos release last), ISO holidays and valid globs.
+// non-helm repo, since helm repos release last), at most one workflows repo
+// (release: false, outside the dependency graph), ISO holidays and valid globs.
 func (m *Manifest) Validate() error {
 	if len(m.Repos) == 0 {
 		return errors.New("manifest has no repos")
@@ -162,6 +168,14 @@ func (m *Manifest) Validate() error {
 		if len(r.Charts) > 0 && r.Kind != KindHelm {
 			return fmt.Errorf("repo %q: charts are only allowed on kind %q", r.Name, KindHelm)
 		}
+		if r.Kind == KindWorkflows {
+			if w := m.Workflows(); w != nil && w.Name != r.Name {
+				return fmt.Errorf("repo %q: only one repo may be of kind %q (%q is)", r.Name, KindWorkflows, w.Name)
+			}
+			if r.Release || len(r.DependsOn) > 0 {
+				return fmt.Errorf("repo %q: kind %q releases itself: it needs release: false and no depends_on", r.Name, KindWorkflows)
+			}
+		}
 	}
 	kinds := make(map[string]Kind, len(m.Repos))
 	for _, r := range m.Repos {
@@ -179,6 +193,9 @@ func (m *Manifest) Validate() error {
 			if seen[d] {
 				return fmt.Errorf("repo %q lists dependency %q more than once", r.Name, d)
 			}
+			if kinds[d] == KindWorkflows {
+				return fmt.Errorf("repo %q depends on %q, but its shared-workflow pins are not release dependencies", r.Name, d)
+			}
 			if r.Kind != KindHelm && kinds[d] == KindHelm {
 				return fmt.Errorf("repo %q depends on helm repo %q, but helm repos release last", r.Name, d)
 			}
@@ -195,8 +212,18 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("include pattern %q: %w", p, err)
 		}
 	}
-	if _, err := m.Stages(); err != nil {
+	if _, err := m.stages(func(Repo) bool { return true }); err != nil {
 		return err
+	}
+	return nil
+}
+
+// Workflows returns the repo of kind workflows, or nil when the manifest has none.
+func (m *Manifest) Workflows() *Repo {
+	for i := range m.Repos {
+		if m.Repos[i].Kind == KindWorkflows {
+			return &m.Repos[i]
+		}
 	}
 	return nil
 }

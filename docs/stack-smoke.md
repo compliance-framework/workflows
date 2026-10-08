@@ -55,7 +55,7 @@ workflow:
 ```yaml
 jobs:
   smoke:
-    uses: compliance-framework/workflows/.github/workflows/stack-smoke.yml@main
+    uses: compliance-framework/workflows/.github/workflows/stack-smoke.yml@<sha> # vX.Y.Z
     with:
       api-tag: 0.21.0
       ui-tag: 2.12.1
