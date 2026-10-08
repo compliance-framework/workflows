@@ -41,6 +41,9 @@ jobs:
   renovate:
     name: renovate
     runs-on: ubuntu-latest
+    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
+    # (repo-settings), so a workflow on another branch can't read them.
+    environment: release
     timeout-minutes: 60
     env:
       # A scheduled run has no inputs: keep these fallbacks equal to the dispatch defaults.

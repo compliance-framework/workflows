@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -27,6 +28,14 @@ type fakeRepo struct {
 	perms    WorkflowPermissions
 	// forkPolicy is the fork PR approval policy ("": none, as for a private repo).
 	forkPolicy string
+	envs       map[string]*fakeEnv
+}
+
+// fakeEnv is an environment: custom is false for one every branch may use.
+type fakeEnv struct {
+	custom   bool
+	policies []DeploymentPolicy
+	secrets  map[string]string // name -> value
 }
 
 // fakeGitHub keeps repo state in memory, records every call and applies writes to the state. Rulesets
@@ -150,6 +159,83 @@ func (f *fakeGitHub) SetForkPRApproval(_ context.Context, repo, policy string) e
 	return err
 }
 
+func (f *fakeGitHub) DefaultBranch(_ context.Context, repo string) (string, error) {
+	_, err := f.repo("default branch", repo, false)
+	return "main", err
+}
+
+func (f *fakeGitHub) Environment(_ context.Context, repo, name string) (*CurrentEnvironment, error) {
+	r, err := f.repo("environment "+name, repo, false)
+	if err != nil || r.envs[name] == nil {
+		return nil, err
+	}
+	var e CurrentEnvironment
+	if r.envs[name].custom {
+		_ = json.Unmarshal([]byte(`{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}`), &e)
+	}
+	return &e, nil
+}
+
+func (f *fakeGitHub) DeploymentPolicies(_ context.Context, repo, env string) ([]DeploymentPolicy, error) {
+	r, err := f.repo("policies "+env, repo, false)
+	if err != nil {
+		return nil, err
+	}
+	if e := r.envs[env]; e == nil || !e.custom {
+		return nil, fmt.Errorf("%s: 404, no custom policies", env) // as GitHub answers
+	}
+	return slices.Clone(r.envs[env].policies), nil
+}
+
+func (f *fakeGitHub) EnvironmentSecrets(_ context.Context, repo, env string) ([]string, error) {
+	r, err := f.repo("secrets "+env, repo, false)
+	if err != nil || r.envs[env] == nil {
+		return nil, err
+	}
+	return slices.Sorted(maps.Keys(r.envs[env].secrets)), nil
+}
+
+func (f *fakeGitHub) PutEnvironment(_ context.Context, repo, name string) error {
+	r, err := f.repo("put env "+name, repo, true)
+	if err != nil {
+		return err
+	}
+	if r.envs == nil {
+		r.envs = map[string]*fakeEnv{}
+	}
+	if r.envs[name] == nil {
+		r.envs[name] = &fakeEnv{secrets: map[string]string{}}
+	}
+	r.envs[name].custom = true
+	return nil
+}
+
+func (f *fakeGitHub) AddDeploymentPolicy(_ context.Context, repo, env string, p DeploymentPolicy) error {
+	r, err := f.repo("add policy "+env+" "+p.String(), repo, true)
+	if err == nil {
+		f.nextID++
+		p.ID = f.nextID
+		r.envs[env].policies = append(r.envs[env].policies, p)
+	}
+	return err
+}
+
+func (f *fakeGitHub) DeleteDeploymentPolicy(_ context.Context, repo, env string, id int64) error {
+	r, err := f.repo(fmt.Sprintf("delete policy %s %d", env, id), repo, true)
+	if err == nil {
+		r.envs[env].policies = slices.DeleteFunc(r.envs[env].policies, func(p DeploymentPolicy) bool { return p.ID == id })
+	}
+	return err
+}
+
+func (f *fakeGitHub) SetEnvironmentSecret(_ context.Context, repo, env, name, value string) error {
+	r, err := f.repo("secret "+env+" "+name, repo, true)
+	if err == nil {
+		r.envs[env].secrets[name] = value
+	}
+	return err
+}
+
 func (f *fakeGitHub) UpdateMergeSettings(_ context.Context, repo string, s MergeSettings) error {
 	r, err := f.repo("PATCH repo", repo, true)
 	if err == nil {
@@ -232,9 +318,19 @@ func newFake(names ...string) *fakeGitHub {
 	return f
 }
 
+// desired is the desired state without its environments, which TestEnvironment* cover (with
+// secret values).
 func desired(t *testing.T) Desired {
 	t.Helper()
-	d, err := DesiredState(Config{RequiredCheck: DefaultRequiredCheck, RequiredCheckAppID: GitHubActionsAppID, BypassAppID: 42})
+	d := desiredAll(t, false)
+	d.Environments = nil
+	return d
+}
+
+// desiredAll is the full desired state, environments included.
+func desiredAll(t *testing.T, rotate bool) Desired {
+	t.Helper()
+	d, err := DesiredState(Config{RequiredCheck: DefaultRequiredCheck, RequiredCheckAppID: GitHubActionsAppID, BypassAppID: 42, RotateSecrets: rotate})
 	if err != nil {
 		t.Fatal(err)
 	}

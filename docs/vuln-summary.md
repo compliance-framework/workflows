@@ -31,7 +31,7 @@ Severity is the advisory's (`critical`, `high`, `medium`, `low`); anything else 
 
 | Name | Kind | What |
 | --- | --- | --- |
-| `RELEASE_BOT_APP_ID`, `RELEASE_BOT_PRIVATE_KEY` | secrets | `ccf-release-bot`, to read the alerts. |
+| `RELEASE_BOT_APP_ID`, `RELEASE_BOT_PRIVATE_KEY` | `release` environment secrets (main only) | `ccf-release-bot`, to read the alerts. |
 | `SLACK_BOT_TOKEN` | secret | Bot token with `chat:write`. Without it the run prints the summary and posts nothing. |
 | `SLACK_CHANNEL_VULNS` | variable | Channel ID to post to. Empty means `SLACK_CHANNEL_CI_FAILURES`. |
 

@@ -26,6 +26,9 @@ jobs:
   summary:
     name: summary
     runs-on: ubuntu-latest
+    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
+    # (repo-settings), so a workflow on another branch can't read them.
+    environment: release
     timeout-minutes: 10
     env:
       # A scheduled run has no inputs: keep this fallback equal to the input's default.

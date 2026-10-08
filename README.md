@@ -308,8 +308,11 @@ The bot is installed on every org repo, so the job refuses to mint a token when 
 is empty or `github.repository` isn't `compliance-framework/<that name>`: a token minted with
 an owner and no repositories would reach the whole org.
 
-Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, via `secrets: inherit`. Outputs:
-`releases-created` and `paths-released` (JSON list of package paths), from the action.
+Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, from the caller's `release`
+environment (the job names it; [Repo settings](#repo-settings) creates it, limited to the default
+branch and release tags, and copies the secrets in). Callers keep `secrets: inherit`: the
+`workflow_call` secrets are optional, and an environment secret wins over an inherited one.
+Outputs: `releases-created` and `paths-released` (JSON list of package paths), from the action.
 
 **Shared defaults.** `release-please/defaults.json` holds the settings every repo uses:
 `bump-minor-pre-major: true` (breaking changes bump the minor before 1.0),
@@ -495,8 +498,8 @@ A repo calls its kind's release workflow when a release is published: by release
 candidate, both as ccf-release-bot so the event starts workflows. Each one decides its tags
 from the release's tag name (`github.event.release.tag_name`), never from the release's
 `prerelease` flag (rules in `internal/release`, `ReleaseTags`), and ends with
-[`release-finished.yml`](#release-finishedyml). They need `secrets: inherit` for the
-release-bot secrets.
+[`release-finished.yml`](#release-finishedyml). Its `dispatch` job reads the release-bot secrets
+from the caller's `release` environment (release tags may use it); callers keep `secrets: inherit`.
 
 | Workflow | Kind | Publishes |
 | --- | --- | --- |
@@ -656,7 +659,7 @@ The tail of every release workflow, called as a job with `needs` on every other 
 
 Inputs: `needs` (the caller's `toJSON(needs)`) and `images` (the packages to prune, as for
 `publish-image.yml`; only `name` is read). Secrets: `RELEASE_BOT_APP_ID` and
-`RELEASE_BOT_PRIVATE_KEY`. Permissions: `packages: write`.
+`RELEASE_BOT_PRIVATE_KEY`, from the caller's `release` environment (the `dispatch` job). Permissions: `packages: write`.
 
 ## Releasing workflows
 
@@ -708,6 +711,14 @@ desired state, defined in `internal/reposettings`:
   without a prerelease suffix): only `ccf-release-bot` creates, moves or deletes them. Release
   workflows run from the tag, so nobody else can start one on an unreviewed commit. Floating major
   tags (`v1`) don't match.
+- **Environment `release`**: only the default branch and the tags `v*.*.*` and `*-v*.*.*` may use
+  it (custom deployment branch and tag policies; any other is deleted), and it holds the secrets
+  `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`. Every job that mints a ccf-release-bot token
+  names it (`release-please.yml`, `cut-prerelease.yml`, `release-finished.yml`, and this repo's
+  train, Renovate, ccf-bump, attention digest and vulnerability summary), so a workflow pushed to
+  any other branch, or a PR's, is refused before it starts and never sees the key. Missing
+  secrets are written (encrypted with the environment's public key); present ones are left alone
+  unless `rotate-secrets` is on. Its other protection rules (reviewers, wait timer) aren't managed.
 
 Every repo in the manifest gets these settings, the `workflows` repo (`release: false`) too: every
 caller's CI and releases run its code. Rulesets are matched by name; other rulesets are left alone.
@@ -725,11 +736,24 @@ Inputs:
 | `apply` | `false` | `false` prints the diff and writes nothing; `true` writes it (from `main` only). |
 | `release-bot-app-id` | org variable `RELEASE_BOT_APP_ID` | `ccf-release-bot`'s app ID, the `ccf-review` bypass actor. Set the org variable (Settings, Secrets and variables, Actions, Variables) to the app's ID from its settings page, or pass the input; the run fails if both are empty. |
 | `required-check` | `ci / required` | The status check context `ccf-required` requires. |
+| `rotate-secrets` | `false` | Rewrite every `release` environment secret, not only missing ones: after rotating the ccf-release-bot key. |
 
-Secrets: `REPO_ADMIN_APP_ID` and `REPO_ADMIN_PRIVATE_KEY` (`ccf-repo-admin`). The app is installed
-on every org repo, so the job lists the selected repos first and mints a token scoped to exactly
-those (`repositories:`, with Administration `read`, or `write` when applying). It refuses an empty
-selection, and the tool checks the token reaches no other repo before reading anything.
+**The `repo-admin` environment.** The job runs in this repo's `repo-admin` environment, which holds
+`REPO_ADMIN_APP_ID` and `REPO_ADMIN_PRIVATE_KEY` (`ccf-repo-admin`) and the ccf-release-bot
+`RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY` it copies into each repo's `release`
+environment (only on apply; a dry run doesn't get them). Configure it by hand once (it is the one
+thing this tool doesn't manage): deployment branches `main` only, required reviewers (the org
+admins), and "Prevent self-review" on. Then every run, dry runs included, waits for an admin's
+approval, and no other branch or workflow can read the keys.
+
+**ccf-repo-admin's permissions** stay set, so a run (and, later, onboarding a new repo) works with
+no permission change: repository **Administration: Read and write** (settings, rulesets,
+environments and their policies, Actions settings), **Environments: Read and write** (environment
+secrets), **Actions: Read** (reading environments and policies) and Metadata: Read. The app is
+installed on every org repo, so the job lists the selected repos first and mints a token scoped to
+exactly those (`repositories:`), with only read access for a dry run (Administration and
+Environments `write` when applying). It refuses an empty selection, and the tool checks the token
+reaches no other repo before reading anything.
 
 Output, per repo, is one line per differing setting, `key: current -> desired`, then a total:
 
@@ -775,16 +799,36 @@ the end if any step failed.
 
 How to run it:
 
-1. **Dry run** (anyone, any time): Actions, `repo-settings`, Run workflow, with `apply` off. Or
-   `gh workflow run repo-settings.yml -f manifest=repos.mock.yaml`. `ccf-repo-admin` has
-   Administration **read** only, so a dry run can't change anything. Review the diff.
-2. **Apply** (a human, never an agent): in the `ccf-repo-admin` app settings, temporarily grant
-   **Administration: Read and write** and accept the new permission on the org installation. Run
-   the workflow from `main` with the same inputs and `apply` on. Run it again with `apply` on:
-   every repo should be `up to date` and nothing is written (the sync is idempotent). A dry run
-   can't show this, since its token is always read-only: a repo that is otherwise in sync shows
-   `0 change(s), 10 unknown` (7 merge settings, 3 ruleset bypass lists). Then set Administration back to **read**.
-   Do the mocks first.
+1. **Dry run**: Actions, `repo-settings`, Run workflow, with `apply` off. Or
+   `gh workflow run repo-settings.yml -f manifest=repos.mock.yaml`. An admin approves the
+   `repo-admin` deployment; the token is read-only, so a dry run can't change anything. Review
+   the diff.
+2. **Apply** (a human, never an agent): run it from `main` with the same inputs and `apply` on,
+   and approve the deployment. Run it again with `apply` on: every repo should be `up to date` and
+   nothing is written (the sync is idempotent). A dry run can't show this, since its token is
+   read-only: a repo that is otherwise in sync shows `0 change(s), 10 unknown` (7 merge settings,
+   3 ruleset bypass lists). Do the mocks first.
+
+**Moving the ccf-release-bot secrets into the environments** (once; the mocks first):
+
+1. Grant `ccf-repo-admin` the permissions above (app settings, Permissions; then accept them on
+   the org installation) and create the `repo-admin` environment with its four secrets. Generate a
+   new ccf-release-bot private key for it (app settings, Private keys): the old one was readable
+   by every workflow of every repo the org secret reached.
+2. Merge this change; the jobs that mint a token now name the `release` environment. Until a
+   repo's environment exists, GitHub creates an empty one on first use and the job still gets
+   the org secret, so nothing breaks in between.
+3. Apply `repo-settings` (`repos.mock.yaml`, then `repos.yaml`): each repo gets its `release`
+   environment, its policies, then the secrets. Check a release on a mock (release-please on
+   `main`, the release workflow on its tag).
+4. Remove the repos from the org secrets `RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY` (or
+   delete them) and the org secrets `REPO_ADMIN_*`, then delete the old private keys from both
+   apps.
+
+Callers need nothing new: `secrets: inherit` stays (it passes `SLACK_BOT_TOKEN`, which stays an
+org secret since `notify-failure.yml` runs on PRs), and the reusable workflows read the
+release-bot secrets from the environment. The `workflows` repo's own scheduled tools only run
+from `main` now; a dispatch from another branch is refused.
 
 The workflow calls `go run ./cmd/repo-settings sync`. Flags it doesn't expose: `--owner`
 (default `compliance-framework`), `--required-check-app-id` (default `15368`, GitHub Actions; `0`

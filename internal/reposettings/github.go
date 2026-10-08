@@ -3,6 +3,8 @@ package reposettings
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,10 +14,13 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/nacl/box"
 )
 
-// GitHub reads and writes repo settings with the GitHub REST API. Reads need Administration read;
-// writes need Administration write.
+// GitHub reads and writes repo settings with the GitHub REST API. Reads need Administration read,
+// Actions read (environments and their policies) and Environments read (their secrets' names);
+// writes need Administration write and Environments write (secrets).
 type GitHub struct {
 	BaseURL string // GITHUB_API_URL
 	Token   string
@@ -213,6 +218,120 @@ func (g *GitHub) ForkPRApproval(ctx context.Context, repo string) (string, error
 
 func (g *GitHub) SetForkPRApproval(ctx context.Context, repo, policy string) error {
 	return g.do(ctx, http.MethodPut, repoPath(repo, "/actions/permissions/fork-pr-contributor-approval"), map[string]string{"approval_policy": policy}, nil)
+}
+
+// DefaultBranch reads the repo's default branch.
+func (g *GitHub) DefaultBranch(ctx context.Context, repo string) (string, error) {
+	var r struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := g.do(ctx, http.MethodGet, repoPath(repo, ""), nil, &r); err != nil {
+		return "", err
+	}
+	if r.DefaultBranch == "" {
+		return "", fmt.Errorf("%s: no default branch in the response", repo)
+	}
+	return r.DefaultBranch, nil
+}
+
+// envPath is /repos/{owner}/{name}/environments/{env}{suffix}.
+func envPath(repo, env, suffix string) string {
+	return repoPath(repo, "/environments/"+url.PathEscape(env)+suffix)
+}
+
+// permissionHint names the app permissions an environment call needs when GitHub refuses it.
+func permissionHint(err error) error {
+	if isForbidden(err) {
+		return fmt.Errorf("%w (the token needs Actions read and Environments read, or write to apply: README, Repo settings)", err)
+	}
+	return err
+}
+
+// Environment reads the named environment; a 404 means the repo has none by that name.
+func (g *GitHub) Environment(ctx context.Context, repo, name string) (*CurrentEnvironment, error) {
+	var e CurrentEnvironment
+	err := g.do(ctx, http.MethodGet, envPath(repo, name, ""), nil, &e)
+	if isNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, permissionHint(err)
+	}
+	return &e, nil
+}
+
+func (g *GitHub) DeploymentPolicies(ctx context.Context, repo, env string) ([]DeploymentPolicy, error) {
+	var r struct {
+		TotalCount     int                `json:"total_count"`
+		BranchPolicies []DeploymentPolicy `json:"branch_policies"`
+	}
+	if err := g.do(ctx, http.MethodGet, envPath(repo, env, fmt.Sprintf("/deployment-branch-policies?per_page=%d", perPage)), nil, &r); err != nil {
+		return nil, permissionHint(err)
+	}
+	if r.TotalCount > len(r.BranchPolicies) {
+		return nil, fmt.Errorf("%s: environment %s has %d deployment policies, more than one page", repo, env, r.TotalCount)
+	}
+	return r.BranchPolicies, nil
+}
+
+func (g *GitHub) EnvironmentSecrets(ctx context.Context, repo, env string) ([]string, error) {
+	var r struct {
+		TotalCount int `json:"total_count"`
+		Secrets    []struct {
+			Name string `json:"name"`
+		} `json:"secrets"`
+	}
+	if err := g.do(ctx, http.MethodGet, envPath(repo, env, fmt.Sprintf("/secrets?per_page=%d", perPage)), nil, &r); err != nil {
+		return nil, permissionHint(err)
+	}
+	if r.TotalCount > len(r.Secrets) {
+		return nil, fmt.Errorf("%s: environment %s has %d secrets, more than one page", repo, env, r.TotalCount)
+	}
+	names := make([]string, len(r.Secrets))
+	for i, s := range r.Secrets {
+		names[i] = s.Name
+	}
+	return names, nil
+}
+
+// PutEnvironment creates the environment or switches it to custom branch and tag policies. Only
+// the deployment branch policy is sent.
+func (g *GitHub) PutEnvironment(ctx context.Context, repo, name string) error {
+	body := map[string]any{"deployment_branch_policy": map[string]bool{"protected_branches": false, "custom_branch_policies": true}}
+	return permissionHint(g.do(ctx, http.MethodPut, envPath(repo, name, ""), body, nil))
+}
+
+func (g *GitHub) AddDeploymentPolicy(ctx context.Context, repo, env string, p DeploymentPolicy) error {
+	body := DeploymentPolicy{Name: p.Name, Type: p.Type}
+	return permissionHint(g.do(ctx, http.MethodPost, envPath(repo, env, "/deployment-branch-policies"), body, nil))
+}
+
+func (g *GitHub) DeleteDeploymentPolicy(ctx context.Context, repo, env string, id int64) error {
+	return permissionHint(g.do(ctx, http.MethodDelete, envPath(repo, env, fmt.Sprintf("/deployment-branch-policies/%d", id)), nil, nil))
+}
+
+// SetEnvironmentSecret encrypts value with the environment's public key (a libsodium sealed box,
+// as GitHub requires) and writes it. Neither the value nor the ciphertext is ever in an error.
+func (g *GitHub) SetEnvironmentSecret(ctx context.Context, repo, env, name, value string) error {
+	var key struct {
+		KeyID string `json:"key_id"`
+		Key   string `json:"key"`
+	}
+	if err := g.do(ctx, http.MethodGet, envPath(repo, env, "/secrets/public-key"), nil, &key); err != nil {
+		return permissionHint(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(key.Key)
+	if err != nil || len(raw) != 32 || key.KeyID == "" {
+		return fmt.Errorf("%s: environment %s: unexpected public key (id %q, %d bytes)", repo, env, key.KeyID, len(raw))
+	}
+	var pub [32]byte
+	copy(pub[:], raw)
+	sealed, err := box.SealAnonymous(nil, []byte(value), &pub, rand.Reader)
+	if err != nil {
+		return fmt.Errorf("%s: environment %s: encrypting %s: %w", repo, env, name, err)
+	}
+	body := map[string]string{"encrypted_value": base64.StdEncoding.EncodeToString(sealed), "key_id": key.KeyID}
+	return permissionHint(g.do(ctx, http.MethodPut, envPath(repo, env, "/secrets/"+url.PathEscape(name)), body, nil))
 }
 
 func onOff(enabled bool) string {

@@ -31,6 +31,9 @@ jobs:
   sync:
     name: sync
     runs-on: ubuntu-latest
+    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
+    # (repo-settings), so a workflow on another branch can't read them.
+    environment: release
     # --batch 10 waits an hour after every 10 PRs.
     timeout-minutes: 300
     steps:

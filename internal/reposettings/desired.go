@@ -26,6 +26,19 @@ var ReleaseTagPatterns = []string{"v*.*.*", "*-v*.*.*"}
 // contributor's fork PR run, not only a first-time contributor's.
 const ForkPRApprovalAll = "all_external_contributors"
 
+// ReleaseEnvironment holds the secrets that mint ccf-release-bot tokens. The jobs that mint one
+// (release-please, cut-prerelease, release-finished and this repo's scheduled tools) name it, so
+// only code on the default branch or a release tag (ccf-release-tags: created by the bot only)
+// can read them; a workflow on any other branch or PR is refused before it starts.
+const ReleaseEnvironment = "release"
+
+// ReleaseBotSecrets are the release environment's secrets. Their values are the repo-settings
+// job's (the workflows repo's repo-admin environment), passed to Run in Options.Secrets.
+var ReleaseBotSecrets = []string{"RELEASE_BOT_APP_ID", "RELEASE_BOT_PRIVATE_KEY"}
+
+// DefaultBranchPattern in Environment.Branches stands for the repo's default branch.
+const DefaultBranchPattern = "~DEFAULT_BRANCH"
+
 // DefaultRequiredCheck is the check context the `required` job of a caller's `ci` job reports.
 const DefaultRequiredCheck = "ci / required"
 
@@ -120,6 +133,8 @@ type Config struct {
 	RequiredCheckAppID int64
 	// BypassAppID is the ccf-release-bot app's ID, the only actor that bypasses ccf-review.
 	BypassAppID int64
+	// RotateSecrets rewrites every environment secret (Environment.RotateSecrets).
+	RotateSecrets bool
 }
 
 // WorkflowPermissions are a repo's GITHUB_TOKEN defaults (GET/PUT
@@ -140,6 +155,28 @@ type ActionsSettings struct {
 	ForkPRApproval string
 }
 
+// Environment is a deployment environment this tool manages: which refs may use it and which
+// secrets it holds. Its other protection rules (reviewers, wait timer) are not managed.
+type Environment struct {
+	Name string
+	// Branches and Tags are the only refs whose jobs may use it (fnmatch patterns, as GitHub's
+	// deployment branch and tag policies); DefaultBranchPattern is the repo's default branch.
+	Branches, Tags []string
+	// Secrets must exist in it; missing ones are written from Options.Secrets.
+	Secrets []string
+	// RotateSecrets writes every secret, not only the missing ones (after a key rotation).
+	RotateSecrets bool
+}
+
+// DeploymentPolicy is a deployment branch or tag policy of an environment.
+type DeploymentPolicy struct {
+	ID   int64  `json:"id,omitempty"`
+	Name string `json:"name"`
+	Type string `json:"type"` // "branch" or "tag"
+}
+
+func (p DeploymentPolicy) String() string { return p.Type + ":" + p.Name }
+
 // Desired is the state every repo should have.
 type Desired struct {
 	Merge               MergeSettings
@@ -147,6 +184,7 @@ type Desired struct {
 	SecurityUpdates     bool
 	Actions             ActionsSettings
 	Rulesets            []Ruleset
+	Environments        []Environment
 }
 
 // DesiredState builds the desired state from c.
@@ -207,6 +245,13 @@ func DesiredState(c Config) (Desired, error) {
 				Rules:        []Rule{{Type: "creation"}, {Type: "update"}, {Type: "deletion"}},
 			},
 		},
+		Environments: []Environment{{
+			Name:          ReleaseEnvironment,
+			Branches:      []string{DefaultBranchPattern},
+			Tags:          slices.Clone(ReleaseTagPatterns),
+			Secrets:       slices.Clone(ReleaseBotSecrets),
+			RotateSecrets: c.RotateSecrets,
+		}},
 	}, nil
 }
 

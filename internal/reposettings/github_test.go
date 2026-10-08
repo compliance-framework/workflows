@@ -3,6 +3,8 @@ package reposettings
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"golang.org/x/crypto/nacl/box"
 )
 
 // defaultRepoJSON is GET /repos/o/a for a token that can read the merge settings.
@@ -324,5 +328,99 @@ func TestGitHubRulesetBypassAbsentVsEmpty(t *testing.T) {
 				t.Errorf("ruleset 7 = %+v, want bypass actors %v", rs, tc.want)
 			}
 		})
+	}
+}
+
+func TestGitHubEnvironment(t *testing.T) {
+	pub, priv, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const env = "/repos/o/a/environments/release"
+	var mu sync.Mutex
+	writes := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		key := r.Method + " " + r.URL.Path
+		if r.Method != http.MethodGet {
+			mu.Lock()
+			writes[key] = string(body)
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		switch key {
+		case "GET /repos/o/a":
+			_, _ = io.WriteString(w, `{"default_branch":"trunk"}`)
+		case "GET " + env:
+			_, _ = io.WriteString(w, `{"name":"release","deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}`)
+		case "GET " + env + "/deployment-branch-policies":
+			_, _ = io.WriteString(w, `{"total_count":2,"branch_policies":[{"id":1,"name":"trunk","type":"branch"},{"id":2,"name":"v*.*.*","type":"tag"}]}`)
+		case "GET " + env + "/secrets":
+			_, _ = io.WriteString(w, `{"total_count":1,"secrets":[{"name":"RELEASE_BOT_APP_ID","created_at":"2026-10-08T00:00:00Z"}]}`)
+		case "GET " + env + "/secrets/public-key":
+			_, _ = io.WriteString(w, `{"key_id":"k1","key":"`+base64.StdEncoding.EncodeToString(pub[:])+`"}`)
+		case "GET /repos/o/a/environments/denied":
+			http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	gh := &GitHub{BaseURL: srv.URL, Token: "tok"}
+	ctx := context.Background()
+
+	if b, err := gh.DefaultBranch(ctx, "o/a"); err != nil || b != "trunk" {
+		t.Errorf("DefaultBranch = %q, %v", b, err)
+	}
+	e, err := gh.Environment(ctx, "o/a", "release")
+	if err != nil || e == nil || !e.Custom() {
+		t.Errorf("Environment = %+v, %v", e, err)
+	}
+	if e, err := gh.Environment(ctx, "o/a", "missing"); err != nil || e != nil {
+		t.Errorf("Environment(missing) = %+v, %v", e, err)
+	}
+	if _, err := gh.Environment(ctx, "o/a", "denied"); err == nil || !strings.Contains(err.Error(), "Environments read") {
+		t.Errorf("Environment(denied) err = %v, want the permission hint", err)
+	}
+	if p, err := gh.DeploymentPolicies(ctx, "o/a", "release"); err != nil || len(p) != 2 || p[1].String() != "tag:v*.*.*" || p[1].ID != 2 {
+		t.Errorf("DeploymentPolicies = %+v, %v", p, err)
+	}
+	if s, err := gh.EnvironmentSecrets(ctx, "o/a", "release"); err != nil || !slices.Equal(s, []string{"RELEASE_BOT_APP_ID"}) {
+		t.Errorf("EnvironmentSecrets = %v, %v", s, err)
+	}
+
+	for _, err := range []error{
+		gh.PutEnvironment(ctx, "o/a", "release"),
+		gh.AddDeploymentPolicy(ctx, "o/a", "release", DeploymentPolicy{ID: 9, Name: "*-v*.*.*", Type: "tag"}),
+		gh.DeleteDeploymentPolicy(ctx, "o/a", "release", 2),
+		gh.SetEnvironmentSecret(ctx, "o/a", "release", "RELEASE_BOT_PRIVATE_KEY", "s3cr3t"),
+	} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for k, want := range map[string]string{
+		"PUT " + env: `{"deployment_branch_policy":{"custom_branch_policies":true,"protected_branches":false}}`,
+		"POST " + env + "/deployment-branch-policies":     `{"name":"*-v*.*.*","type":"tag"}`,
+		"DELETE " + env + "/deployment-branch-policies/2": ``,
+	} {
+		if writes[k] != want {
+			t.Errorf("%s body = %q, want %q", k, writes[k], want)
+		}
+	}
+	var sent struct {
+		EncryptedValue string `json:"encrypted_value"`
+		KeyID          string `json:"key_id"`
+	}
+	if err := json.Unmarshal([]byte(writes["PUT "+env+"/secrets/RELEASE_BOT_PRIVATE_KEY"]), &sent); err != nil {
+		t.Fatal(err)
+	}
+	sealed, _ := base64.StdEncoding.DecodeString(sent.EncryptedValue)
+	if plain, ok := box.OpenAnonymous(nil, sealed, pub, priv); !ok || string(plain) != "s3cr3t" || sent.KeyID != "k1" {
+		t.Errorf("secret = %q (decrypted %v), key %q", plain, ok, sent.KeyID)
+	}
+	if strings.Contains(writes["PUT "+env+"/secrets/RELEASE_BOT_PRIVATE_KEY"], "s3cr3t") {
+		t.Error("the secret was sent in clear")
 	}
 }
