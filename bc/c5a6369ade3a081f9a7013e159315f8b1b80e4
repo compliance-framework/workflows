@@ -1,0 +1,4 @@
+lisa-design:
+- Manifest check is "0.0.0 or >= 1.0.0" rather than pinning a value, so release PRs (which bump the manifest) never break the test again.
+- Version must equal semver.Canonical("v"+v): x/mod/semver.IsValid accepts shorthand like "v1.0" and build metadata, which release-please never writes; requiring the canonical form keeps the check a real full-semver check. Prereleases (1.2.0-rc.1) are accepted.
+- Versions in (0.0.0, 1.0.0) are rejected: initial-version is 1.0.0, so such a value means the config or manifest was edited by hand.
