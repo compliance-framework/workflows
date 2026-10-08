@@ -1,0 +1,2 @@
+lisa-addressed:
+- pass 1: added TestRequiredChecks (empty RequiredCheck falls back to CICheck; override; ReleaseCheck on release PRs).
