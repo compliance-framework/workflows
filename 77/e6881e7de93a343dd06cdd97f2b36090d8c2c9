@@ -1,0 +1,7 @@
+lisa-design:
+- Any EnableAutoMerge error is a ::warning:: (not only the two known GraphQL messages): the PR is already open, so a human can merge it; real failures (push, PR create/update, manifest/version resolution) still fail the run.
+- Superseded = open PR in the same repo whose head branch is ccf-bump/<mode>-* (same mode only, so a train run never closes a broader sync PR), head repo is the repo itself (not a fork), not today's branch, and author login equals the login of the PR just opened/updated (the release bot). An empty author login skips closing rather than broadening the match.
+- Dry run has no PR to learn the bot's login from, so it lists ccf-bump PRs authored by any Bot; it only prints, never writes.
+- Closing/deleting a superseded PR's branch failing is a warning, not a run failure (the new bump PR is open). Order: comment, close, then delete branch.
+- Warnings are collected on the bumper and repeated at the end of stdout and appended to $GITHUB_STEP_SUMMARY when set (the code wrote no summary before).
+- No workflow change: the live token already has contents write (delete ref) and pull-requests write (comment, close); dry runs only list PRs (pull-requests read).
