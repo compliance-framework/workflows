@@ -7,3 +7,6 @@ lisa-design:
 - Reason text from branch: renovate/opa -> OPA in the api; renovate/* -> major update; ccf-bump/* -> auto-merge off; else "labelled needs-human".
 - needs-human steps use !cancelled() so an incident post failure doesn't skip them.
 - The release-checks job is identified by its caller job id `release-checks` in NEEDS (every mock uses it; documented as a requirement).
+
+lisa-selfreview:
+pass 1 (strict): approve, no findings. Checked: plan/post route consistently (both call Route with the same env); vars allowed in jobs.<id>.env of a called workflow; lookup-only miss gives cache-hit '' or 'false' (condition uses != 'true'); human PRs and pushes never routed; no-channel path leaves incidents untouched (tested); token never printed (tested); Run stays comparable.
