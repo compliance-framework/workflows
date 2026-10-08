@@ -6,3 +6,9 @@ lisa-design:
 - Pin rules: same sha -> comment fix (auto-merge); older same-major sha#ver or tag -> move (auto-merge); main or SHA w/o comment -> move, needs human (Major); other major (older or newer) -> CONFLICT (not moved: v2 may change inputs, and sync would otherwise force-push over a human's migration branch); newer same major -> conflict (never downgrade); other branch/short sha -> conflict.
 - workflows-ref: DELETED (not rewritten) with its head comment and an emptied with:, only when the job's pin moves; flow-style with: is an error for a human. notify-failure default changed v1 -> "" and checks out `inputs.workflows-ref || job.workflow_sha`.
 - release-checks.yml gets additive input module-path (default true); workflows' ci.yml passes false, since a v2 must not require a /v2 module rename.
+
+lisa-selfreview:
+pass 1 (strict), verdict request_changes:
+- CORE-TEST-001 (must-fix) .github/workflows/self-release.yml, release-please-config.json, notify-failure.yml: the first-release config (simple, initial-version 1.0.0, manifest 0.0.0, no drift from defaults) and notify's `inputs.workflows-ref || job.workflow_sha` tool ref have no test. Fix: internal/ciworkflows/self_release_test.go.
+- CORE-NAME-001 (should-fix) cmd/ccf-bump/bumper.go bumper.finals: also caches "repo@tag" -> commit. Fix: separate commits map.
+- CORE-STYLE-001 (nit) internal/bump/files.go workflowRef doc and docs/ccf-bump.md line 98 over the usual width. Fix: reflow.
