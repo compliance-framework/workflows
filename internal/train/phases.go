@@ -1,6 +1,7 @@
 package train
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -44,7 +45,7 @@ func (e *Engine) bump(ctx context.Context, st *State, r *RepoState) error {
 	case !slices.Contains(pr.Labels, bump.AutomergeLabel) && !pr.AutoMerge: // AutoMerge: a PR from an older ccf-bump
 		r.hold(NeedsHuman, false, "ccf-bump left %s to a person (no %s label: a major update, or a pin that was not a version); review and merge it by hand", e.prLink(r.Name, pr.Number), bump.AutomergeLabel)
 	default:
-		merged, err := e.mergeGreen(ctx, r, pr)
+		merged, err := e.mergeGreen(ctx, r, pr, e.requiredChecks(false))
 		if merged {
 			r.next(ReleasePR)
 		}
@@ -53,13 +54,23 @@ func (e *Engine) bump(ctx context.Context, st *State, r *RepoState) error {
 	return nil
 }
 
-// mergeGreen merges pr once its checks pass, and reports whether it did.
-func (e *Engine) mergeGreen(ctx context.Context, r *RepoState, pr *PR) (bool, error) {
+// requiredChecks are the checks that gate a merge: CICheck (or --required-check) on every PR, and
+// ReleaseCheck too on a release-please PR.
+func (e *Engine) requiredChecks(releasePR bool) []string {
+	required := []string{cmp.Or(e.RequiredCheck, CICheck)}
+	if releasePR {
+		required = append(required, ReleaseCheck)
+	}
+	return required
+}
+
+// mergeGreen merges pr once its required checks pass, and reports whether it did.
+func (e *Engine) mergeGreen(ctx context.Context, r *RepoState, pr *PR, required []string) (bool, error) {
 	checks, err := e.Repos.Checks(ctx, r.Name, pr.HeadSHA)
 	if err != nil {
 		return false, err
 	}
-	switch state, detail := EvaluateChecks(checks, e.RequiredCheck); state {
+	switch state, detail := EvaluateChecks(checks, required); state {
 	case ChecksPending:
 		r.wait("waiting for checks on %s: %s", e.prLink(r.Name, pr.Number), detail)
 		return false, nil
@@ -148,7 +159,7 @@ func (e *Engine) merge(ctx context.Context, r *RepoState) error {
 				e.prLink(r.Name, pr.Number), strings.Join(majors, "; "), release.MajorApprovedLabel, r.Name)
 			return nil
 		}
-		if merged, err := e.mergeGreen(ctx, r, pr); !merged {
+		if merged, err := e.mergeGreen(ctx, r, pr, e.requiredChecks(true)); !merged {
 			return err
 		}
 		if pr, err = e.Repos.PR(ctx, r.Name, pr.Number); err != nil || !pr.Merged {

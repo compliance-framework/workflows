@@ -118,6 +118,7 @@ func (w *world) tick() {
 			}
 			pr.HeadSHA, pr.BaseSHA = head, r.main
 			w.green(r, head, !r.failChecks)
+			r.checks[head] = append(r.checks[head], Check{ID: w.nextID(), Name: ReleaseCheck, Status: "completed", Conclusion: "success"})
 		}
 		for sha, tags := range r.tags {
 			for _, tag := range tags {

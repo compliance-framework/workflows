@@ -67,7 +67,11 @@ func TestGitHubRepos(t *testing.T) {
 		t.Errorf("PR = %+v %v", pr, err)
 	}
 	checks, err := g.Checks(ctx, "r", "h")
-	if state, detail := EvaluateChecks(checks, "ci / required"); err != nil || state != ChecksFailing || detail != "osv" ||
+	// Statuses map onto checks: error fails, pending runs. Checks that are not required are ignored.
+	if state, _ := EvaluateChecks(checks, []string{CICheck}); err != nil || state != ChecksGreen {
+		t.Errorf("Checks = %+v %v -> %s", checks, err, state)
+	}
+	if state, detail := EvaluateChecks(checks, []string{CICheck, "osv", "cla"}); err != nil || state != ChecksFailing || detail != "osv" ||
 		!checks[0].StartedAt.Equal(time.Date(2026, 10, 8, 5, 1, 0, 0, time.UTC)) {
 		t.Errorf("Checks = %+v %v -> %s %s", checks, err, state, detail)
 	}
