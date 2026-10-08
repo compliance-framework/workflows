@@ -29,6 +29,16 @@ type PR struct {
 	Number int    `json:"number"`
 	NodeID string `json:"node_id"`
 	URL    string `json:"html_url"`
+	User   struct {
+		Login string `json:"login"`
+		Type  string `json:"type"` // "Bot" for a GitHub App
+	} `json:"user"`
+	Head struct {
+		Ref  string `json:"ref"`
+		Repo *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"` // nil when the fork is gone
+	} `json:"head"`
 }
 
 var finalTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
@@ -100,6 +110,35 @@ func (g *GitHub) OpenPR(ctx context.Context, repo, branch string) (*PR, error) {
 		return nil, nil
 	}
 	return &prs[0], nil
+}
+
+// OpenPRs lists repo's open PRs.
+func (g *GitHub) OpenPRs(ctx context.Context, repo string) ([]PR, error) {
+	var all []PR
+	for page := 1; page <= 10; page++ {
+		var prs []PR
+		if err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=100&page=%d", g.Owner, repo, page), nil, &prs); err != nil {
+			return nil, err
+		}
+		all = append(all, prs...)
+		if len(prs) < 100 {
+			break
+		}
+	}
+	return all, nil
+}
+
+// ClosePR comments on the PR, then closes it.
+func (g *GitHub) ClosePR(ctx context.Context, repo string, number int, comment string) error {
+	if err := g.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/comments", g.Owner, repo, number), map[string]string{"body": comment}, nil); err != nil {
+		return err
+	}
+	return g.do(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/%s/pulls/%d", g.Owner, repo, number), map[string]string{"state": "closed"}, nil)
+}
+
+// DeleteBranch deletes branch from repo.
+func (g *GitHub) DeleteBranch(ctx context.Context, repo, branch string) error {
+	return g.do(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", g.Owner, repo, branch), nil, nil)
 }
 
 // CreatePR opens a PR from head to base.

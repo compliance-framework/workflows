@@ -3,6 +3,7 @@ package bump
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,5 +59,47 @@ func TestGitHub(t *testing.T) {
 	}
 	if _, err := g.DefaultBranch(ctx, "missing"); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("DefaultBranch(missing) error = %v", err)
+	}
+}
+
+func TestGitHubSupersededPRs(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.Path+" "+string(body))
+		switch r.Method + " " + r.URL.Path {
+		case "GET /repos/o/ui/pulls":
+			fmt.Fprint(w, `[{"number":7,"user":{"login":"b[bot]","type":"Bot"},"head":{"ref":"ccf-bump/sync-x","repo":{"full_name":"o/ui"}}},
+				{"number":8,"user":{"login":"u","type":"User"},"head":{"ref":"x","repo":null}}]`)
+		case "POST /repos/o/ui/issues/7/comments", "PATCH /repos/o/ui/pulls/7":
+			fmt.Fprint(w, `{}`)
+		case "DELETE /repos/o/ui/git/refs/heads/ccf-bump/sync-x":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	g := &GitHub{BaseURL: srv.URL, Owner: "o"}
+	ctx := context.Background()
+	prs, err := g.OpenPRs(ctx, "ui")
+	if err != nil || len(prs) != 2 || prs[0].User.Login != "b[bot]" || prs[0].User.Type != "Bot" ||
+		prs[0].Head.Ref != "ccf-bump/sync-x" || prs[0].Head.Repo.FullName != "o/ui" || prs[1].Head.Repo != nil {
+		t.Fatalf("OpenPRs = %+v, %v", prs, err)
+	}
+	if err := g.ClosePR(ctx, "ui", 7, "Superseded by #9."); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.DeleteBranch(ctx, "ui", "ccf-bump/sync-x"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"GET /repos/o/ui/pulls ",
+		`POST /repos/o/ui/issues/7/comments {"body":"Superseded by #9."}`,
+		`PATCH /repos/o/ui/pulls/7 {"state":"closed"}`,
+		"DELETE /repos/o/ui/git/refs/heads/ccf-bump/sync-x ",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

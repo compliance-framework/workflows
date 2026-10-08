@@ -37,6 +37,9 @@ type GitHub interface {
 	CreatePR(ctx context.Context, repo, base, head, title, body string) (*bump.PR, error)
 	UpdatePR(ctx context.Context, repo string, number int, title, body string) error
 	EnableAutoMerge(ctx context.Context, id string) error
+	OpenPRs(ctx context.Context, repo string) ([]bump.PR, error)
+	ClosePR(ctx context.Context, repo string, number int, comment string) error
+	DeleteBranch(ctx context.Context, repo, branch string) error
 }
 
 // env is everything run depends on, so tests can fake it.
@@ -170,6 +173,7 @@ func run(ctx context.Context, args []string, e env) error {
 			inWindow++
 		}
 	}
+	b.summary()
 	return errors.Join(failed...)
 }
 
