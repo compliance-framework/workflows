@@ -177,6 +177,34 @@ func TestPostUntrackedRunIsNoop(t *testing.T) {
 	}
 }
 
+// TestClosedPRIsIgnored: release-please relabels its PR after the merge, and the labeled event
+// re-runs CI on the closed PR. Whatever that run's result, notify posts nothing.
+func TestClosedPRIsIgnored(t *testing.T) {
+	closed := strings.Replace(releasePR(`[{"name":"needs-human"}]`), `"number":7,`, `"number":7,"state":"closed",`, 1)
+	for _, needs := range []string{failed, releaseChecksFailed, passed} {
+		env, posts := setup(t, "pull_request", "refs/pull/7/merge", closed)
+		env["NEEDS"], env["NEEDS_HUMAN_CHANNEL"] = needs, "C0HUMAN"
+		env["NEEDS_HUMAN_STATE_FILE"] = filepath.Join(t.TempDir(), "needs-human.json")
+		if _, err := runCmd(t, env, "plan"); err != nil {
+			t.Fatal(err)
+		}
+		if out := outputs(t, env); !strings.HasPrefix(out, "notify=false\nreason=\n") || !strings.Contains(out, "needs-human=false\n") {
+			t.Errorf("needs %s: plan outputs = %q", needs, out)
+		}
+		for _, cmd := range []string{"post", "needs-human"} {
+			if _, err := runCmd(t, env, cmd); err != nil {
+				t.Fatal(err)
+			}
+			if out := outputs(t, env); out != "save=false\n" {
+				t.Errorf("needs %s: %s outputs = %q", needs, cmd, out)
+			}
+		}
+		if len(*posts) != 0 {
+			t.Errorf("needs %s: posts = %v", needs, *posts)
+		}
+	}
+}
+
 func TestPostIgnoresBrokenState(t *testing.T) {
 	env, posts := setup(t, "pull_request", "refs/pull/5/merge", renovatePR("abc"))
 	if err := os.WriteFile(env["STATE_FILE"], []byte("{"), 0o600); err != nil {

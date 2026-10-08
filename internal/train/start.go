@@ -47,7 +47,7 @@ func (e *Engine) Start(ctx context.Context, o StartOptions) error {
 	if err != nil {
 		return err
 	}
-	body, err := Render(st, issueHelp)
+	body, err := Render(st, e.ReposURL, issueHelp)
 	if err != nil {
 		return err
 	}

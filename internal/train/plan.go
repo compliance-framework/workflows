@@ -40,7 +40,7 @@ func (e *Engine) plan(ctx context.Context, is Issue, st *State) error {
 	if _, err := e.Tracker.Comment(ctx, is.Number, comment); err != nil {
 		errs = append(errs, err)
 	}
-	e.notify(ctx, st, "plan", fmt.Sprintf(":clipboard: Dry-run plan for *%s* (nothing merged):\n%s", is.Title, b.String()))
+	e.notify(ctx, st, "plan", fmt.Sprintf(":clipboard: Dry-run plan for *%s* (nothing merged):\n%s", is.Title, SlackText(b.String())))
 	st.Status = StatusFinished
 	return errors.Join(errs...)
 }
@@ -90,7 +90,7 @@ func (e *Engine) planRepo(ctx context.Context, st *State, r *RepoState, details 
 				r.Versions[pkg] = v
 			}
 		}
-		notes = append(notes, fmt.Sprintf("would release %s from #%d", Versions(r.Versions), pr.Number))
+		notes = append(notes, fmt.Sprintf("would release %s from %s", Versions(r.Versions), e.prLink(r.Name, pr.Number)))
 		majors, err := e.majors(ctx, r.Name, pr)
 		if err != nil {
 			return err

@@ -39,6 +39,7 @@ func TestRoute(t *testing.T) {
 		{"human PR labelled", pr("octocat", "fix", true), fail("release-checks"), true, fail("release-checks"), ""},
 		{"human release-please branch", pr("octocat", "release-please--x", false), fail("release-checks"), true, fail("release-checks"), ""},
 		{"push", Run{Repo: "o/r", EventName: "push", Branch: "renovate/x"}, fail("ci"), true, fail("ci"), ""},
+		{"closed labelled bot PR", func() Run { r := pr(bot, "renovate/vite-8.x", true); r.PRClosed = true; return r }(), pass, true, pass, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,6 +90,16 @@ func TestPostNeedsHuman(t *testing.T) {
 	}
 	if _, err := PostNeedsHuman(context.Background(), p, r, "x", ""); err == nil {
 		t.Error("no error without a channel")
+	}
+}
+
+func TestRunFromEnvClosed(t *testing.T) {
+	for state, want := range map[string]bool{`"closed"`: true, `"open"`: false, `""`: false} {
+		r, err := RunFromEnv(getenv(t, "pull_request", "refs/pull/5/merge",
+			`{"pull_request":{"number":5,"state":`+state+`,"user":{"login":"renovate[bot]"},"head":{"ref":"renovate/x","sha":"2"}}}`))
+		if err != nil || r.PRClosed != want {
+			t.Errorf("state %s: PRClosed = %t, %v; want %t", state, r.PRClosed, err, want)
+		}
 	}
 }
 

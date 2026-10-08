@@ -80,15 +80,17 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	default:
 		return fmt.Errorf("unknown command %q: want select, start or reconcile", cmd)
 	}
+	server := strings.TrimRight(envOr(getenv, "GITHUB_SERVER_URL", "https://github.com"), "/")
 	e := &train.Engine{
 		Repos:                 &train.GitHub{BaseURL: api, Token: getenv("GH_TOKEN"), Owner: *owner},
 		Tracker:               tracker,
 		Bumper:                execBumper{path: *bumpPath, log: stdout},
 		Load:                  load,
+		ReposURL:              server + "/" + *owner,
 		Channel:               getenv("SLACK_CHANNEL"),
 		RequiredCheck:         *required,
 		ReleasePleaseWorkflow: *rpWorkflow,
-		RunURL:                fmt.Sprintf("%s/%s/actions/runs/%s", envOr(getenv, "GITHUB_SERVER_URL", "https://github.com"), getenv("GITHUB_REPOSITORY"), getenv("GITHUB_RUN_ID")),
+		RunURL:                fmt.Sprintf("%s/%s/actions/runs/%s", server, getenv("GITHUB_REPOSITORY"), getenv("GITHUB_RUN_ID")),
 		Now:                   now,
 		Log:                   stdout,
 	}

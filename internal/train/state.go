@@ -188,8 +188,9 @@ func Title(month string, dryRun bool, existing []string) string {
 	}
 }
 
-// Render returns the tracking issue body: a summary, the table and the hidden state.
-func Render(s *State, issueHelp string) (string, error) {
+// Render returns the tracking issue body: a summary, the table and the hidden state. reposURL
+// is the web URL of the repos' owner, for the PR links (see PRLink).
+func Render(s *State, reposURL, issueHelp string) (string, error) {
 	data, err := json.Marshal(s) // escapes < and >, so the JSON can't close the comment
 	if err != nil {
 		return "", err
@@ -211,10 +212,10 @@ func Render(s *State, issueHelp string) (string, error) {
 	for _, r := range s.Repos {
 		var prs []string
 		if r.BumpPR > 0 {
-			prs = append(prs, fmt.Sprintf("bump #%d", r.BumpPR))
+			prs = append(prs, "bump "+PRLink(reposURL, r.Name, r.BumpPR))
 		}
 		if r.ReleasePR > 0 {
-			prs = append(prs, fmt.Sprintf("release #%d", r.ReleasePR))
+			prs = append(prs, "release "+PRLink(reposURL, r.Name, r.ReleasePR))
 		}
 		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s |\n", r.Stage, r.Name, r.Status(),
 			Versions(r.From), Versions(r.Versions), strings.Join(prs, ", "), cell(r.Detail))

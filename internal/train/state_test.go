@@ -21,14 +21,15 @@ func testState() *State {
 func TestRenderParseRoundTrip(t *testing.T) {
 	s := testState()
 	s.Repos[1].Detail += " --> <!-- injected"
-	body, err := Render(s, "Comment /skip <repo>.")
+	body, err := Render(s, "https://github.com/o", "Comment /skip <repo>.")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
 		"Release train 2026-12 over `repos.mock.yaml`: **open**.",
-		"| 1 | mock-api | released | v0.1.0 | v0.2.0 | release #4 |  |",
-		`| 2 | mock-agent | blocked |  |  | bump #8, release #9 | checks failing on #9: ci / go \| x --> <!-- injected |`,
+		"| 1 | mock-api | released | v0.1.0 | v0.2.0 | release [mock-api#4](https://github.com/o/mock-api/pull/4) |  |",
+		"| 2 | mock-agent | blocked |  |  | bump [mock-agent#8](https://github.com/o/mock-agent/pull/8), release [mock-agent#9](https://github.com/o/mock-agent/pull/9) | " +
+			`checks failing on #9: ci / go \| x --> <!-- injected |`,
 		"| 3 | mock-helm-charts | waiting | mock-agent v0.2.0, mock-app v0.2.0 |",
 	} {
 		if !strings.Contains(body, want) {

@@ -1,6 +1,7 @@
 # Checks a release-please PR (head branch release-please--*) before it merges: final
 # compliance-framework dependencies, an approved major bump, a matching Go module path. On any
-# other PR the job is skipped, which a required check counts as passing. Rules: internal/release.
+# other PR, and on a closed one (release-please relabels its PR after the merge), the job is
+# skipped, which a required check counts as passing. Rules: internal/release.
 name: release-checks
 
 on:
@@ -16,7 +17,7 @@ permissions: {}
 jobs:
   release-checks:
     name: release-checks
-    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    if: github.event_name == 'pull_request' && github.event.pull_request.state != 'closed' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

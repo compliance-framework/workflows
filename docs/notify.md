@@ -12,7 +12,10 @@ A run is tracked when:
   `renovate/` or `ccf-bump/` (a pull request, or a push to that branch);
 - (b) it's for a push to the default branch.
 
-Every other run (a human's PR, a push to another branch, a tag, a schedule) does nothing.
+Every other run (a human's PR, a push to another branch, a tag, a schedule) does nothing, and
+so does a run for a closed pull request, merged or not (the event payload's `pull_request.state`
+is `closed`): release-please relabels its PR after the merge, and that re-runs CI on a PR no one
+can act on. It opens no incident, posts no reply and is never posted as needing a human.
 
 ## Incidents
 

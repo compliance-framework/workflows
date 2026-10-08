@@ -37,7 +37,7 @@ func openTrain(t *testing.T, repos ...string) string {
 	for _, r := range repos {
 		st.Repos = append(st.Repos, &train.RepoState{Name: r, Stage: 1, Phase: train.Waiting})
 	}
-	body, err := train.Render(st, "")
+	body, err := train.Render(st, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestRunRejectsUnknownCommands(t *testing.T) {
 
 func TestWatch(t *testing.T) {
 	render := func(r *train.RepoState) string {
-		body, err := train.Render(&train.State{Month: "2026-12", Manifest: "repos.mock.yaml", Status: train.StatusOpen, Repos: []*train.RepoState{r}}, "")
+		body, err := train.Render(&train.State{Month: "2026-12", Manifest: "repos.mock.yaml", Status: train.StatusOpen, Repos: []*train.RepoState{r}}, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}

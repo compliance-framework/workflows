@@ -32,6 +32,7 @@ type Engine struct {
 	// Load reads a manifest; the train's own path is in its state.
 	Load func(path string) (*manifest.Manifest, error)
 
+	ReposURL              string // web URL of the repos' owner (https://github.com/<owner>), for PR links
 	Channel               string // Slack channel for new trains
 	RequiredCheck         string // a check every merged PR must pass, e.g. "ci / required"
 	ReleasePleaseWorkflow string // file name of the repos' release-please workflow
@@ -145,7 +146,7 @@ func (e *Engine) step(ctx context.Context, is Issue, st *State) error {
 	for _, r := range st.Repos {
 		if r.Hold != NoHold {
 			e.notify(ctx, st, r.Name+"|"+string(r.Phase)+"|"+string(r.Hold)+"|"+r.Detail,
-				fmt.Sprintf(":warning: *%s* is %s (%s): %s <%s|tracking issue>", r.Name, r.Hold, r.Phase, r.Detail, is.URL))
+				fmt.Sprintf(":warning: *%s* is %s (%s): %s <%s|tracking issue>", r.Name, r.Hold, r.Phase, SlackText(r.Detail), is.URL))
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
@@ -225,7 +226,7 @@ func (e *Engine) notify(ctx context.Context, st *State, key, text string) {
 
 // save writes the state and the table to the issue, closing it once the train is over.
 func (e *Engine) save(ctx context.Context, is Issue, st *State) error {
-	body, err := Render(st, issueHelp)
+	body, err := Render(st, e.ReposURL, issueHelp)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package train
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -49,7 +50,7 @@ func open(t *testing.T, w *world, e *Engine, o StartOptions) {
 		t.Fatal(err)
 	}
 	st.ThreadTS = "ts-0"
-	body, err := Render(st, issueHelp)
+	body, err := Render(st, e.ReposURL, issueHelp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func TestFailureInStage2BlocksStage3(t *testing.T) {
 	drive(t, w, e, 10)
 	st := w.state(1)
 	agent := st.Repo("mock-agent")
-	if agent.Hold != Blocked || agent.Phase != Merging || !strings.Contains(agent.Detail, "checks failing on #") {
+	if agent.Hold != Blocked || agent.Phase != Merging || !strings.Contains(agent.Detail, fmt.Sprintf("checks failing on [mock-agent#%d](https://github.com/compliance-framework/mock-agent/pull/%d) at ", agent.ReleasePR, agent.ReleasePR)) {
 		t.Fatalf("mock-agent = %+v", agent)
 	}
 	if ui := st.Repo("mock-ui"); ui.Phase != Released {
@@ -138,9 +139,13 @@ func TestFailureInStage2BlocksStage3(t *testing.T) {
 		}
 	}
 	blocked := 0
+	link := fmt.Sprintf("<https://github.com/compliance-framework/mock-agent/pull/%d|mock-agent#%d>", agent.ReleasePR, agent.ReleasePR)
 	for _, m := range w.slack {
 		if strings.Contains(m, "*mock-agent* is blocked") {
 			blocked++
+			if !strings.Contains(m, "checks failing on "+link) || strings.Contains(m, "](") {
+				t.Errorf("the Slack message doesn't link %s in mrkdwn: %q", link, m)
+			}
 		}
 	}
 	if blocked != 1 {
