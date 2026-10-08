@@ -113,6 +113,28 @@ func (g *GitHub) TagCommit(ctx context.Context, repo, tag string) (string, error
 	return c.SHA, err
 }
 
+// ReleaseAuthor returns the login of the account that published repo's release tag.
+func (g *GitHub) ReleaseAuthor(ctx context.Context, repo, tag string) (string, error) {
+	var r struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+	}
+	err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/releases/tags/%s", g.Owner, repo, url.PathEscape(tag)), nil, &r)
+	return r.Author.Login, err
+}
+
+// OnBranch reports whether commit sha is on repo's branch: its head or one of its ancestors.
+func (g *GitHub) OnBranch(ctx context.Context, repo, sha, branch string) (bool, error) {
+	var c struct {
+		Status string `json:"status"`
+	}
+	// base...head: "ahead" (or "identical") means the branch contains the commit; per_page=1
+	// keeps the commit list in the response short.
+	err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/compare/%s...%s?per_page=1", g.Owner, repo, url.PathEscape(sha), url.PathEscape(branch)), nil, &c)
+	return c.Status == "ahead" || c.Status == "identical", err
+}
+
 // File returns the content of path in repo at ref.
 func (g *GitHub) File(ctx context.Context, repo, ref, path string) ([]byte, error) {
 	var f struct {

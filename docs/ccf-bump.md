@@ -104,6 +104,12 @@ with `--set workflows=vX.Y.Z` / `--workflows-ref`. ccf-bump reads the commit the
 | a newer version | conflict: ccf-bump never downgrades |
 | another branch (not `main`), or anything else | conflict: a human decides |
 
+The release must have been published by the release bot (`--author`, default
+`ccf-release-bot[bot]`, as release-please does) and its commit must be on the workflows repo's
+default branch. The moved pins put every caller on that code and same-major moves auto-merge, so a
+release someone published by hand, or cut from an unreviewed branch, doesn't move them: in sync
+mode the pins are left as they are with a warning, and a release given with `--set` fails the run.
+
 The new pin keeps the line's layout: the comment's version is added or replaced, and any other
 comment text is kept after it (`# pinned` becomes `# vX.Y.Z pinned`). When a job's pin moves,
 its `workflows-ref:` input and the comment above it are deleted (the reusable workflows build

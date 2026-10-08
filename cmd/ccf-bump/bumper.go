@@ -26,6 +26,8 @@ type bumper struct {
 	finals map[string]string // repo -> latest final tag, cached across repos
 	// commits caches "repo@tag" -> the commit SHA the tag points at (shared-workflow pins).
 	commits map[string]string
+	// trust caches "repo@tag" -> why the shared-workflow release isn't trusted (nil: it is).
+	trust map[string]error
 	// warnings are problems that don't fail the run (labels, superseded PRs, merges), for the summary.
 	warnings []string
 }
@@ -187,7 +189,8 @@ func (b *bumper) targets(ctx context.Context, cfg bump.Config, refs []bump.Ref) 
 // workflowsTarget sets the target of the shared-workflow pins: a release vX.Y.Z (given, or in
 // sync mode the latest final release of the manifest's workflows repo) becomes its commit SHA
 // with the tag (bump.WorkflowsPin); any other given ref is used as is. Without a workflows repo in
-// the manifest, sync mode leaves the pins alone.
+// the manifest, sync mode leaves the pins alone. A release that trustedRelease refuses is an error
+// when given; in sync mode the pins stay as they are, with a warning.
 func (b *bumper) workflowsTarget(ctx context.Context, t map[string]string, refs []bump.Ref, final func(string) (string, error)) error {
 	if !slices.ContainsFunc(refs, func(r bump.Ref) bool { return r.Dep == bump.DepWorkflows }) {
 		return nil
@@ -216,7 +219,46 @@ func (b *bumper) workflowsTarget(ctx context.Context, t map[string]string, refs 
 		}
 		b.commits[repo+"@"+tag] = sha
 	}
+	err, checked := b.trust[repo+"@"+tag]
+	if !checked {
+		err = b.trustedRelease(ctx, repo, tag, sha)
+		b.trust[repo+"@"+tag] = err
+		if err != nil && !given {
+			b.warn("workflows pins left as they are: %v", err)
+		}
+	}
+	switch {
+	case err != nil && given:
+		return err
+	case err != nil:
+		return nil
+	}
 	t[bump.DepWorkflows] = bump.WorkflowsPin(sha, tag)
+	return nil
+}
+
+// trustedRelease checks that release tag of repo, at commit sha, was published by the release bot
+// (--author) from repo's default branch. The pins move every caller onto that code, and the bump
+// PRs merge without a review, so a release cut by hand from an unreviewed branch must not move them.
+func (b *bumper) trustedRelease(ctx context.Context, repo, tag, sha string) error {
+	author, err := b.e.gh.ReleaseAuthor(ctx, repo, tag)
+	if err != nil {
+		return fmt.Errorf("release %s of %s: %w", tag, repo, err)
+	}
+	if !strings.EqualFold(author, b.o.author) {
+		return fmt.Errorf("release %s of %s was published by %s, not %s", tag, repo, author, b.o.author)
+	}
+	branch, err := b.e.gh.DefaultBranch(ctx, repo)
+	if err != nil {
+		return fmt.Errorf("default branch of %s: %w", repo, err)
+	}
+	on, err := b.e.gh.OnBranch(ctx, repo, sha, branch)
+	if err != nil {
+		return fmt.Errorf("is %s %s on %s: %w", repo, tag, branch, err)
+	}
+	if !on {
+		return fmt.Errorf("release %s of %s is at %s, which is not on %s", tag, repo, sha, branch)
+	}
 	return nil
 }
 

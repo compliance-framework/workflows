@@ -16,10 +16,14 @@ import (
 )
 
 type fakeGH struct {
-	failFor  string // LatestFinal fails for this repo
-	finals   map[string]string
-	files    map[string]string // "repo@ref:path" -> content
-	commits  map[string]string // "repo@tag" -> commit SHA
+	failFor string // LatestFinal fails for this repo
+	finals  map[string]string
+	files   map[string]string // "repo@ref:path" -> content
+	commits map[string]string // "repo@tag" -> commit SHA
+	// authors: "repo@tag" -> who published the release (default ccf-release-bot[bot]); offMain:
+	// commits that are not on the default branch.
+	authors  map[string]string
+	offMain  map[string]bool
 	open     map[string]*bump.PR
 	calls    []string
 	nextPR   int
@@ -52,6 +56,15 @@ func (f *fakeGH) TagCommit(_ context.Context, repo, tag string) (string, error) 
 		return "", fmt.Errorf("no tag %s %s", repo, tag)
 	}
 	return c, nil
+}
+func (f *fakeGH) ReleaseAuthor(_ context.Context, repo, tag string) (string, error) {
+	if a, ok := f.authors[repo+"@"+tag]; ok {
+		return a, nil
+	}
+	return "ccf-release-bot[bot]", nil
+}
+func (f *fakeGH) OnBranch(_ context.Context, _, sha, branch string) (bool, error) {
+	return branch == "main" && !f.offMain[sha], nil
 }
 func (f *fakeGH) File(_ context.Context, repo, ref, path string) ([]byte, error) {
 	c, ok := f.files[repo+"@"+ref+":"+path]
@@ -354,6 +367,37 @@ func TestWorkflowsPins(t *testing.T) {
 	if err := run(context.Background(), args, e); err != nil || !strings.Contains(out.String(), "-> "+sha+" # v1.1.0") {
 		t.Errorf("train --set workflows=1.1.0: %v\n%s", err, out)
 	}
+
+	// A release someone published by hand, or cut from a commit that isn't on main, doesn't move
+	// the pins: sync warns and leaves them, a given release fails.
+	for _, untrusted := range []struct {
+		name string
+		set  func()
+		why  string
+	}{
+		{"published by hand", func() { gh.authors = map[string]string{"workflows@v1.1.0": "mallory"} },
+			"release v1.1.0 of workflows was published by mallory, not ccf-release-bot[bot]"},
+		{"off main", func() { gh.authors, gh.offMain = nil, map[string]bool{sha: true} },
+			"release v1.1.0 of workflows is at " + sha + ", which is not on main"},
+	} {
+		untrusted.set()
+		out.Reset()
+		gh.finals["workflows"] = "v1.1.0"
+		args := []string{"sync", "--repos", "mock-plugin-1", "--manifest", m, "--clones", filepath.Join(root, "clones")}
+		if err := run(context.Background(), args, e); err != nil {
+			t.Fatalf("%s: sync: %v\n%s", untrusted.name, err, out)
+		}
+		if !strings.Contains(out.String(), "::warning::ccf-bump: workflows pins left as they are: "+untrusted.why) ||
+			!strings.Contains(out.String(), "no target workflows    3 pin(s) left as they are") {
+			t.Errorf("%s: sync output:\n%s", untrusted.name, out)
+		}
+		out.Reset()
+		args = []string{"--repo", "mock-plugin-1", "--mode", "train", "--set", "workflows=v1.1.0", "--manifest", m, "--clones", filepath.Join(root, "clones")}
+		if err := run(context.Background(), args, e); err == nil || !strings.Contains(err.Error(), untrusted.why) {
+			t.Errorf("%s: train --set workflows=v1.1.0: %v\n%s", untrusted.name, err, out)
+		}
+	}
+	gh.authors, gh.offMain = nil, nil
 
 	// Train mode moves the pins only when asked; sync mode without a workflows release leaves them.
 	for _, args := range [][]string{
