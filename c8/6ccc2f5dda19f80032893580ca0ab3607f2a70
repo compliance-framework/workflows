@@ -4,3 +4,6 @@ lisa-design:
 - Train board: Block Kit has no table block in our supported set, so each stage is a section titled "Stage n" with one field per repo (name link + pill emoji + status + version); stages over 10 repos split into extra sections.
 - Board color precedence: aborted (grey) > finished (green) > any repo held (red) > running (amber).
 - Failed jobs are struck through (~job~) once Resolved or Closed, kept otherwise.
+
+lisa-selfreview:
+pass 1: fixed — workflow name unescaped in the incident fallback text; file comment referenced cmd/slack-preview before it exists. pass 2: no findings.
