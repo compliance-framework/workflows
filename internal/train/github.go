@@ -109,6 +109,8 @@ func pages[T any](ctx context.Context, g *GitHub, path string, out *[]T) error {
 	return nil
 }
 
+func (g *GitHub) fullName(repo string) string { return g.Owner + "/" + repo }
+
 func (g *GitHub) repoPath(repo string) string {
 	return "/repos/" + url.PathEscape(g.Owner) + "/" + url.PathEscape(repo)
 }
@@ -150,8 +152,11 @@ type ghPR struct {
 	MergeSHA string `json:"merge_commit_sha"`
 	AutoMrg  any    `json:"auto_merge"`
 	Head     struct {
-		Ref string `json:"ref"`
-		SHA string `json:"sha"`
+		Ref  string `json:"ref"`
+		SHA  string `json:"sha"`
+		Repo *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"` // null when the fork was deleted
 	} `json:"head"`
 	Base struct {
 		SHA string `json:"sha"`
@@ -161,9 +166,11 @@ type ghPR struct {
 	} `json:"labels"`
 }
 
-func (p ghPR) pr() *PR {
+// pr converts p, a PR of fullName ("owner/repo").
+func (p ghPR) pr(fullName string) *PR {
 	out := &PR{Number: p.Number, URL: p.URL, HeadSHA: p.Head.SHA, BaseSHA: p.Base.SHA, Open: p.State == "open",
-		Merged: p.MergedAt != "", AutoMerge: p.AutoMrg != nil}
+		Merged: p.MergedAt != "", AutoMerge: p.AutoMrg != nil,
+		Fork: p.Head.Repo == nil || !strings.EqualFold(p.Head.Repo.FullName, fullName)}
 	if out.Merged {
 		out.MergeSHA = p.MergeSHA
 	}
@@ -173,15 +180,17 @@ func (p ghPR) pr() *PR {
 	return out
 }
 
-// OpenPR returns the oldest open PR whose head branch starts with headPrefix, or nil.
+// OpenPR returns the oldest open PR whose head branch, in repo itself, starts with headPrefix, or
+// nil. A fork's PR is skipped: its head ref is only the fork's branch name, which anyone can make
+// look like release-please's.
 func (g *GitHub) OpenPR(ctx context.Context, repo, headPrefix string) (*PR, error) {
 	var prs []ghPR
 	if err := pages(ctx, g, g.repoPath(repo)+"/pulls?state=open&sort=created&direction=asc", &prs); err != nil {
 		return nil, err
 	}
 	for _, p := range prs {
-		if strings.HasPrefix(p.Head.Ref, headPrefix) {
-			return p.pr(), nil
+		if pr := p.pr(g.fullName(repo)); strings.HasPrefix(p.Head.Ref, headPrefix) && !pr.Fork {
+			return pr, nil
 		}
 	}
 	return nil, nil
@@ -193,7 +202,7 @@ func (g *GitHub) PR(ctx context.Context, repo string, number int) (*PR, error) {
 	if err := g.do(ctx, http.MethodGet, fmt.Sprintf("%s/pulls/%d", g.repoPath(repo), number), nil, &p); err != nil {
 		return nil, err
 	}
-	return p.pr(), nil
+	return p.pr(g.fullName(repo)), nil
 }
 
 // Checks returns the check runs and commit statuses of sha.
