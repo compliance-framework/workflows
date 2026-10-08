@@ -66,7 +66,7 @@ func (f *fakeGH) OpenPR(_ context.Context, repo, branch string) (*bump.PR, error
 
 // newPR is an open PR from branch in owner/repo.
 func newPR(n int, owner, repo, branch, login, typ string) *bump.PR {
-	pr := &bump.PR{Number: n, NodeID: fmt.Sprintf("PR_%d", n), URL: fmt.Sprintf("https://example/%s/%d", repo, n)}
+	pr := &bump.PR{Number: n, NodeID: fmt.Sprintf("PR_%d", n), URL: fmt.Sprintf("https://example/%s/%d", repo, n), State: "open"}
 	pr.User.Login, pr.User.Type, pr.Head.Ref = login, typ, branch
 	pr.Head.Repo = &struct {
 		FullName string `json:"full_name"`
@@ -143,13 +143,13 @@ func (f *fakeGH) PullRequest(_ context.Context, repo string, n int) (*bump.PR, e
 		return nil, fmt.Errorf("no PR %s#%d", repo, n)
 	}
 	cp, ok := *pr, !f.conflicts[n]
-	if c := f.changed[n]; c != nil {
-		c(&cp)
-	}
 	if f.computing[n] > 0 {
 		f.computing[n]--
 	} else {
 		cp.Mergeable = &ok
+	}
+	if c := f.changed[n]; c != nil {
+		c(&cp)
 	}
 	return &cp, nil
 }

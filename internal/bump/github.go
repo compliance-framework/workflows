@@ -31,6 +31,7 @@ type PR struct {
 	NodeID string `json:"node_id"`
 	URL    string `json:"html_url"`
 	Title  string `json:"title"`
+	State  string `json:"state"` // open, closed
 	User   struct {
 		Login string `json:"login"`
 		Type  string `json:"type"` // "Bot" for a GitHub App

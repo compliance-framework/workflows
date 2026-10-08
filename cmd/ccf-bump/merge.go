@@ -118,8 +118,11 @@ func (b *bumper) tryMerge(ctx context.Context, c *candidate) (bool, error) {
 		return false, err
 	}
 	switch {
+	case pr.State != "open": // merged (e.g. by the train) or closed meanwhile
+		fmt.Fprintf(b.e.stdout, "%s: no longer open\n", c)
+		return false, nil
 	case !pr.HasLabel(bump.AutomergeLabel) || pr.HasLabel(bump.NeedsHumanLabel): // relabelled meanwhile
-		fmt.Fprintf(b.e.stdout, "%s: no longer labelled %s alone; left open\n", c, bump.AutomergeLabel)
+		fmt.Fprintf(b.e.stdout, "%s: labels changed (%s removed or %s added); left open\n", c, bump.AutomergeLabel, bump.NeedsHumanLabel)
 		return false, nil
 	case pr.Head.SHA != c.pr.Head.SHA: // pushed meanwhile: check the new head
 		c.pr, c.why = *pr, "new head "+short(pr.Head.SHA)

@@ -164,15 +164,18 @@ func TestMergeOnlyItsOwnPRs(t *testing.T) {
 	}
 }
 
-func TestMergeRelabelledOrPushedMeanwhile(t *testing.T) {
-	args, e, gh, out, _ := mergeSetup(t, botPR(1, "ccf-bump/sync-2026-10-08", bot), botPR(2, "ccf-bump/sync-2026-10-08", bot))
-	for _, sha := range []string{"sha1", "sha2", "new2"} {
+func TestMergeChangedMeanwhile(t *testing.T) {
+	args, e, gh, out, _ := mergeSetup(t, botPR(1, "ccf-bump/sync-2026-10-08", bot), botPR(2, "ccf-bump/sync-2026-10-08", bot),
+		botPR(3, "ccf-bump/train-2026-10-08", bot))
+	for _, sha := range []string{"sha1", "sha2", "new2", "sha3"} {
 		gh.checks[sha] = []*bump.CheckRun{check("completed", "success")}
 	}
-	// After the listing, #1 gets needs-human and #2 a new head (a sync rerun pushed).
+	// After the listing, #1 gets needs-human, #2 a new head (a sync rerun pushed) and the train
+	// merges #3 (GitHub then reports mergeable null).
 	gh.changed = map[int]func(*bump.PR){
 		1: func(p *bump.PR) { p.Labels = append(p.Labels, bump.PRLabel{Name: bump.NeedsHumanLabel}) },
 		2: func(p *bump.PR) { p.Head.SHA = "new2" },
+		3: func(p *bump.PR) { p.State, p.Mergeable = "closed", nil },
 	}
 	if err := run(context.Background(), append(args, "--wait", "5m"), e); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -180,8 +183,13 @@ func TestMergeRelabelledOrPushedMeanwhile(t *testing.T) {
 	if want := []string{`merge mock-ui#2 new2 "ci(deps): bump workflows to v1.2.0 (#2)"`}; !slices.Equal(gh.calls, want) {
 		t.Errorf("calls %q, want %q", gh.calls, want)
 	}
-	if !strings.Contains(out.String(), "mock-ui#1: no longer labelled ccf-bump:automerge alone; left open") {
-		t.Errorf("output:\n%s", out)
+	for _, s := range []string{"mock-ui#1: labels changed", "mock-ui#3: no longer open"} {
+		if !strings.Contains(out.String(), s) {
+			t.Errorf("output lacks %q:\n%s", s, out)
+		}
+	}
+	if strings.Contains(out.String(), "still pending") {
+		t.Errorf("a PR is left pending:\n%s", out)
 	}
 }
 
