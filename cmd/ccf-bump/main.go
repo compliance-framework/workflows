@@ -45,7 +45,7 @@ type GitHub interface {
 	AddLabel(ctx context.Context, repo string, number int, l bump.Label) error
 	RemoveLabel(ctx context.Context, repo string, number int, name string) error
 	PullRequest(ctx context.Context, repo string, number int) (*bump.PR, error)
-	LatestCheck(ctx context.Context, repo, sha, name string) (*bump.CheckRun, error)
+	CheckRuns(ctx context.Context, repo, sha, name string) ([]bump.CheckRun, error)
 	Merge(ctx context.Context, repo string, number int, sha, title string) error
 }
 

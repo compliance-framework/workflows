@@ -258,30 +258,61 @@ func (g *GitHub) PullRequest(ctx context.Context, repo string, number int) (*PR,
 	return &pr, err
 }
 
-// CheckRun is the latest run of a named check on a commit.
+// CheckRun is a run of a check on a commit.
 type CheckRun struct {
-	ID         int64  `json:"id"`
-	Status     string `json:"status"`     // queued, in_progress, completed
-	Conclusion string `json:"conclusion"` // success, failure, ... once completed
-	URL        string `json:"html_url"`
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`     // queued, in_progress, completed
+	Conclusion string    `json:"conclusion"` // success, failure, ... once completed
+	StartedAt  time.Time `json:"started_at"`
+	URL        string    `json:"html_url"`
 }
 
-// LatestCheck returns the latest check run named name on commit sha, or nil when there is none.
-func (g *GitHub) LatestCheck(ctx context.Context, repo, sha, name string) (*CheckRun, error) {
-	var r struct {
-		CheckRuns []CheckRun `json:"check_runs"`
-	}
-	q := url.Values{"check_name": {name}, "filter": {"latest"}, "per_page": {"100"}}
-	if err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?%s", g.Owner, repo, url.PathEscape(sha), q.Encode()), nil, &r); err != nil {
-		return nil, err
-	}
-	var latest *CheckRun
-	for i, c := range r.CheckRuns {
-		if latest == nil || c.ID > latest.ID {
-			latest = &r.CheckRuns[i]
+// CheckRuns returns every run of the check named name on commit sha (not only the latest: a
+// re-triggered workflow, e.g. on a labeled event, adds a second run to the same commit).
+func (g *GitHub) CheckRuns(ctx context.Context, repo, sha, name string) ([]CheckRun, error) {
+	var out []CheckRun
+	for page := 1; page <= 10; page++ {
+		var r struct {
+			CheckRuns []CheckRun `json:"check_runs"`
+		}
+		q := url.Values{"check_name": {name}, "filter": {"all"}, "per_page": {"100"}, "page": {fmt.Sprint(page)}}
+		if err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?%s", g.Owner, repo, url.PathEscape(sha), q.Encode()), nil, &r); err != nil {
+			return nil, err
+		}
+		for _, c := range r.CheckRuns {
+			if c.Name == name {
+				out = append(out, c)
+			}
+		}
+		if len(r.CheckRuns) < 100 {
+			break
 		}
 	}
-	return latest, nil
+	return out, nil
+}
+
+// RequiredCheck settles the runs of a required check: the first run still queued or in progress
+// (pending), else the newest run (by start time, then ID), whose conclusion decides; nil, nil when
+// there is no run.
+func RequiredCheck(runs []CheckRun) (running, newest *CheckRun) {
+	for i, c := range runs {
+		if c.Status != "completed" {
+			return &runs[i], nil
+		}
+		if newest == nil || c.StartedAt.After(newest.StartedAt) || c.StartedAt.Equal(newest.StartedAt) && c.ID > newest.ID {
+			newest = &runs[i]
+		}
+	}
+	return nil, newest
+}
+
+// ExpectsCheck reports whether err is GitHub refusing a merge because a required status check is
+// still expected (it hasn't reported on the head yet, or a new run of it is in progress).
+func ExpectsCheck(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Code == http.StatusMethodNotAllowed &&
+		bytes.Contains(se.Body, []byte("status check")) && bytes.Contains(se.Body, []byte("is expected"))
 }
 
 // Merge squash-merges the PR if its head is still sha, with title as the commit title.

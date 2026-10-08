@@ -95,18 +95,22 @@ func (b *bumper) candidates(ctx context.Context, repo string) ([]*candidate, err
 }
 
 // tryMerge merges c once its head's required check succeeded and GitHub reports it mergeable. It
-// reports whether c is still pending (check not concluded, or mergeability not computed yet).
+// reports whether c is still pending (a run of the check not concluded, or mergeability not
+// computed yet).
 func (b *bumper) tryMerge(ctx context.Context, c *candidate) (bool, error) {
-	check, err := b.e.gh.LatestCheck(ctx, c.repo, c.pr.Head.SHA, b.o.required)
+	runs, err := b.e.gh.CheckRuns(ctx, c.repo, c.pr.Head.SHA, b.o.required)
 	if err != nil {
 		return false, fmt.Errorf("check %s: %w", b.o.required, err)
 	}
+	// Every run counts: an earlier run's success doesn't merge while a newer one (e.g. started by
+	// the labeled event) is running, and GitHub would refuse the merge anyway.
+	running, check := bump.RequiredCheck(runs)
 	switch {
+	case running != nil:
+		c.why = b.o.required + " " + running.Status
+		return true, nil
 	case check == nil:
 		c.why = b.o.required + " not started"
-		return true, nil
-	case check.Status != "completed":
-		c.why = b.o.required + " " + check.Status
 		return true, nil
 	case check.Conclusion != "success":
 		// notify-failure.yml reports the failure; the attention digest lists the PR.
@@ -139,7 +143,10 @@ func (b *bumper) tryMerge(ctx context.Context, c *candidate) (bool, error) {
 		fmt.Fprintf(b.e.stdout, "%s: dry run: would merge %q\n", c, title)
 		return false, nil
 	}
-	if err := b.e.gh.Merge(ctx, c.repo, c.pr.Number, c.pr.Head.SHA, title); err != nil {
+	if err := b.e.gh.Merge(ctx, c.repo, c.pr.Number, c.pr.Head.SHA, title); bump.ExpectsCheck(err) {
+		c.why = "GitHub still expects " + b.o.required // a run started after the listing
+		return true, nil
+	} else if err != nil {
 		b.warn("%s: merge refused: %v", c, err)
 		return false, nil
 	}

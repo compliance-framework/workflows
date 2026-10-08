@@ -27,11 +27,12 @@ type fakeGH struct {
 	closeErr error
 	labelErr error
 	anon     bool // CreatePR returns a PR without its author
-	// checks: head SHA -> the required check's run on each read (the last one repeats; none: nil).
-	checks    map[string][]*bump.CheckRun
+	// checks: head SHA -> the required check's runs on each read (the last list repeats).
+	checks    map[string][][]bump.CheckRun
 	conflicts map[int]bool // PR number -> mergeable false
 	computing map[int]int  // PR number -> reads that return mergeable null
 	mergeErr  error
+	mergeErrs []error                // returned by the first merges, before mergeErr
 	listErr   error                  // OpenPRs
 	changed   map[int]func(*bump.PR) // PR number -> a change seen by PullRequest only (after the listing)
 }
@@ -153,21 +154,26 @@ func (f *fakeGH) PullRequest(_ context.Context, repo string, n int) (*bump.PR, e
 	}
 	return &cp, nil
 }
-func (f *fakeGH) LatestCheck(_ context.Context, _, sha, name string) (*bump.CheckRun, error) {
+func (f *fakeGH) CheckRuns(_ context.Context, _, sha, name string) ([]bump.CheckRun, error) {
 	if name != "ci / required" {
 		return nil, fmt.Errorf("check %q", name)
 	}
-	runs := f.checks[sha]
-	if len(runs) == 0 {
+	reads := f.checks[sha]
+	if len(reads) == 0 {
 		return nil, nil
 	}
-	if len(runs) > 1 {
-		f.checks[sha] = runs[1:]
+	if len(reads) > 1 {
+		f.checks[sha] = reads[1:]
 	}
-	return runs[0], nil
+	return slices.Clone(reads[0]), nil
 }
 func (f *fakeGH) Merge(_ context.Context, repo string, n int, sha, title string) error {
 	f.calls = append(f.calls, fmt.Sprintf("merge %s#%d %s %q", repo, n, sha, title))
+	if len(f.mergeErrs) > 0 {
+		err := f.mergeErrs[0]
+		f.mergeErrs = f.mergeErrs[1:]
+		return err
+	}
 	return f.mergeErr
 }
 
