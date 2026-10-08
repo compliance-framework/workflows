@@ -4,7 +4,12 @@
 name: release-checks
 
 on:
-  workflow_call: {}
+  workflow_call:
+    inputs:
+      module-path:
+        description: "Run the go-module-path check; false for a repo whose major isn't a Go API (compliance-framework/workflows)"
+        type: boolean
+        default: true
 
 permissions: {}
 
@@ -73,7 +78,7 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.base.outcome == 'success' }}
         run: '"$RUNNER_TEMP/release" check version-guard --base "$RUNNER_TEMP/base.json" --head .release-please-manifest.json'
       - name: go-module-path
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.module-path }}
         run: |
           if [ ! -f go.mod ]; then echo "No go.mod; not a Go repo, skipping."; exit 0; fi
           "$RUNNER_TEMP/release" check module-path --gomod go.mod --manifest .release-please-manifest.json

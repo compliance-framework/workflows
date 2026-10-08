@@ -141,7 +141,7 @@ as the `report` output (one line of JSON), and the job fails as the probe does. 
 ```yaml
 jobs:
   probe:
-    uses: compliance-framework/workflows/.github/workflows/plugin-probe.yml@main
+    uses: compliance-framework/workflows/.github/workflows/plugin-probe.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
     with:

@@ -6,8 +6,10 @@ import (
 	"strings"
 )
 
-// Stages groups the repos into topological stages: every repo's dependencies
-// are in earlier stages, and each repo sits in the earliest stage it can.
+// Stages groups the repos with release: true into topological stages: every
+// repo's dependencies are in earlier stages, and each repo sits in the earliest
+// stage it can. Repos with release: false (the workflows repo) are left out,
+// and dependencies on them are ignored.
 //
 // Helm repos are deployment bundles that pin the versions of everything else,
 // so they release last: a repo of kind helm implicitly depends on every
@@ -21,18 +23,29 @@ import (
 // Dependencies on repos that are not in the manifest are ignored here; Validate
 // reports them.
 func (m *Manifest) Stages() ([][]string, error) {
-	pending := make(map[string]int, len(m.Repos)) // unmet dependency count
-	dependents := make(map[string][]string, len(m.Repos))
+	return m.stages(func(r Repo) bool { return r.Release })
+}
+
+// stages orders the repos for which keep is true; Validate keeps them all, to find every cycle.
+func (m *Manifest) stages(keep func(Repo) bool) ([][]string, error) {
+	repos := make([]Repo, 0, len(m.Repos))
 	for _, r := range m.Repos {
+		if keep(r) {
+			repos = append(repos, r)
+		}
+	}
+	pending := make(map[string]int, len(repos)) // unmet dependency count
+	dependents := make(map[string][]string, len(repos))
+	for _, r := range repos {
 		pending[r.Name] = 0
 	}
 	var nonHelm []string
-	for _, r := range m.Repos {
+	for _, r := range repos {
 		if r.Kind != KindHelm {
 			nonHelm = append(nonHelm, r.Name)
 		}
 	}
-	for _, r := range m.Repos {
+	for _, r := range repos {
 		deps := r.DependsOn
 		if r.Kind == KindHelm {
 			deps = slices.Concat(deps, nonHelm)

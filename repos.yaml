@@ -40,3 +40,10 @@ repos:
     depends_on: [api, ui, agent]
     release: true
     charts: [ccf-agent, ccf-app]
+
+  # This repo: the source of the shared-workflow pins ccf-bump moves
+  # (`uses: compliance-framework/workflows/.github/workflows/<f>@<sha> # vX.Y.Z`).
+  # It releases itself (self-release.yml), outside the train.
+  - name: workflows
+    kind: workflows
+    release: false

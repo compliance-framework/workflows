@@ -35,7 +35,8 @@ type Options struct {
 var runnerKeys = []string{"platform", "autodiscover", "repositories", "onboarding", "requireConfig", "dryRun", "statusCheckWhen"}
 
 // SelectRepos returns the repos named in list (comma- or space-separated), or every repo in the
-// manifest if list is empty, in manifest order. Named repos must be in the manifest.
+// manifest but the workflows repo (kind workflows) if list is empty, in manifest order. Named
+// repos must be in the manifest.
 func SelectRepos(m *manifest.Manifest, list string) ([]string, error) {
 	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
 	var unknown []string
@@ -49,7 +50,7 @@ func SelectRepos(m *manifest.Manifest, list string) ([]string, error) {
 	}
 	var out []string
 	for _, r := range m.Repos {
-		if len(names) == 0 || slices.Contains(names, r.Name) {
+		if len(names) == 0 && r.Kind != manifest.KindWorkflows || slices.Contains(names, r.Name) {
 			out = append(out, r.Name)
 		}
 	}

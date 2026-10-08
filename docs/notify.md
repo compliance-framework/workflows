@@ -2,7 +2,7 @@
 
 The reusable workflow `.github/workflows/notify-failure.yml` keeps one Slack thread per CI
 incident. The logic is `cmd/notify`, with the rules in `internal/notify`; the workflow builds
-it from this repo at `workflows-ref`.
+it from this repo at the commit it is called at (`job.workflow_sha`, the caller's `@<sha>`).
 
 ## Which runs
 
@@ -85,7 +85,7 @@ Limits:
   notify:
     needs: [ci, release-checks]  # every job whose failure should notify
     if: always()
-    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@<sha> # vX.Y.Z
     with:
       needs: ${{ toJSON(needs) }}
     permissions:
@@ -97,7 +97,7 @@ Limits:
 | --- | --- | --- |
 | `needs` | `""` | The calling job's `toJSON(needs)`: the jobs and their results. Empty means the run failed, with the failed jobs unknown (callers still on `if: failure()`). |
 | `channel` | `""` | Slack channel ID for new incidents; empty means the `SLACK_CHANNEL_CI_FAILURES` variable. |
-| `workflows-ref` | `v1` | Ref of this repo to build `cmd/notify` from. A reusable workflow can't see the ref it was called at, so pass the same ref when calling it at anything but `@v1`. |
+| `workflows-ref` | `""` | Ref of this repo to build `cmd/notify` from, to test another ref; empty means the commit the workflow is called at. Callers don't pass it: ccf-bump deletes it when it moves the job's pin. |
 
 Secret: `SLACK_BOT_TOKEN` (optional, `chat:write`), via `secrets: inherit`. Without it (forks,
 repos outside the secret's scope) the job does nothing and succeeds.
@@ -113,7 +113,7 @@ The earlier caller ran the job only on failure, with no inputs, and granted `act
   notify:
     needs: [ci]
     if: failure()
-    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@<sha> # vX.Y.Z
     permissions:
       actions: read
       contents: read

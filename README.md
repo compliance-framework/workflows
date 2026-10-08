@@ -28,7 +28,7 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `internal/reposettings` | The desired repo settings and rulesets, the current-vs-desired diff, and the GitHub client [`repo-settings.yml`](#repo-settings) uses. |
 | `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag, the preview tags, the release tags and the chart a helm release tag is for. |
 | `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`; `cmd/release` runs the `internal/release` rules for the release workflows; `cmd/repo-settings` syncs repo settings. |
-| `.github/workflows/` | This repo's own CI (`ci.yml`) and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, the `ci-<kind>.yml` kind CI workflows and the [release workflows](#release-workflows)). |
+| `.github/workflows/` | This repo's own CI (`ci.yml`) and release (`self-release.yml`), and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, the `ci-<kind>.yml` kind CI workflows and the [release workflows](#release-workflows)). |
 | `release-please/defaults.json` | The release-please settings every repo's `release-please-config.json` copies. |
 | `.golangci.yml`, `.regal/config.yaml` | Shared lint base configs, used by the CI workflows when the calling repo has none. |
 
@@ -40,7 +40,7 @@ include_patterns: []                     # repo name globs, used from workstream
 exclude: []                              # repo names the globs must not pick up
 repos:
   - name: agent
-    kind: go-service          # go-service | go-plugin | go-lib | policies | ui | helm | action
+    kind: go-service          # go-service | go-plugin | go-lib | policies | ui | helm | action | workflows
     depends_on: [api, gooci]  # repos that release before this one
     release: true             # required; whether the release tooling acts on it
   - name: helm-charts
@@ -51,9 +51,11 @@ repos:
 ```
 
 Loading rejects unknown fields and kinds, duplicate names, missing `release` values,
-dependencies on unknown repos, cycles, and a non-helm repo depending on a helm repo.
+dependencies on unknown repos, cycles, and a non-helm repo depending on a helm repo. At most one
+repo is of kind `workflows` (this repo, the source of the shared-workflow pins ccf-bump moves); it
+needs `release: false`, has no `depends_on`, and no repo depends on it.
 
-`Stages()` groups repos into release stages. Every repo's dependencies are in earlier stages,
+`Stages()` groups the repos with `release: true` into release stages. Every repo's dependencies are in earlier stages,
 and each stage is sorted by name. Repos of kind `helm` always release last, after every
 non-helm repo, because the charts pin the versions of everything else. For `repos.yaml`:
 
@@ -73,7 +75,8 @@ input, so the same code runs against `repos.mock.yaml`.
 
 ## How repos consume the workflows
 
-A repo calls a reusable workflow from a thin workflow of its own, pinned to a tag of this repo:
+A repo calls a reusable workflow from a thin workflow of its own, pinned to the commit SHA of a
+release of this repo with the version in a comment, as third-party actions are:
 
 ```yaml
 # .github/workflows/ci.yml in a consuming repo
@@ -87,7 +90,7 @@ permissions:
   contents: read
 jobs:
   ci:
-    uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@v1  # calls ci-common.yml
+    uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@<sha> # vX.Y.Z (calls ci-common.yml)
     permissions:
       actions: read
       contents: read
@@ -97,7 +100,7 @@ jobs:
   notify:
     needs: [ci]
     if: always()
-    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@<sha> # vX.Y.Z
     with:
       needs: ${{ toJSON(needs) }}
     permissions:
@@ -107,7 +110,9 @@ jobs:
 
 Each `kind` gets its own CI workflow (`ci-<kind>.yml`, see [Kind CI workflows](#kind-ci-workflows)),
 plus release workflows later. The mock repos adopt each one before the
-product repos do. Consumers pin a major tag (`@v1`) or a full commit SHA, never `@main`.
+product repos do. Consumers pin `@<sha> # vX.Y.Z`, the commit a release tag points at, never
+`@main` or a tag: a SHA can't move under the caller, and each update is a reviewable
+[ccf-bump](docs/ccf-bump.md) PR; this repo's tags never move.
 The `permissions` above are the ones `ci-common.yml` and `notify-failure.yml` need (see
 below).
 
@@ -151,7 +156,7 @@ Tool versions are pinned in the workflows.
 
 `ci-common.yml` is called as `./.github/workflows/ci-common.yml`. In a called workflow, a
 local reference means this repo at the same commit as the calling workflow file, not the
-top-level caller's repo, so a caller pinned to `@v1` or a SHA gets the matching
+top-level caller's repo, so a caller pinned to a SHA gets the matching
 `ci-common.yml` ("the called workflow is from the same commit as the caller workflow",
 [Reusing workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)).
 The shared lint configs are fetched the same way, from `job.workflow_repository` at
@@ -189,7 +194,7 @@ A caller is the example above with the kind's workflow in `uses:`, for example:
 
 ```yaml
   ci:
-    uses: compliance-framework/workflows/.github/workflows/ci-policies.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/ci-policies.yml@<sha> # vX.Y.Z
     with:
       directory: policies  # the default; inputs are optional
     permissions:
@@ -215,7 +220,7 @@ The snippets below show only the `uses:` and `with:` keys of that `ci` job.
 | `prepare-command` | `""` | Shell command run first in `go` (after gofmt) and `make`. If it fails, the later checks are skipped. |
 
 ```yaml
-    uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@<sha> # vX.Y.Z
     with:  # api; agent passes make-targets: check-opa-version
       prepare-command: make swag
       make-targets: test-integration check-diff
@@ -229,7 +234,7 @@ The snippets below show only the `uses:` and `with:` keys of that `ci` job.
 | `go` | `gofmt -l .`, `go test ./...`. |
 | `goreleaser` | `goreleaser check` (deprecated properties only warn). |
 
-Caller: `uses: compliance-framework/workflows/.github/workflows/ci-go-lib.yml@v1`.
+Caller: `uses: compliance-framework/workflows/.github/workflows/ci-go-lib.yml@<sha> # vX.Y.Z`.
 
 #### `ci-ui.yml` (kind `ui`)
 
@@ -245,7 +250,7 @@ One `node` job: Node from the repo's `.nvmrc` (else `node-version`), `npm ci`, t
 | `extra-command` | `""` | Shell command run last, e.g. a drift check. |
 
 ```yaml
-    uses: compliance-framework/workflows/.github/workflows/ci-ui.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/ci-ui.yml@<sha> # vX.Y.Z
     with:  # ui
       test-script: test:unit
       extra-command: scripts/sync-agentconfig-conformance.sh --check main
@@ -264,7 +269,7 @@ One `node` job: Node from the repo's `.nvmrc` (else `node-version`), `npm ci`, t
 | `make-targets` | `""` | `make` targets that run the chart unit tests, space-separated. |
 
 ```yaml
-    uses: compliance-framework/workflows/.github/workflows/ci-helm.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/ci-helm.yml@<sha> # vX.Y.Z
     with:
       make-targets: helm.test
 ```
@@ -277,7 +282,7 @@ One `node` job: Node from the repo's `.nvmrc` (else `node-version`), `npm ci`, t
 | `docker` | `docker build --file <dockerfile> <context>`. |
 
 actionlint runs in `ci-common.yml`. Inputs: `dockerfile` (default `Dockerfile`) and `context`
-(default `.`). Caller: `uses: compliance-framework/workflows/.github/workflows/ci-action.yml@v1`.
+(default `.`). Caller: `uses: compliance-framework/workflows/.github/workflows/ci-action.yml@<sha> # vX.Y.Z`.
 
 ### Release workflows
 
@@ -346,7 +351,7 @@ concurrency:
   group: release-please
 jobs:
   release-please:
-    uses: compliance-framework/workflows/.github/workflows/release-please.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/release-please.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
     secrets: inherit
@@ -367,12 +372,13 @@ an earlier one failed (rules in `internal/release`):
 
 Repos without a root `go.mod` skip the two Go checks. The labels come from the event, so
 the caller listens for `labeled` and `unlabeled` to re-check after adding the label. The job
-needs `contents: read`; no inputs or secrets.
+needs `contents: read`; no secrets. Input `module-path` (default `true`): `false` skips
+`go-module-path`, for a repo whose major isn't a Go API (this one).
 
 ```yaml
 # in the consuming repo's ci.yml (on: pull_request types include labeled, unlabeled)
   release-checks:
-    uses: compliance-framework/workflows/.github/workflows/release-checks.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/release-checks.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
 ```
@@ -423,7 +429,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   preview:
-    uses: compliance-framework/workflows/.github/workflows/preview.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/preview.yml@<sha> # vX.Y.Z
     with:  # agent's three images
       images: >-
         [{"name": "agent"}, {"name": "agent-ci", "dockerfile": "Dockerfile-ci"},
@@ -470,7 +476,7 @@ permissions:
   contents: read
 jobs:
   cut:
-    uses: compliance-framework/workflows/.github/workflows/cut-prerelease.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/cut-prerelease.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
     secrets: inherit
@@ -581,7 +587,7 @@ permissions:
   contents: read
 jobs:
   release:
-    uses: compliance-framework/workflows/.github/workflows/release-go-image.yml@v1  # or release-ui.yml
+    uses: compliance-framework/workflows/.github/workflows/release-go-image.yml@<sha> # vX.Y.Z (or release-ui.yml)
     with:  # agent's three images
       images: >-
         [{"name": "agent"}, {"name": "agent-ci", "dockerfile": "Dockerfile-ci"},
@@ -596,7 +602,7 @@ jobs:
 # the same, in a plugin repo
 jobs:
   release:
-    uses: compliance-framework/workflows/.github/workflows/release-go-plugin.yml@v1  # or release-policies.yml
+    uses: compliance-framework/workflows/.github/workflows/release-go-plugin.yml@<sha> # vX.Y.Z (or release-policies.yml)
     permissions:
       contents: write  # release-policies.yml: read
       packages: write
@@ -607,7 +613,7 @@ jobs:
 # the same, in a library repo (gooci)
 jobs:
   release:
-    uses: compliance-framework/workflows/.github/workflows/release-go-lib.yml@v1
+    uses: compliance-framework/workflows/.github/workflows/release-go-lib.yml@<sha> # vX.Y.Z
     permissions:
       contents: write
       packages: write
@@ -618,7 +624,7 @@ jobs:
 # the same, in a chart or action repo
 jobs:
   release:
-    uses: compliance-framework/workflows/.github/workflows/release-helm.yml@v1  # or release-action.yml
+    uses: compliance-framework/workflows/.github/workflows/release-helm.yml@<sha> # vX.Y.Z (or release-action.yml)
     permissions:
       contents: read  # release-action.yml: write
       packages: write
@@ -645,6 +651,32 @@ The tail of every release workflow, called as a job with `needs` on every other 
 Inputs: `needs` (the caller's `toJSON(needs)`) and `images` (the packages to prune, as for
 `publish-image.yml`; only `name` is read). Secrets: `RELEASE_BOT_APP_ID` and
 `RELEASE_BOT_PRIVATE_KEY`. Permissions: `packages: write`.
+
+## Releasing workflows
+
+This repo releases itself with release-please (`simple`; `release-please-config.json`,
+`.release-please-manifest.json`, `CHANGELOG.md`): `self-release.yml` calls the local
+`release-please.yml` on every push to `main`, as ccf-release-bot with a token scoped to this
+repo. Merging the release PR tags `vX.Y.Z` on the merge commit and publishes the GitHub
+release. It is in both manifests as `kind: workflows` with `release: false`: the train doesn't
+release it, and Renovate and vuln-summary leave it out unless it is named.
+
+- **Tags never move.** There is no floating `v1`: callers pin a release's commit SHA, and
+  `ccf-bump sync` moves the pins to the latest final release (`@<sha> # vX.Y.Z`) within a
+  major, auto-merged unless a pin was `main` or a SHA of unknown version
+  ([docs/ccf-bump.md](docs/ccf-bump.md)).
+- **First release.** The package's `initial-version` is `1.0.0` and the manifest is seeded with
+  `0.0.0` (no release), so the first release PR proposes `1.0.0`; `bootstrap-sha` starts its
+  changelog at the manifest skeleton (#3). Neither is read again once a release exists. 0.0.0
+  to 1.0.0 is a major for `version-guard`, so that PR needs the `release:major-approved` label.
+- **A major (v2).** A breaking change (`feat!:` or a `BREAKING CHANGE:` footer) makes the
+  release PR propose `2.0.0`. `ci.yml` calls `release-checks.yml`, so the PR needs the
+  `release:major-approved` label (`module-path: false`: the module path keeps no `/v2`, the
+  major is the workflows' interface, not a Go API). After it merges, ccf-bump reports each
+  caller's v1 pins as conflicts: move each repo by hand, mocks first, adapting the inputs the
+  release notes list, to `@<v2 sha> # v2.0.0`; from then on ccf-bump keeps it current.
+- **The `workflows-ref` input** of `notify-failure.yml` now defaults to the commit it is called
+  at; ccf-bump deletes it from callers when it moves their pin.
 
 ## Repo settings
 
@@ -785,7 +817,8 @@ bundles with the agent's OPA version. See [docs/plugin-probe.md](docs/plugin-pro
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,
-`go run ./cmd/manifest` on both manifests, and actionlint (at the version pinned in `ci.yml`).
+`go run ./cmd/manifest` on both manifests, actionlint (at the version pinned in `ci.yml`), and
+`release-checks.yml` on release PRs (see [Releasing workflows](#releasing-workflows)).
 Third-party actions are pinned by full commit SHA, with the version in a comment.
 
 ## Legacy files
