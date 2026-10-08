@@ -1,0 +1,2 @@
+lisa-design:
+- Renovate: packageRule matchManagers [gomod] + matchDepTypes [indirect] -> semanticCommitType fix (scope stays deps). Only the commit type changes; whether Renovate updates indirect modules at all (enabled) is left to its defaults, so it bites on the security PRs it does open (observed: mock-plugin-1 grpc/x/crypto merged as chore(deps), no release). final/toolchain rule untouched.
