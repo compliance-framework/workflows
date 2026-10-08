@@ -1,0 +1,22 @@
+name: release
+on:
+  release:
+    types: [published]
+jobs:
+  release:
+    uses: "compliance-framework/workflows/.github/workflows/release-go-image.yml@v1.0.0" # pinned for the images
+    secrets: inherit
+  current:
+    uses: compliance-framework/workflows/.github/workflows/preview.yml@89abcdef0123456789abcdef0123456789abcdef # v1.1.0
+  no-comment:
+    uses: compliance-framework/workflows/.github/workflows/cut-prerelease.yml@89abcdef0123456789abcdef0123456789abcdef
+  trying:
+    uses: compliance-framework/workflows/.github/workflows/release-checks.yml@ra/try-something
+  notify:
+    needs: [release, current, no-comment, trying]
+    if: always()
+    with:
+      workflows-ref: v1
+    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@v1
+  other:
+    uses: other-org/workflows/.github/workflows/x.yml@main

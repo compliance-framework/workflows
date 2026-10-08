@@ -1,0 +1,19 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions: {}
+jobs:
+  ci:
+    uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@89abcdef0123456789abcdef0123456789abcdef # v1.1.0
+    secrets: inherit
+  release-checks:
+    uses: compliance-framework/workflows/.github/workflows/release-checks.yml@89abcdef0123456789abcdef0123456789abcdef # v1.1.0
+  notify:
+    needs: [ci, release-checks]
+    if: always()
+    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@89abcdef0123456789abcdef0123456789abcdef # v1.1.0
+    with:
+      needs: ${{ toJSON(needs) }}
+    secrets: inherit

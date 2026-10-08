@@ -81,6 +81,18 @@ func (g *GitHub) TagTime(ctx context.Context, repo, tag string) (time.Time, erro
 	return c.Commit.Committer.Date, err
 }
 
+// TagCommit returns the SHA of the commit tag points at (an annotated tag is peeled to its commit).
+func (g *GitHub) TagCommit(ctx context.Context, repo, tag string) (string, error) {
+	var c struct {
+		SHA string `json:"sha"`
+	}
+	err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/commits/%s", g.Owner, repo, url.PathEscape(tag)), nil, &c)
+	if err == nil && !fullSHA.MatchString(c.SHA) {
+		err = fmt.Errorf("commit of %s %s: unexpected sha %q", repo, tag, c.SHA)
+	}
+	return c.SHA, err
+}
+
 // File returns the content of path in repo at ref.
 func (g *GitHub) File(ctx context.Context, repo, ref, path string) ([]byte, error) {
 	var f struct {

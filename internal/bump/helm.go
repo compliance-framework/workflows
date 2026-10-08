@@ -73,18 +73,24 @@ func join(path, key string) string {
 }
 
 func mapValue(n *yaml.Node, key string) *yaml.Node {
+	_, v := mapEntry(n, key)
+	return v
+}
+
+// mapEntry returns the key and value nodes of key in the mapping n (or a document holding one).
+func mapEntry(n *yaml.Node, key string) (k, v *yaml.Node) {
 	if n.Kind == yaml.DocumentNode && len(n.Content) == 1 {
 		n = n.Content[0]
 	}
 	if n.Kind != yaml.MappingNode {
-		return nil
+		return nil, nil
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value == key {
-			return n.Content[i+1]
+			return n.Content[i], n.Content[i+1]
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // chart returns a chart's refs and, by "<file>\x00<key>", the nodes they point at.

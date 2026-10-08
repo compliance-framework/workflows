@@ -664,7 +664,7 @@ release it, and Renovate and vuln-summary leave it out unless it is named.
 - **Tags never move.** There is no floating `v1`: callers pin a release's commit SHA, and
   `ccf-bump sync` moves the pins to the latest final release (`@<sha> # vX.Y.Z`) within a
   major, auto-merged unless a pin was `main` or a SHA of unknown version
-  ([docs/ccf-bump.md](docs/ccf-bump.md)).
+  ([docs/ccf-bump.md](docs/ccf-bump.md#shared-workflow-pins)).
 - **First release.** The package's `initial-version` is `1.0.0` and the manifest is seeded with
   `0.0.0` (no release), so the first release PR proposes `1.0.0`; `bootstrap-sha` starts its
   changelog at the manifest skeleton (#3). Neither is read again once a release exists. 0.0.0

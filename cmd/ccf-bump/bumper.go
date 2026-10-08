@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 
 	"github.com/compliance-framework/workflows/internal/bump"
 	"github.com/compliance-framework/workflows/internal/manifest"
@@ -23,6 +24,8 @@ type bumper struct {
 	o      options
 	m      *manifest.Manifest
 	finals map[string]string // repo -> latest final tag, cached across repos
+	// commits caches "repo@tag" -> the commit SHA the tag points at (shared-workflow pins).
+	commits map[string]string
 	// warnings are problems that don't fail the run (auto-merge, superseded PRs), for the summary.
 	warnings []string
 }
@@ -156,6 +159,9 @@ func (b *bumper) targets(ctx context.Context, cfg bump.Config, refs []bump.Ref) 
 			t[r.Dep] = v
 		}
 	}
+	if err := b.workflowsTarget(ctx, t, refs, final); err != nil {
+		return nil, err
+	}
 	if _, ok := t[bump.DepOPA]; !ok && slices.ContainsFunc(refs, func(r bump.Ref) bool { return r.Dep == bump.DepOPA }) {
 		tag, err := final(cfg.OPASource)
 		if err != nil || tag == "" {
@@ -176,6 +182,42 @@ func (b *bumper) targets(ctx context.Context, cfg bump.Config, refs []bump.Ref) 
 		}
 	}
 	return t, nil
+}
+
+// workflowsTarget sets the target of the shared-workflow pins: a release vX.Y.Z (given, or in
+// sync mode the latest final release of the manifest's workflows repo) becomes its commit SHA
+// with the tag (bump.WorkflowsPin); any other given ref is used as is. Without a workflows repo in
+// the manifest, sync mode leaves the pins alone.
+func (b *bumper) workflowsTarget(ctx context.Context, t map[string]string, refs []bump.Ref, final func(string) (string, error)) error {
+	if !slices.ContainsFunc(refs, func(r bump.Ref) bool { return r.Dep == bump.DepWorkflows }) {
+		return nil
+	}
+	repo, w := bump.DepWorkflows, b.m.Workflows()
+	if w != nil {
+		repo = w.Name
+	}
+	tag, given := t[bump.DepWorkflows]
+	if !given && w != nil && b.o.mode == "sync" {
+		var err error
+		if tag, err = final(repo); err != nil {
+			return err
+		}
+	}
+	if c := bump.Canonical(tag); semver.IsValid(c) && semver.Canonical(c) == c && semver.Prerelease(c) == "" {
+		tag = c
+	} else {
+		return nil // no release (or a ref given by hand, used as is)
+	}
+	sha, ok := b.commits[repo+"@"+tag]
+	if !ok {
+		var err error
+		if sha, err = b.e.gh.TagCommit(ctx, repo, tag); err != nil {
+			return fmt.Errorf("commit of %s %s: %w", repo, tag, err)
+		}
+		b.commits[repo+"@"+tag] = sha
+	}
+	t[bump.DepWorkflows] = bump.WorkflowsPin(sha, tag)
+	return nil
 }
 
 // bump plans and applies the bump of one repo; it reports whether it opened or updated a PR.
@@ -332,7 +374,7 @@ func (b *bumper) closeSuperseded(ctx context.Context, repo, branch string, pr *b
 func targetsOf(plan bump.Plan) []string {
 	var out []string
 	for _, c := range plan.Changes {
-		s := c.Dep + " to " + c.To
+		s := c.Dep + " to " + shown(c)
 		if !slices.Contains(out, s) {
 			out = append(out, s)
 		}
@@ -341,13 +383,24 @@ func targetsOf(plan bump.Plan) []string {
 	return out
 }
 
+// shown is the version a change moves to: a shared-workflow pin's release tag, else To.
+func shown(c bump.Change) string {
+	if _, tag := bump.SplitWorkflowsPin(c.To); c.Dep == bump.DepWorkflows && tag != "" {
+		return tag
+	}
+	return c.To
+}
+
 // releaseURL links a change's release notes.
 func releaseURL(owner string, c bump.Change) string {
 	switch c.Dep {
 	case bump.DepOPA:
 		return "https://github.com/open-policy-agent/opa/releases/tag/" + c.To
 	case bump.DepWorkflows:
-		return "https://github.com/" + owner + "/workflows/tree/" + c.To
+		if ref, tag := bump.SplitWorkflowsPin(c.To); tag == "" {
+			return "https://github.com/" + owner + "/workflows/tree/" + ref
+		}
+		return "https://github.com/" + owner + "/workflows/releases/tag/" + shown(c)
 	}
 	return "https://github.com/" + owner + "/" + c.Dep + "/releases/tag/" + c.To
 }
@@ -357,7 +410,7 @@ func prText(o options, plan bump.Plan) (string, string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Bumps internal dependencies (ccf-bump, %s mode).\n\n| Dependency | From | To | Where |\n| --- | --- | --- | --- |\n", o.mode)
 	for _, c := range plan.Changes {
-		from := c.Current
+		from := c.Pinned()
 		if from == "" {
 			from = "(unknown)"
 		}
@@ -375,13 +428,13 @@ func prText(o options, plan bump.Plan) (string, string) {
 func report(p bump.Plan) string {
 	var b strings.Builder
 	for _, c := range p.Changes {
-		fmt.Fprintf(&b, "  bump      %-12s %s -> %s (%s %s)\n", c.Dep, orDash(c.Current), c.To, c.File, c.Key)
+		fmt.Fprintf(&b, "  bump      %-12s %s -> %s (%s %s)\n", c.Dep, orDash(c.Pinned()), c.To, c.File, c.Key)
 	}
 	for _, c := range p.Conflicts {
 		fmt.Fprintf(&b, "  conflict  %-12s %s (%s %s)\n", c.Dep, c.Reason, c.File, c.Key)
 	}
 	for _, r := range p.UpToDate {
-		fmt.Fprintf(&b, "  current   %-12s %s (%s %s)\n", r.Dep, r.Current, r.File, r.Key)
+		fmt.Fprintf(&b, "  current   %-12s %s (%s %s)\n", r.Dep, r.Pinned(), r.File, r.Key)
 	}
 	var none []string // deps without a target, once each
 	for _, r := range p.NoTarget {

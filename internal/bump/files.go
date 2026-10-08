@@ -10,16 +10,67 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
+	"golang.org/x/mod/semver"
 )
 
-// workflowRef moves `uses: <owner>/workflows/<path>@<ref>` to the target ref. It has a target only
-// when one is given (--set workflows=<ref>); any ref other than the target is replaced.
+// workflowRef moves the callers' shared-workflow pins, a job's
+// `uses: <owner>/workflows/<path>@<ref>`, to the target (rules: Plan.decideWorkflows). A release is
+// written `@<sha> # vX.Y.Z`: the comment is added, or its version replaced, keeping any other text.
+// Moving a job's pin also deletes the job's `workflows-ref` input with its comment (the reusable
+// workflows build their tools at the commit they are called at), and the `with:` it leaves
+// empty. Edits are made line by line, so comments and layout stay.
 type workflowRef struct{ c Config }
 
 func (workflowRef) Name() string { return "workflow ref" }
 
-func (w workflowRef) edit() lineEdit {
-	return lineEdit{re: regexp.MustCompile(`uses:\s*(` + regexp.QuoteMeta(w.c.Owner) + `/workflows/[^@\s]+)@([^\s#"']+)`), group: 2}
+// workflowsInput is the input callers passed to notify-failure.yml to choose the ref of its tools.
+const workflowsInput = "workflows-ref"
+
+// call is one job's call of a shared workflow.
+type call struct {
+	ref       Ref
+	uses      *yaml.Node // the uses: value
+	with, key *yaml.Node // the with: mapping and its key, or nil
+}
+
+// calls parses file and returns its jobs' calls of the shared workflows, and its lines.
+func (w workflowRef) calls(dir, file string) ([]call, []string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, file))
+	if err != nil {
+		return nil, nil, err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", file, err)
+	}
+	lines := strings.SplitAfter(string(data), "\n")
+	jobs := mapValue(&doc, "jobs")
+	if jobs == nil || jobs.Kind != yaml.MappingNode {
+		return nil, lines, nil
+	}
+	var out []call
+	for i := 1; i < len(jobs.Content); i += 2 {
+		uses := mapValue(jobs.Content[i], "uses")
+		if uses == nil || uses.Kind != yaml.ScalarNode || !strings.HasPrefix(uses.Value, w.c.Owner+"/workflows/") {
+			continue
+		}
+		key, ref, ok := strings.Cut(uses.Value, "@")
+		if !ok || ref == "" {
+			continue
+		}
+		r := Ref{Updater: w.Name(), Dep: DepWorkflows, Key: key, Current: ref, File: file}
+		if _, tail, ok := splitPinLine(lines[uses.Line-1], uses.Value); ok {
+			if m := pinTail.FindStringSubmatch(tail); m != nil {
+				r.Version, _ = splitVersion(m[2])
+			}
+		}
+		c := call{ref: r, uses: uses}
+		c.key, c.with = mapEntry(jobs.Content[i], "with")
+		out = append(out, c)
+	}
+	return out, lines, nil
 }
 
 func (w workflowRef) Scan(dir string) ([]Ref, error) {
@@ -29,12 +80,12 @@ func (w workflowRef) Scan(dir string) ([]Ref, error) {
 	}
 	var refs []Ref
 	for _, f := range files {
-		ms, err := scanLines(dir, f, w.edit().re)
+		cs, _, err := w.calls(dir, f)
 		if err != nil {
 			return nil, err
 		}
-		for _, m := range ms {
-			refs = append(refs, Ref{Updater: w.Name(), Dep: DepWorkflows, Key: m[1], Current: m[2], File: f})
+		for _, c := range cs {
+			refs = append(refs, c.ref)
 		}
 	}
 	return refs, nil
@@ -43,15 +94,99 @@ func (w workflowRef) Scan(dir string) ([]Ref, error) {
 func (w workflowRef) Apply(_ context.Context, dir string, changes []Change) error {
 	files, cs := byFile(changes)
 	for _, f := range files {
-		err := w.edit().rewrite(dir, f, func(m []string) (string, bool) {
-			c, ok := find(cs[f], m[1], m[2])
-			return c.To, ok
-		})
-		if err != nil {
-			return err
+		if err := w.apply(dir, f, cs[f]); err != nil {
+			return fmt.Errorf("%s: %w", f, err)
 		}
 	}
 	return nil
+}
+
+func (w workflowRef) apply(dir, file string, changes []Change) error {
+	calls, lines, err := w.calls(dir, file)
+	if err != nil {
+		return err
+	}
+	drop := map[int]bool{} // line numbers to delete
+	for _, c := range calls {
+		ch, ok := find(changes, c.ref.Key, c.ref.Current)
+		if !ok {
+			continue
+		}
+		n := c.uses.Line - 1
+		head, tail, ok := splitPinLine(lines[n], c.uses.Value)
+		if !ok {
+			return fmt.Errorf("line %d: can't find %q", c.uses.Line, c.uses.Value)
+		}
+		lines[n] = head + pinText(ch.To, tail)
+		if c.with == nil {
+			continue
+		}
+		k, v := mapEntry(c.with, workflowsInput)
+		if k == nil {
+			continue
+		}
+		if c.with.Style&yaml.FlowStyle != 0 || v.Line != k.Line {
+			return fmt.Errorf("line %d: remove the %s input by hand (only a one-line entry of a block `with:` is removed)", k.Line, workflowsInput)
+		}
+		drop[k.Line] = true
+		for n := k.Line - 1; k.HeadComment != "" && n > 0 && strings.HasPrefix(strings.TrimSpace(lines[n-1]), "#"); n-- {
+			drop[n] = true // the input's own comment
+		}
+		if len(c.with.Content) == 2 { // the only input: drop `with:` too
+			drop[c.key.Line] = true
+		}
+	}
+	var b strings.Builder
+	for i, l := range lines {
+		if !drop[i+1] {
+			b.WriteString(l)
+		}
+	}
+	info, err := os.Stat(filepath.Join(dir, file))
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, file), []byte(b.String()), info.Mode().Perm())
+}
+
+// pinTail matches what follows a pin's ref on its line: a closing quote, and a comment.
+var pinTail = regexp.MustCompile(`^(["']?)(?:[ \t]+#[ \t]*([^\r\n]*?))?[ \t]*(\r?\n)?$`)
+
+// versionWord matches a version at the start of a comment.
+var versionWord = regexp.MustCompile(`^(v[0-9][0-9A-Za-z.+-]*)(?:[ \t]+|$)`)
+
+// splitPinLine splits line around the ref of the uses: value: head ends with "@", tail starts
+// after the ref.
+func splitPinLine(line, value string) (head, tail string, ok bool) {
+	i, at := strings.Index(line, value), strings.Index(value, "@")
+	if i < 0 || at < 0 {
+		return "", "", false
+	}
+	return line[:i+at+1], line[i+len(value):], true
+}
+
+// splitVersion splits a pin's comment into its leading version, if any, and the rest.
+func splitVersion(comment string) (version, rest string) {
+	if m := versionWord.FindStringSubmatch(comment); m != nil && semver.IsValid(m[1]) {
+		return m[1], strings.TrimSpace(comment[len(m[0]):])
+	}
+	return "", comment
+}
+
+// pinText is the new pin, to (a WorkflowsPin or a ref), followed by the rest of the old line,
+// tail: the version comment is replaced by to's tag, or dropped for a ref without one.
+func pinText(to, tail string) string {
+	ref, tag := SplitWorkflowsPin(to)
+	m := pinTail.FindStringSubmatch(tail)
+	if m == nil { // more YAML follows on the line (a flow mapping): only the ref changes
+		return ref + tail
+	}
+	_, rest := splitVersion(m[2])
+	comment := strings.TrimSpace(tag + " " + rest)
+	if comment != "" {
+		comment = " # " + comment
+	}
+	return ref + m[1] + comment + m[3]
 }
 
 // opaVersion sets policy repos' `opa-version:` workflow inputs to the OPA version in the agent's

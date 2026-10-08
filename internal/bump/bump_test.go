@@ -70,6 +70,14 @@ func describe(p Plan) (changes, conflicts, upToDate []string) {
 	return
 }
 
+// Shared-workflow pins in the fixtures.
+const (
+	wf    = "compliance-framework/workflows/.github/workflows/"
+	sha10 = "0123456789abcdef0123456789abcdef01234567"
+	sha11 = "89abcdef0123456789abcdef0123456789abcdef"
+	sha20 = "fedcba9876543210fedcba9876543210fedcba98"
+)
+
 func TestUpdaters(t *testing.T) {
 	pseudoTime := time.Date(2026, 10, 7, 17, 3, 2, 0, time.UTC)
 	tagTimes := map[string]time.Time{"mock-api v0.1.0": pseudoTime.Add(time.Hour), "mock-api v0.0.1": pseudoTime.Add(-time.Hour)}
@@ -113,6 +121,59 @@ func TestUpdaters(t *testing.T) {
 			upToDate:      []string{".github/workflows/release.yml github.com/compliance-framework/gooci: v0.0.7"},
 			golden:        true,
 			reapplyStable: true,
+		},
+		{
+			// A release: SHA pins with a version comment; main, tags, older SHAs and a SHA without
+			// comment move, and the moved jobs lose their workflows-ref input.
+			fixture: "workflows",
+			targets: map[string]string{DepWorkflows: WorkflowsPin(sha11, "v1.1.0")},
+			changes: []string{
+				"workflow ref .github/workflows/ci.yml " + wf + "ci-go-service.yml: main -> " + sha11 + " # v1.1.0",
+				"workflow ref .github/workflows/ci.yml " + wf + "release-checks.yml: " + sha10 + " -> " + sha11 + " # v1.1.0",
+				"workflow ref .github/workflows/ci.yml " + wf + "notify-failure.yml: main -> " + sha11 + " # v1.1.0",
+				"workflow ref .github/workflows/release.yml " + wf + "release-go-image.yml: v1.0.0 -> " + sha11 + " # v1.1.0",
+				"workflow ref .github/workflows/release.yml " + wf + "cut-prerelease.yml: " + sha11 + " -> " + sha11 + " # v1.1.0",
+				"workflow ref .github/workflows/release.yml " + wf + "notify-failure.yml: v1 -> " + sha11 + " # v1.1.0",
+			},
+			conflicts: []string{".github/workflows/release.yml " + wf + "release-checks.yml: " +
+				"pinned to ra/try-something, not main, a commit SHA or a release: a human decides"},
+			upToDate:      []string{".github/workflows/release.yml " + wf + "preview.yml: " + sha11},
+			golden:        true,
+			reapplyStable: true,
+		},
+		{
+			// A new major is a human's call: only main and a SHA of unknown version move.
+			fixture: "workflows",
+			targets: map[string]string{DepWorkflows: WorkflowsPin(sha20, "v2.0.0")},
+			changes: []string{
+				"workflow ref .github/workflows/ci.yml " + wf + "ci-go-service.yml: main -> " + sha20 + " # v2.0.0",
+				"workflow ref .github/workflows/ci.yml " + wf + "notify-failure.yml: main -> " + sha20 + " # v2.0.0",
+				"workflow ref .github/workflows/release.yml " + wf + "cut-prerelease.yml: " + sha11 + " -> " + sha20 + " # v2.0.0",
+			},
+			conflicts: []string{
+				".github/workflows/ci.yml " + wf + "release-checks.yml: pinned " + sha10 + " # v1.0.0 is major v1, the latest release is v2.0.0: moving to another major is a human's call",
+				".github/workflows/release.yml " + wf + "release-go-image.yml: pinned v1.0.0 is major v1, the latest release is v2.0.0: moving to another major is a human's call",
+				".github/workflows/release.yml " + wf + "preview.yml: pinned " + sha11 + " # v1.1.0 is major v1, the latest release is v2.0.0: moving to another major is a human's call",
+				".github/workflows/release.yml " + wf + "release-checks.yml: pinned to ra/try-something, not main, a commit SHA or a release: a human decides",
+				".github/workflows/release.yml " + wf + "notify-failure.yml: pinned v1 is major v1, the latest release is v2.0.0: moving to another major is a human's call",
+			},
+		},
+		{
+			// Never downgrade a pin to a later release.
+			fixture: "workflows",
+			targets: map[string]string{DepWorkflows: WorkflowsPin(sha10, "v1.0.0")},
+			changes: []string{
+				"workflow ref .github/workflows/ci.yml " + wf + "ci-go-service.yml: main -> " + sha10 + " # v1.0.0",
+				"workflow ref .github/workflows/ci.yml " + wf + "notify-failure.yml: main -> " + sha10 + " # v1.0.0",
+				"workflow ref .github/workflows/release.yml " + wf + "release-go-image.yml: v1.0.0 -> " + sha10 + " # v1.0.0",
+				"workflow ref .github/workflows/release.yml " + wf + "cut-prerelease.yml: " + sha11 + " -> " + sha10 + " # v1.0.0",
+				"workflow ref .github/workflows/release.yml " + wf + "notify-failure.yml: v1 -> " + sha10 + " # v1.0.0",
+			},
+			conflicts: []string{
+				".github/workflows/release.yml " + wf + "preview.yml: pinned " + sha11 + " # v1.1.0 is newer than v1.0.0; ccf-bump never downgrades",
+				".github/workflows/release.yml " + wf + "release-checks.yml: pinned to ra/try-something, not main, a commit SHA or a release: a human decides",
+			},
+			upToDate: []string{".github/workflows/ci.yml " + wf + "release-checks.yml: " + sha10},
 		},
 		{
 			fixture:       "action",
@@ -274,6 +335,23 @@ func TestMajor(t *testing.T) {
 	} {
 		if got := (Change{Ref: Ref{Current: tc.from}, To: tc.to}).Major(); got != tc.major {
 			t.Errorf("Major(%s -> %s) = %v, want %v", tc.from, tc.to, got, tc.major)
+		}
+	}
+	for _, tc := range []struct {
+		from, version, to string
+		major             bool
+	}{
+		{"main", "", WorkflowsPin(sha10, "v1.0.0"), true},
+		{sha10, "", WorkflowsPin(sha11, "v1.1.0"), true}, // version unknown
+		{sha10, "v1.0.0", WorkflowsPin(sha11, "v1.1.0"), false},
+		{sha11, "", WorkflowsPin(sha11, "v1.1.0"), false}, // only the comment
+		{"v1", "", WorkflowsPin(sha11, "v1.1.0"), false},
+		{"v1.0.0", "", WorkflowsPin(sha20, "v2.0.0"), true},
+		{sha10, "v1.0.0", "main", true}, // a ref given by hand
+	} {
+		c := Change{Ref: Ref{Dep: DepWorkflows, Current: tc.from, Version: tc.version}, To: tc.to}
+		if got := c.Major(); got != tc.major {
+			t.Errorf("Major(workflows %s -> %s) = %v, want %v", c.Pinned(), tc.to, got, tc.major)
 		}
 	}
 }

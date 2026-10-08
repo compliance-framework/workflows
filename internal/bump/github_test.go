@@ -24,6 +24,8 @@ func TestGitHub(t *testing.T) {
 				return
 			}
 			fmt.Fprint(w, `[]`)
+		case "/repos/o/workflows/commits/v1.1.0": // GitHub peels an annotated tag to its commit
+			fmt.Fprint(w, `{"sha":"89abcdef0123456789abcdef0123456789abcdef"}`)
 		case "/repos/o/none/releases":
 			fmt.Fprint(w, `[]`)
 		case "/repos/o/agent/contents/go.mod":
@@ -47,6 +49,12 @@ func TestGitHub(t *testing.T) {
 	}
 	if v, err := g.LatestFinal(ctx, "none"); err != nil || v != "" {
 		t.Errorf("LatestFinal(none) = %q, %v", v, err)
+	}
+	if sha, err := g.TagCommit(ctx, "workflows", "v1.1.0"); err != nil || sha != "89abcdef0123456789abcdef0123456789abcdef" {
+		t.Errorf("TagCommit = %q, %v", sha, err)
+	}
+	if _, err := g.TagCommit(ctx, "workflows", "v9.9.9"); err == nil {
+		t.Error("TagCommit(missing tag): no error")
 	}
 	if b, err := g.File(ctx, "agent", "v0.10.1", "go.mod"); err != nil || string(b) != "require go 1.26\n" {
 		t.Errorf("File = %q, %v", b, err)

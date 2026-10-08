@@ -1,0 +1,21 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions: {}
+jobs:
+  ci:
+    uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@main
+    secrets: inherit
+  release-checks:
+    uses: compliance-framework/workflows/.github/workflows/release-checks.yml@0123456789abcdef0123456789abcdef01234567 # v1.0.0
+  notify:
+    needs: [ci, release-checks]
+    if: always()
+    uses: compliance-framework/workflows/.github/workflows/notify-failure.yml@main
+    with:
+      needs: ${{ toJSON(needs) }}
+      # Keep equal to the ref notify-failure.yml is called at.
+      workflows-ref: main
+    secrets: inherit
