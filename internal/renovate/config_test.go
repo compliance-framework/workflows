@@ -135,6 +135,7 @@ func TestSharedPreset(t *testing.T) {
 		OSVVulnerabilityAlerts bool     `json:"osvVulnerabilityAlerts"`
 		PlatformAutomerge      *bool    `json:"platformAutomerge"`
 		AutomergeStrategy      string   `json:"automergeStrategy"`
+		RebaseWhen             string   `json:"rebaseWhen"`
 		PrHourlyLimit          int      `json:"prHourlyLimit"`
 		PrConcurrentLimit      int      `json:"prConcurrentLimit"`
 		PostUpdateOptions      []string `json:"postUpdateOptions"`
@@ -172,6 +173,12 @@ func TestSharedPreset(t *testing.T) {
 	// itself, through the API as ccf-release-bot, with the repos' only merge method.
 	if p.PlatformAutomerge == nil || *p.PlatformAutomerge || p.AutomergeStrategy != "squash" {
 		t.Errorf("platformAutomerge %v, automergeStrategy %q, want false and squash", p.PlatformAutomerge, p.AutomergeStrategy)
+	}
+	// With automerge on, Renovate's default rebaseWhen "auto" means behind-base-branch: after one
+	// merge every other PR is behind main and gets rebased (a new CI run) instead of merged, so a
+	// run merges at most one PR per repo. ccf-required doesn't require up-to-date branches.
+	if p.RebaseWhen != "conflicted" {
+		t.Errorf("rebaseWhen = %q, want conflicted", p.RebaseWhen)
 	}
 	if !slices.Contains(p.PostUpdateOptions, "gomodTidy") {
 		t.Errorf("postUpdateOptions = %v, want gomodTidy", p.PostUpdateOptions)

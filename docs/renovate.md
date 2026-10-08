@@ -15,6 +15,7 @@ public repos.
 | Waiting period | `minimumReleaseAge: "7 days"` with `internalChecksFilter: "strict"`: no branch or PR before a release is a week old. An update with no release timestamp waits too (Renovate's default `minimumReleaseAgeBehaviour`). |
 | Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain and the `golang` image are in it. Majors get their own PRs. |
 | Auto-merge | The non-major group (and every non-major vulnerability fix) auto-merges, but Renovate merges it itself (`platformAutomerge: false`, `automergeType: "pr"`, `automergeStrategy: "squash"`): on its next run after the checks pass, Renovate squash-merges the PR through the API as `ccf-release-bot`. Majors wait for a human. See [Why Renovate merges, not GitHub](#why-renovate-merges-not-github). |
+| Rebasing | `rebaseWhen: "conflicted"`: a branch is rebased only when it conflicts with `main`, not every time it falls behind. See [One run merges every green PR](#one-run-merges-every-green-pr). |
 | Limits | `prHourlyLimit: 4`, `prConcurrentLimit: 8` per repo. |
 | Commits | Semantic: `fix(deps)` for runtime dependencies (Go `require`, npm `dependencies`, a Dockerfile's final stage, the Go `toolchain` directive), which release-please releases, and `chore(deps)` for everything else (dev, CI, actions). A group takes the highest type of its updates, so a group with any runtime update is `fix(deps)`. |
 | Go | `postUpdateOptions: ["gomodTidy"]`. Indirect modules are left to `go mod tidy` (Renovate's default). |
@@ -36,8 +37,25 @@ its next run that finds the checks green. `renovate.yml` runs daily, so a PR mer
 day after its checks pass. The 8th/22nd `schedule` doesn't delay this: it only limits when new
 branches are created, while Renovate keeps updating and merging existing PRs on the other days
 (its defaults `updateNotScheduled: true` and `automergeSchedule: ["at any time"]`, which the preset
-leaves alone). A PR whose checks fail stays open, and Renovate rebases or recreates it
+leaves alone). A PR whose checks fail stays open, and Renovate updates or recreates it
 on later runs as usual. The repo's "allow auto-merge" setting is no longer used by Renovate.
+
+### One run merges every green PR
+
+With auto-merge on, Renovate's default `rebaseWhen: "auto"` acts as `behind-base-branch`. Once it
+merges one PR, every other PR of that repo is behind `main`, so it rebases them instead of merging
+them, and their CI starts again. A run then merges at most one PR per repo: a repo with three
+security PRs takes three daily runs, and every rebase costs a CI run (seen on `mock-plugin-1` in
+run 37758663162). The preset sets `rebaseWhen: "conflicted"`, so Renovate merges every PR whose
+checks are green in the same run and rebases a branch only when it really conflicts with `main`
+(`go.mod` and `go.sum` conflicts are textual, so they are caught). This works because the
+`ccf-required` ruleset doesn't require branches to be up to date
+(`strict_required_status_checks_policy: false`), and a squash merge still checks for conflicts
+when it merges.
+
+The trade-off: a PR's CI may have run against an older `main` than the one it merges into. The
+push to `main` runs CI again on the merged result, and if that breaks, the repo's
+`notify-failure.yml` opens an incident, as for any red `main` (rule (b) in [notify](notify.md)).
 
 It extends `config:recommended`, which adds the Dependency Dashboard issue (where majors and pending
 updates are listed) and Renovate's standard monorepo groups.
