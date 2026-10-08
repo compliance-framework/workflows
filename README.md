@@ -766,6 +766,12 @@ See [docs/ccf-bump.md](docs/ccf-bump.md).
 internal dependencies with `ccf-bump`, merges the release PRs, waits for the releases, and tracks it
 all in a `Release train YYYY-MM` issue and a Slack thread. See [docs/train.md](docs/train.md).
 
+## Stack smoke test
+
+`stack-smoke.yml` (reusable and `workflow_dispatch`) runs postgres, the API, the UI and one agent
+from their published images at given tags and checks they work together (`smoke/run.sh`). See
+[docs/stack-smoke.md](docs/stack-smoke.md).
+
 ## Plugin probe
 
 `cmd/plugin-probe` and the reusable `plugin-probe.yml` load plugins through the agent's runner

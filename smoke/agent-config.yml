@@ -1,0 +1,17 @@
+# Agent config for the stack smoke test (smoke/compose.yaml). No plugins yet: the agent only
+# registers its instance (config report at startup) and heartbeats every minute.
+# api.auth comes from CCF_API_AUTH_CLIENT_ID / CCF_API_AUTH_CLIENT_SECRET (smoke/run.sh).
+daemon: true
+verbosity: 1
+
+api:
+  url: http://api:8080
+
+remote_config:
+  mode: report
+
+agent_evidence:
+  enabled: true
+  interval: 1h
+
+# TODO(W3): add a plugin and its policies here; smoke/run.sh's plugin hook checks its evidence.

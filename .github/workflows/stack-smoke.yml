@@ -1,0 +1,67 @@
+name: stack-smoke
+
+# Stack smoke test (docs/stack-smoke.md): runs postgres, the API, the UI and one agent from the
+# published images at the given tags and checks they work together (smoke/run.sh). The images
+# are only pulled; nothing is pushed or published.
+
+on:
+  workflow_call:
+    inputs:
+      api-tag:
+        description: Tag of ghcr.io/compliance-framework/api
+        type: string
+        default: "0.21.0"
+      ui-tag:
+        description: Tag of ghcr.io/compliance-framework/ui
+        type: string
+        default: "2.12.1"
+      agent-tag:
+        description: Tag of ghcr.io/compliance-framework/agent
+        type: string
+        default: "0.9.0"
+  workflow_dispatch:
+    inputs:
+      api-tag:
+        description: Tag of ghcr.io/compliance-framework/api
+        type: string
+        default: "0.21.0"
+      ui-tag:
+        description: Tag of ghcr.io/compliance-framework/ui
+        type: string
+        default: "2.12.1"
+      agent-tag:
+        description: Tag of ghcr.io/compliance-framework/agent
+        type: string
+        default: "0.9.0"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: stack smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check the tools ref
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so smoke/ can't be fetched"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repo and commit this workflow file was called at (not the caller's), for smoke/.
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - name: Run the stack smoke test
+        env:
+          SMOKE_API_TAG: ${{ inputs.api-tag }}
+          SMOKE_UI_TAG: ${{ inputs.ui-tag }}
+          SMOKE_AGENT_TAG: ${{ inputs.agent-tag }}
+        run: smoke/run.sh
+      # TODO(W3): plugin step. The plugin check runs inside smoke/run.sh (check_plugin), while
+      # the stack is up; add a plugin-tag input here and pass it to the step above.
