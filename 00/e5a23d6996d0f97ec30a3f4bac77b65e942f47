@@ -1,0 +1,2 @@
+lisa-addressed:
+pass 2: workflowRef.apply matches a change by the whole Ref (incl. Version), so a same-SHA job with another version comment keeps its own decision; fixture job checks-newer covers it (mutation-checked: old matching fails the golden).
