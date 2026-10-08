@@ -26,7 +26,7 @@ type bumper struct {
 	finals map[string]string // repo -> latest final tag, cached across repos
 	// commits caches "repo@tag" -> the commit SHA the tag points at (shared-workflow pins).
 	commits map[string]string
-	// warnings are problems that don't fail the run (auto-merge, superseded PRs), for the summary.
+	// warnings are problems that don't fail the run (labels, superseded PRs, merges), for the summary.
 	warnings []string
 }
 
@@ -276,9 +276,11 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	branch := "ccf-bump/" + b.o.mode + "-" + b.e.now().UTC().Format("2006-01-02")
 	if b.o.dryRun {
 		fmt.Fprintf(out, "  dry run: would push %s and open %q\n%s", branch, title, indent(body))
+		label := bump.AutomergeLabel
 		if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
-			fmt.Fprintf(out, "  dry run: auto-merge off; would add label %s\n", bump.NeedsHumanLabel)
+			label = bump.NeedsHumanLabel
 		}
+		fmt.Fprintf(out, "  dry run: would add label %s\n", label)
 		// Nothing was opened to tell who ccf-bump runs as, so any bot's ccf-bump PR is listed.
 		old, err := b.superseded(ctx, name, branch, func(p bump.PR) bool { return p.User.Type == "Bot" })
 		if err != nil {
@@ -307,7 +309,15 @@ func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, p
 		return err
 	}
 	if pr != nil {
-		err = b.e.gh.UpdatePR(ctx, repo, pr.Number, title, body)
+		if err = b.e.gh.UpdatePR(ctx, repo, pr.Number, title, body); err == nil && pr.AutoMerge != nil {
+			// Opened by an older run: GitHub's auto-merge never applies the ccf-review bypass, so it
+			// would leave the PR blocked; ccf-bump merge merges it instead.
+			if err := b.e.gh.DisableAutoMerge(ctx, pr.NodeID); err != nil {
+				b.warn("%s#%d: %v", repo, pr.Number, err)
+			} else {
+				fmt.Fprintln(b.e.stdout, "  GitHub auto-merge: disabled")
+			}
+		}
 	} else {
 		var base string
 		if base, err = b.e.gh.DefaultBranch(ctx, repo); err == nil {
@@ -321,28 +331,30 @@ func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, p
 	b.closeSuperseded(ctx, repo, branch, pr)
 	if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
 		fmt.Fprintln(b.e.stdout, "  auto-merge: off (a major update, or a pin that was not a version)")
-		b.needsHuman(ctx, repo, pr)
+		if pr.HasLabel(bump.AutomergeLabel) { // an earlier run the same day was eligible
+			if err := b.e.gh.RemoveLabel(ctx, repo, pr.Number, bump.AutomergeLabel); err != nil {
+				b.warn("%s#%d: remove label %s: %v", repo, pr.Number, bump.AutomergeLabel, err)
+			}
+		}
+		b.label(ctx, repo, pr, bump.NeedsHuman)
 		return nil
 	}
-	if err := b.e.gh.EnableAutoMerge(ctx, pr.NodeID); err != nil {
-		// e.g. the base branch has no protection rules, or the PR is already mergeable ("clean
-		// status"). The PR is open either way; a human merges it.
-		b.warn("%s#%d: %v", repo, pr.Number, err)
-		b.needsHuman(ctx, repo, pr)
-		return nil
+	// Not GitHub's auto-merge: `ccf-bump merge` merges the labelled PR as the bot once it is green.
+	if !b.label(ctx, repo, pr, bump.Automerge) {
+		b.label(ctx, repo, pr, bump.NeedsHuman) // nothing will merge it
 	}
-	fmt.Fprintln(b.e.stdout, "  auto-merge: on")
 	return nil
 }
 
-// needsHuman labels a PR with auto-merge off needs-human, which notify-failure.yml posts to Slack
-// (docs/attention.md). A failure is a warning: the PR is open either way.
-func (b *bumper) needsHuman(ctx context.Context, repo string, pr *bump.PR) {
-	if err := b.e.gh.LabelNeedsHuman(ctx, repo, pr.Number); err != nil {
-		b.warn("%s#%d: label %s: %v", repo, pr.Number, bump.NeedsHumanLabel, err)
-		return
+// label adds l to the PR (needs-human is posted to Slack by notify-failure.yml, docs/attention.md).
+// A failure is a warning: the PR is open either way.
+func (b *bumper) label(ctx context.Context, repo string, pr *bump.PR, l bump.Label) bool {
+	if err := b.e.gh.AddLabel(ctx, repo, pr.Number, l); err != nil {
+		b.warn("%s#%d: label %s: %v", repo, pr.Number, l.Name, err)
+		return false
 	}
-	fmt.Fprintf(b.e.stdout, "  label: %s\n", bump.NeedsHumanLabel)
+	fmt.Fprintf(b.e.stdout, "  label: %s\n", l.Name)
+	return true
 }
 
 // superseded returns repo's other open PRs that ccf-bump opened in this mode: head branch

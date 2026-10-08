@@ -9,6 +9,7 @@ anything that ships (Go modules, images, helm, the action's Dockerfile, OPA) sta
 ```text
 ccf-bump --repo NAME [--set dep=version]... [--mode sync|train] [--pr] [--dry-run] [flags]
 ccf-bump sync --all|--repos a,b [--batch 10] [--pr] [--dry-run] [flags]
+ccf-bump merge --all|--repos a,b [--wait 20m] [--author NAME] [--dry-run]
 ccf-bump list [--repos a,b]
 ```
 
@@ -28,9 +29,8 @@ ccf-bump list [--repos a,b]
 - A repo that fails is reported (`::error::`) and the others still run; the exit code is non-zero.
   Failures are a branch push, a PR create/update, or resolving the manifest or a version.
 - **Warnings** don't fail the run: they are printed as `::warning::` and repeated at the end of the
-  output and in `$GITHUB_STEP_SUMMARY` (when set). Failing to enable auto-merge is one (GitHub
-  refuses it when the base branch has no protection rules, or when the PR is already mergeable,
-  "clean status"); the PR stays open for a human to merge.
+  output and in `$GITHUB_STEP_SUMMARY` (when set). Failing to add a label is one; the PR stays
+  open.
 - **Superseded PRs**: after opening or updating a repo's bump PR, ccf-bump closes that repo's other
   open PRs it opened in the same mode: head branch `ccf-bump/<mode>-*` in the repo itself (not a
   fork), opened by the same account as the new PR (the release bot). Each gets the comment
@@ -70,11 +70,17 @@ Files are edited in place, so comments and layout stay. Chart versions are left 
   pseudo-version whose commit is newer than the target tag's commit. A pin that is not a version
   (`alpine:3.20`, a branch, a SHA, `latest`) is replaced. Conflicts are printed and listed in the PR.
 - **No target, no change**: a dependency with no final release yet is left alone.
-- **Auto-merge** (squash) is enabled when every change stays within its major version. A move from
-  a pin that is not a version, or whose current version is unknown (the ui conformance file),
-  needs a human.
-- **A PR that needs a human** (auto-merge off, or refused by GitHub) gets the `needs-human` label,
-  created in the repo when missing; a failure is a warning. See [attention.md](attention.md).
+- **Merged by ccf-bump** when every change stays within its major version: the PR gets the
+  `ccf-bump:automerge` label (color `0e8a16`, "ccf-bump merges this once CI is green", created in
+  the repo when missing) and [`ccf-bump merge`](#the-merge-pass) merges it once `ci / required`
+  passes. Never GitHub's auto-merge ([why](#why-ccf-bump-merges-not-github)); updating a PR that an
+  older run left with GitHub's auto-merge on turns it off (a failure is a warning). A move from a
+  pin that is not a version, or whose current version is unknown (the ui conformance file), needs
+  a human.
+- **A PR that needs a human** gets the `needs-human` label instead (and loses
+  `ccf-bump:automerge` if an earlier run the same day added it); so does a PR whose
+  `ccf-bump:automerge` label could not be added. A failure is a warning. See
+  [attention.md](attention.md).
 - Shared-workflow pins follow their own rules, below.
 
 ## Shared-workflow pins
@@ -107,6 +113,34 @@ inside a flow mapping
 (`--set workflows=main`, a SHA) is used as given: every other pin moves to it, needing a human,
 and its version comment is dropped.
 
+## Why ccf-bump merges, not GitHub
+
+GitHub's native auto-merge never applies the `ccf-review` bypass of `ccf-release-bot`, so a bump PR
+with a green `ci / required` stays `BLOCKED` / `REVIEW_REQUIRED` (seen on all 10 mocks on
+2026-10-08), as Renovate's did: see [renovate.md](renovate.md#why-renovate-merges-not-github). A
+merge through the API as the bot does use the bypass, and `ccf-required` has no bypass, so the
+required check still gates it.
+
+## The merge pass
+
+`ccf-bump merge` lists each repo's open PRs and merges those that are all of: labelled
+`ccf-bump:automerge`, from a `ccf-bump/*` branch of the repo itself (not a fork), opened by
+`--author` (default `ccf-release-bot[bot]`; the workflows pass the token's app), and not labelled
+`needs-human` (a person can hold a PR by adding it). Renovate, release-please and people's PRs never
+qualify. For each, at its head commit:
+
+| State | What merge does |
+| --- | --- |
+| `ci / required` (`--required-check`) concluded `success`, and GitHub reports the PR mergeable | squash-merges it as the token's identity, with the PR title plus ` (#N)` as the commit title, if its head is still that commit. Behind its base is fine (`ccf-required` is not strict). |
+| the check concluded otherwise | leaves it, with a warning: `notify-failure.yml` already posted the failure and the attention digest lists the PR |
+| conflicting with its base | leaves it, with a warning |
+| the check queued, running or not there yet, or mergeability not computed | pending: with `--wait D` it looks again every 30s for up to `D`, then reports what is still pending (a later pass merges it) |
+
+A merge GitHub refuses is a warning; failing to list a repo's PRs, or to read a PR or its check,
+fails the run (the other repos still run). It removes no label. `--dry-run` prints what it would
+merge and doesn't wait. The train merges its own train-mode bump PRs; one merge pass merging
+them first is harmless.
+
 ## The `ccf-bump-sync` workflow
 
 `ccf-bump-sync.yml` runs `ccf-bump sync --batch 10 --pr` on the 8th and 22nd at 04:00 UTC, and on
@@ -114,8 +148,15 @@ and its version comment is dropped.
 (default `true`). Scheduled runs use `repos.yaml` and are dry runs until the repo variable
 `CCF_BUMP_SYNC_LIVE` is `true`. It lists the repos, then mints a `ccf-release-bot` token scoped to
 exactly those (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`): read-only for dry runs; contents,
-pull requests and workflows write otherwise (bumps edit workflow files). Commits are authored by
-the bot.
+pull requests and workflows write otherwise (bumps edit workflow files), and checks read. Commits
+are authored by the bot. A live run then runs `ccf-bump merge --wait 20m` over the same repos.
+
+`ccf-bump-merge.yml` runs the merge pass alone (`--wait 0`) daily at 05:41 UTC, for PRs whose CI
+finished later, and on `workflow_dispatch` with inputs `manifest` (default `repos.mock.yaml`) and
+`dry_run` (default `true`). A scheduled run uses `repos.mock.yaml` (the fallback equals the input's
+default: change both to move to `repos.yaml`) and is a dry run until `CCF_BUMP_SYNC_LIVE` is
+`true`. Its token has the same permissions as the sync's (merging a PR that edits workflow files
+needs workflows write).
 
 ```sh
 # Dry run against local clones of the mocks (DIR/mock-*):

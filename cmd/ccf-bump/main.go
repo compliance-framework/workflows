@@ -3,6 +3,7 @@
 //
 //	ccf-bump --repo NAME [--set dep=version]... [--mode train|sync] [--pr] [--dry-run] [flags]
 //	ccf-bump sync --all|--repos a,b [--batch 10] [--pr] [--dry-run] [flags]
+//	ccf-bump merge --all|--repos a,b [--wait 20m] [--dry-run]   merge its green ccf-bump:automerge PRs
 //	ccf-bump list [--repos a,b]       the selected repos, comma-separated (to scope the token)
 //
 // sync mode targets each dependency's latest final release; train mode only the --set versions.
@@ -37,11 +38,15 @@ type GitHub interface {
 	OpenPR(ctx context.Context, repo, branch string) (*bump.PR, error)
 	CreatePR(ctx context.Context, repo, base, head, title, body string) (*bump.PR, error)
 	UpdatePR(ctx context.Context, repo string, number int, title, body string) error
-	EnableAutoMerge(ctx context.Context, id string) error
+	DisableAutoMerge(ctx context.Context, id string) error
 	OpenPRs(ctx context.Context, repo string) ([]bump.PR, error)
 	ClosePR(ctx context.Context, repo string, number int, comment string) error
 	DeleteBranch(ctx context.Context, repo, branch string) error
-	LabelNeedsHuman(ctx context.Context, repo string, number int) error
+	AddLabel(ctx context.Context, repo string, number int, l bump.Label) error
+	RemoveLabel(ctx context.Context, repo string, number int, name string) error
+	PullRequest(ctx context.Context, repo string, number int) (*bump.PR, error)
+	LatestCheck(ctx context.Context, repo, sha, name string) (*bump.CheckRun, error)
+	Merge(ctx context.Context, repo string, number int, sha, title string) error
 }
 
 // env is everything run depends on, so tests can fake it.
@@ -88,27 +93,32 @@ type options struct {
 	set                               setFlag
 	pr, dryRun                        bool
 	batch                             int
+	wait                              time.Duration
+	author, required                  string
 }
 
 func run(ctx context.Context, args []string, e env) error {
 	cmd := ""
-	if len(args) > 0 && (args[0] == "sync" || args[0] == "list") {
+	if len(args) > 0 && (args[0] == "sync" || args[0] == "list" || args[0] == "merge") {
 		cmd, args = args[0], args[1:]
 	}
 	fs := flag.NewFlagSet("ccf-bump "+cmd, flag.ContinueOnError)
 	o := options{set: setFlag{}}
 	path := fs.String("manifest", manifest.DefaultPath, "path to the repo manifest")
 	repo := fs.String("repo", "", "the repo to bump")
-	repos := fs.String("repos", "", "sync, list: comma-separated repos (default with --all: every repo with release: true)")
-	all := fs.Bool("all", false, "sync: every repo with release: true")
+	repos := fs.String("repos", "", "sync, merge, list: comma-separated repos (default with --all: every repo with release: true)")
+	all := fs.Bool("all", false, "sync, merge: every repo with release: true")
 	fs.StringVar(&o.owner, "owner", "compliance-framework", "the repos' owner")
 	fs.StringVar(&o.mode, "mode", "sync", "sync (latest final releases) or train (only --set versions)")
 	fs.Var(o.set, "set", "dep=version target (repeatable); dep is a repo, a github.com/<owner>/ module path, opa or workflows")
 	fs.StringVar(&o.workflowsRef, "workflows-ref", "", "move compliance-framework/workflows pins to this release (vX.Y.Z, pinned by its commit SHA) or ref (same as --set workflows=REF)")
 	fs.StringVar(&o.clones, "clones", "", "directory of local clones (<dir>/<repo>) to read instead of cloning from GitHub")
 	fs.BoolVar(&o.pr, "pr", false, "push a branch and open or update a PR per repo")
-	fs.BoolVar(&o.dryRun, "dry-run", false, "with --pr: print the PR instead of pushing")
+	fs.BoolVar(&o.dryRun, "dry-run", false, "with --pr: print the PR instead of pushing; merge: print what it would merge")
 	fs.IntVar(&o.batch, "batch", 0, "sync: open at most this many PRs per hour (0: no limit)")
+	fs.DurationVar(&o.wait, "wait", 0, "merge: poll PRs whose required check is pending for up to this long")
+	fs.StringVar(&o.author, "author", "ccf-release-bot[bot]", "merge: the account whose PRs it merges (the token's identity)")
+	fs.StringVar(&o.required, "required-check", "ci / required", "merge: the check that must pass on a PR's head")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -138,8 +148,8 @@ func run(ctx context.Context, args []string, e env) error {
 		return errors.New("--repo is required (or use: ccf-bump sync --all)")
 	case cmd == "":
 		selected, err = selectRepos(m, *repo)
-	case *all == (*repos != "") && cmd == "sync":
-		return errors.New("sync takes one of --all or --repos")
+	case *all == (*repos != "") && (cmd == "sync" || cmd == "merge"):
+		return errors.New(cmd + " takes one of --all or --repos")
 	default:
 		selected, err = selectRepos(m, *repos)
 	}
@@ -148,6 +158,12 @@ func run(ctx context.Context, args []string, e env) error {
 	}
 	if cmd == "list" {
 		_, err := fmt.Fprintln(e.stdout, strings.Join(selected, ","))
+		return err
+	}
+	if cmd == "merge" {
+		b := &bumper{e: e, o: o, m: m}
+		err := b.mergeAll(ctx, selected)
+		b.summary()
 		return err
 	}
 	if cmd == "sync" && o.mode != "sync" {

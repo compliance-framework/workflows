@@ -23,10 +23,17 @@ type fakeGH struct {
 	open     map[string]*bump.PR
 	calls    []string
 	nextPR   int
-	autoErr  error
+	autoErr  error // DisableAutoMerge
 	closeErr error
 	labelErr error
 	anon     bool // CreatePR returns a PR without its author
+	// checks: head SHA -> the required check's run on each read (the last one repeats; none: nil).
+	checks    map[string][]*bump.CheckRun
+	conflicts map[int]bool // PR number -> mergeable false
+	computing map[int]int  // PR number -> reads that return mergeable null
+	mergeErr  error
+	listErr   error                  // OpenPRs
+	changed   map[int]func(*bump.PR) // PR number -> a change seen by PullRequest only (after the listing)
 }
 
 func (f *fakeGH) LatestFinal(_ context.Context, repo string) (string, error) {
@@ -81,11 +88,14 @@ func (f *fakeGH) UpdatePR(_ context.Context, repo string, n int, title, _ string
 	f.calls = append(f.calls, fmt.Sprintf("update %s#%d %q", repo, n, title))
 	return nil
 }
-func (f *fakeGH) EnableAutoMerge(_ context.Context, id string) error {
-	f.calls = append(f.calls, "automerge "+id)
+func (f *fakeGH) DisableAutoMerge(_ context.Context, id string) error {
+	f.calls = append(f.calls, "disable-automerge "+id)
 	return f.autoErr
 }
 func (f *fakeGH) OpenPRs(_ context.Context, repo string) ([]bump.PR, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	var out []bump.PR
 	for k, pr := range f.open {
 		if strings.HasPrefix(k, repo+" ") {
@@ -111,9 +121,54 @@ func (f *fakeGH) DeleteBranch(_ context.Context, repo, branch string) error {
 	f.calls = append(f.calls, "delete "+repo+" "+branch)
 	return nil
 }
-func (f *fakeGH) LabelNeedsHuman(_ context.Context, repo string, n int) error {
-	f.calls = append(f.calls, fmt.Sprintf("label %s#%d", repo, n))
+func (f *fakeGH) AddLabel(_ context.Context, repo string, n int, l bump.Label) error {
+	f.calls = append(f.calls, fmt.Sprintf("label %s#%d %s", repo, n, l.Name))
 	return f.labelErr
+}
+func (f *fakeGH) RemoveLabel(_ context.Context, repo string, n int, name string) error {
+	f.calls = append(f.calls, fmt.Sprintf("unlabel %s#%d %s", repo, n, name))
+	return nil
+}
+func (f *fakeGH) find(repo string, n int) *bump.PR {
+	for k, pr := range f.open {
+		if strings.HasPrefix(k, repo+" ") && pr.Number == n {
+			return pr
+		}
+	}
+	return nil
+}
+func (f *fakeGH) PullRequest(_ context.Context, repo string, n int) (*bump.PR, error) {
+	pr := f.find(repo, n)
+	if pr == nil {
+		return nil, fmt.Errorf("no PR %s#%d", repo, n)
+	}
+	cp, ok := *pr, !f.conflicts[n]
+	if c := f.changed[n]; c != nil {
+		c(&cp)
+	}
+	if f.computing[n] > 0 {
+		f.computing[n]--
+	} else {
+		cp.Mergeable = &ok
+	}
+	return &cp, nil
+}
+func (f *fakeGH) LatestCheck(_ context.Context, _, sha, name string) (*bump.CheckRun, error) {
+	if name != "ci / required" {
+		return nil, fmt.Errorf("check %q", name)
+	}
+	runs := f.checks[sha]
+	if len(runs) == 0 {
+		return nil, nil
+	}
+	if len(runs) > 1 {
+		f.checks[sha] = runs[1:]
+	}
+	return runs[0], nil
+}
+func (f *fakeGH) Merge(_ context.Context, repo string, n int, sha, title string) error {
+	f.calls = append(f.calls, fmt.Sprintf("merge %s#%d %s %q", repo, n, sha, title))
+	return f.mergeErr
 }
 
 const testManifest = `repos:
@@ -192,13 +247,13 @@ func TestSyncAllPR(t *testing.T) {
 	}
 	want := []string{
 		`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
-		"automerge PR_1",
+		"label mock-ui#1 ccf-bump:automerge",
 		`create mock-agent-action main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-agent to v0.2.0"`,
-		"label mock-agent-action#2",
+		"label mock-agent-action#2 needs-human",
 		`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0"`,
-		"automerge PR_3",
+		"label mock-plugin-1#3 ccf-bump:automerge",
 		`create mock-plugin-policies-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump opa to v1.15.0"`,
-		"automerge PR_4",
+		"label mock-plugin-policies-1#4 ccf-bump:automerge",
 	}
 	if !slices.Equal(gh.calls, want) {
 		t.Errorf("calls:\n%s\nwant:\n%s\noutput:\n%s", strings.Join(gh.calls, "\n"), strings.Join(want, "\n"), out)
@@ -230,7 +285,7 @@ func TestSyncAllPR(t *testing.T) {
 	if err := run(context.Background(), []string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}, e); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{`update mock-ui#1 "fix(deps): bump mock-api to v0.1.0"`, "automerge PR_1"}; !slices.Equal(gh.calls, want) {
+	if want := []string{`update mock-ui#1 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#1 ccf-bump:automerge"}; !slices.Equal(gh.calls, want) {
 		t.Errorf("rerun calls %q, want %q", gh.calls, want)
 	}
 }
@@ -279,7 +334,7 @@ func TestWorkflowsPins(t *testing.T) {
 		}
 	}
 	if want := []string{`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0, workflows to v1.1.0"`,
-		"label mock-plugin-1#1"}; !slices.Equal(gh.calls, want) {
+		"label mock-plugin-1#1 needs-human"}; !slices.Equal(gh.calls, want) {
 		t.Errorf("calls %q, want %q", gh.calls, want)
 	}
 	got := git(t, root, "--git-dir", filepath.Join("remotes", "mock-plugin-1.git"), "show", "ccf-bump/sync-2026-10-08:.github/workflows/ci.yaml")
@@ -358,18 +413,18 @@ func TestOneRepoFailing(t *testing.T) {
 	}
 }
 
-func TestAutoMergeFailureWarns(t *testing.T) {
+func TestLabelFailureWarns(t *testing.T) {
 	root, e, gh, out := setup(t)
-	gh.autoErr = fmt.Errorf("enable auto-merge: Protected branch rules not configured for this branch")
+	gh.labelErr = fmt.Errorf("403 Forbidden")
 	summary := filepath.Join(root, "summary.md")
 	e.getenv = func(k string) string { return map[string]string{"GITHUB_STEP_SUMMARY": summary}[k] }
 	if err := run(context.Background(), []string{"sync", "--all", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}, e); err != nil {
-		t.Fatalf("run failed on an auto-merge error: %v\n%s", err, out)
+		t.Fatalf("run failed on a label error: %v\n%s", err, out)
 	}
 	if n := strings.Count(strings.Join(gh.calls, "\n"), "create "); n != 4 {
 		t.Errorf("created %d PRs, want 4: %q", n, gh.calls)
 	}
-	want := "mock-ui#1: enable auto-merge: Protected branch rules not configured for this branch"
+	want := "mock-ui#1: label ccf-bump:automerge: 403 Forbidden"
 	if !strings.Contains(out.String(), "::warning::ccf-bump: "+want) {
 		t.Errorf("no ::warning:: line:\n%s", out)
 	}
@@ -404,7 +459,7 @@ func TestSupersededPRsClosed(t *testing.T) {
 		`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
 		`close mock-ui#50 "Superseded by #100."`,
 		"delete mock-ui ccf-bump/sync-2026-09-22",
-		"automerge PR_100",
+		"label mock-ui#100 ccf-bump:automerge",
 	}
 	if !slices.Equal(gh.calls, want) {
 		t.Errorf("calls:\n%s\nwant:\n%s\noutput:\n%s", strings.Join(gh.calls, "\n"), strings.Join(want, "\n"), out)
@@ -424,12 +479,12 @@ func TestSupersededPRsWarnings(t *testing.T) {
 			fake: func(f *fakeGH) { f.closeErr = fmt.Errorf("403 Forbidden") },
 			warn: "mock-ui#50: close superseded PR: 403 Forbidden",
 			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
-				`close mock-ui#50 "Superseded by #100."`, "automerge PR_100"},
+				`close mock-ui#50 "Superseded by #100."`, "label mock-ui#100 ccf-bump:automerge"},
 		},
 		"author unknown": {
 			fake:  func(f *fakeGH) { f.anon = true },
 			warn:  "mock-ui#100: author unknown; earlier ccf-bump PRs left open",
-			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`, "automerge PR_100"},
+			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#100 ccf-bump:automerge"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -473,36 +528,54 @@ func TestWithoutTokens(t *testing.T) {
 	}
 }
 
-func TestNeedsHuman(t *testing.T) {
+func TestLabels(t *testing.T) {
+	automerge := []bump.PRLabel{{Name: bump.AutomergeLabel}}
 	for name, tc := range map[string]struct {
+		repo  string
+		open  *bump.PR // the PR an earlier run opened on today's branch
 		fake  func(*fakeGH)
 		calls []string
 		out   string
 	}{
-		"auto-merge refused": {
-			fake:  func(f *fakeGH) { f.autoErr = fmt.Errorf("enable auto-merge: clean status") },
-			calls: []string{"automerge PR_1", "label mock-ui#1"},
-			out:   "  label: needs-human\n",
+		"eligible": {
+			repo: "mock-ui", calls: []string{"label mock-ui#1 ccf-bump:automerge"}, out: "  label: ccf-bump:automerge\n",
 		},
 		"label fails": {
-			fake:  func(f *fakeGH) { f.autoErr, f.labelErr = fmt.Errorf("refused"), fmt.Errorf("403 Forbidden") },
-			calls: []string{"automerge PR_1", "label mock-ui#1"},
+			repo: "mock-ui", fake: func(f *fakeGH) { f.labelErr = fmt.Errorf("403 Forbidden") },
+			calls: []string{"label mock-ui#1 ccf-bump:automerge", "label mock-ui#1 needs-human"},
 			out:   "::warning::ccf-bump: mock-ui#1: label needs-human: 403 Forbidden",
 		},
-		"auto-merge on": {
-			fake:  func(*fakeGH) {},
-			calls: []string{"automerge PR_1"},
-			out:   "auto-merge: on",
+		"major": {
+			repo: "mock-agent-action", calls: []string{"label mock-agent-action#1 needs-human"}, out: "auto-merge: off",
+		},
+		"major, earlier run eligible": {
+			repo: "mock-agent-action", open: &bump.PR{Number: 7, Labels: automerge},
+			calls: []string{"unlabel mock-agent-action#7 ccf-bump:automerge", "label mock-agent-action#7 needs-human"},
+		},
+		"GitHub auto-merge from an older run": {
+			repo: "mock-ui", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
+			calls: []string{"disable-automerge PR_7", "label mock-ui#7 ccf-bump:automerge"}, out: "GitHub auto-merge: disabled",
+		},
+		"disabling GitHub auto-merge fails": {
+			repo: "mock-ui", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
+			fake:  func(f *fakeGH) { f.autoErr = fmt.Errorf("disable auto-merge: nope") },
+			calls: []string{"disable-automerge PR_7", "label mock-ui#7 ccf-bump:automerge"},
+			out:   "::warning::ccf-bump: mock-ui#7: disable auto-merge: nope",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root, e, gh, out := setup(t)
-			tc.fake(gh)
-			args := []string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}
+			if tc.open != nil {
+				gh.open[tc.repo+" ccf-bump/sync-2026-10-08"] = tc.open
+			}
+			if tc.fake != nil {
+				tc.fake(gh)
+			}
+			args := []string{"sync", "--repos", tc.repo, "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}
 			if err := run(context.Background(), args, e); err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			if got := gh.calls[1:]; !slices.Equal(got, tc.calls) { // [0] is the create
+			if got := gh.calls[1:]; !slices.Equal(got, tc.calls) { // [0] is the create or update
 				t.Errorf("calls %q, want %q", got, tc.calls)
 			}
 			if !strings.Contains(out.String(), tc.out) {
@@ -521,7 +594,7 @@ func TestNeedsHumanDryRun(t *testing.T) {
 	if len(gh.calls) != 0 {
 		t.Errorf("dry run called the API: %q", gh.calls)
 	}
-	if s := "dry run: auto-merge off; would add label needs-human"; !strings.Contains(out.String(), s) {
+	if s := "dry run: would add label needs-human"; !strings.Contains(out.String(), s) {
 		t.Errorf("output lacks %q:\n%s", s, out)
 	}
 }
