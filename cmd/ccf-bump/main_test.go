@@ -525,3 +525,24 @@ func TestNeedsHumanDryRun(t *testing.T) {
 		t.Errorf("output lacks %q:\n%s", s, out)
 	}
 }
+
+func TestPRTitleType(t *testing.T) {
+	const sha = "89abcdef0123456789abcdef0123456789abcdef"
+	wf := func(file string) bump.Change {
+		return bump.Change{Ref: bump.Ref{Dep: bump.DepWorkflows, File: file, Current: "main"}, To: bump.WorkflowsPin(sha, "v1.1.0")}
+	}
+	gomod := bump.Change{Ref: bump.Ref{Dep: "mock-api", File: "go.mod", Current: "v0.1.0"}, To: "v0.2.0"}
+	for name, tc := range map[string]struct {
+		changes []bump.Change
+		want    string
+	}{
+		"only workflow pins":    {[]bump.Change{wf(".github/workflows/ci.yml"), wf(".github/workflows/release.yml")}, "ci(deps): bump workflows to v1.1.0"},
+		"a runtime dep too":     {[]bump.Change{wf(".github/workflows/ci.yml"), gomod}, "fix(deps): bump mock-api to v0.2.0, workflows to v1.1.0"},
+		"only a runtime dep":    {[]bump.Change{gomod}, "fix(deps): bump mock-api to v0.2.0"},
+		"OPA counts as runtime": {[]bump.Change{{Ref: bump.Ref{Dep: bump.DepOPA, File: ".github/workflows/release.yml"}, To: "v1.15.0"}, wf("x")}, "fix(deps): bump opa to v1.15.0, workflows to v1.1.0"},
+	} {
+		if title, _ := prText(options{owner: "compliance-framework", mode: "sync"}, bump.Plan{Changes: tc.changes}); title != tc.want {
+			t.Errorf("%s: title %q, want %q", name, title, tc.want)
+		}
+	}
+}

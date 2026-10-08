@@ -420,8 +420,19 @@ func releaseURL(owner string, c bump.Change) string {
 	return "https://github.com/" + owner + "/" + c.Dep + "/releases/tag/" + c.To
 }
 
+// commitType is the PR title's (and squash commit's) conventional type: ci when the bump moves
+// only shared-workflow pins, which release-please hides and never releases for; fix when it
+// moves anything that ships (go.mod, images, helm, the action's Dockerfile, OPA), even with
+// workflow pins in the same PR.
+func commitType(plan bump.Plan) string {
+	if len(plan.Changes) > 0 && !slices.ContainsFunc(plan.Changes, func(c bump.Change) bool { return c.Dep != bump.DepWorkflows }) {
+		return "ci"
+	}
+	return "fix"
+}
+
 func prText(o options, plan bump.Plan) (string, string) {
-	title := "fix(deps): bump " + strings.Join(targetsOf(plan), ", ")
+	title := commitType(plan) + "(deps): bump " + strings.Join(targetsOf(plan), ", ")
 	var b strings.Builder
 	fmt.Fprintf(&b, "Bumps internal dependencies (ccf-bump, %s mode).\n\n| Dependency | From | To | Where |\n| --- | --- | --- | --- |\n", o.mode)
 	for _, c := range plan.Changes {
