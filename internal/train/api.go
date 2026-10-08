@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 )
 
 // PR is a pull request as the train sees it.
@@ -26,6 +27,7 @@ type Check struct {
 	Name       string
 	Status     string // queued, in_progress, completed
 	Conclusion string // success, failure, skipped, ...
+	StartedAt  time.Time
 }
 
 // Run is a GitHub Actions workflow run.
@@ -121,21 +123,24 @@ const (
 var failed = map[string]bool{"failure": true, "timed_out": true, "cancelled": true, "action_required": true, "startup_failure": true}
 
 // EvaluateChecks reduces a commit's checks to green, pending or failing (with the failing
-// names), using the latest check of each name. required must be present and pass.
+// names). A commit can have several runs of a check (a re-run, or a run for another event such as
+// labeled): a check with any run queued or in progress is pending, else its newest run (by start
+// time, then ID) decides. required must be present and pass.
 func EvaluateChecks(checks []Check, required string) (state, detail string) {
-	latest := map[string]Check{}
+	latest, running := map[string]Check{}, map[string]bool{}
 	for _, c := range checks {
-		if l, ok := latest[c.Name]; !ok || c.ID > l.ID {
+		running[c.Name] = running[c.Name] || c.Status != "completed"
+		l, ok := latest[c.Name]
+		if !ok || c.StartedAt.After(l.StartedAt) || c.StartedAt.Equal(l.StartedAt) && c.ID > l.ID {
 			latest[c.Name] = c
 		}
 	}
 	var failing, pending []string
 	for _, name := range slices.Sorted(maps.Keys(latest)) {
-		c := latest[name]
 		switch {
-		case c.Status != "completed":
+		case running[name]:
 			pending = append(pending, name)
-		case failed[c.Conclusion]:
+		case failed[latest[name].Conclusion]:
 			failing = append(failing, name)
 		}
 	}

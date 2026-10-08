@@ -25,6 +25,12 @@ Every run reads GitHub's current state, so running it again is always safe, and 
 on the next run. A failed `ccf-bump` stays blocked until `/retry`, because running it again would
 fail again. A blocked repo holds up the stages after it, never the other repos of its stage.
 
+A PR's checks are judged per name over every run on its head commit (a re-run, or a run for a
+`labeled` or `edited` event, adds one): a check with any run queued or in progress is pending,
+otherwise its newest run (by start time, then ID) decides. A merge GitHub refuses with 405
+"Required status check … is expected" (a run that started after the checks were read) is waiting,
+not `blocked`: the next run retries it.
+
 ## Tracking issue
 
 Each train has an issue in this repo titled `Release train YYYY-MM` (a second manual train in a
