@@ -20,12 +20,19 @@ const defaultRepoJSON = `{"allow_squash_merge":true,"allow_merge_commit":true,"a
 // apiServer serves a repo o/a with GitHub's defaults and records every request as "METHOD path".
 func apiServer(t *testing.T) (*GitHub, func() []string) {
 	t.Helper()
-	gh, calls, _ := apiServerWith(t, defaultRepoJSON)
+	gh, calls, _ := apiServerWith(t, defaultRepoJSON, nil)
 	return gh, calls
 }
 
-// apiServerWith is apiServer with repoJSON as GET /repos/o/a; it also returns the PATCH bodies.
-func apiServerWith(t *testing.T, repoJSON string) (*GitHub, func() []string, func() []string) {
+// reply is a canned response: a status code and a body.
+type reply struct {
+	code int
+	body string
+}
+
+// apiServerWith is apiServer with repoJSON as GET /repos/o/a and the replies in override, keyed by
+// "METHOD path"; it also returns the PATCH bodies.
+func apiServerWith(t *testing.T, repoJSON string, override map[string]reply) (*GitHub, func() []string, func() []string) {
 	t.Helper()
 	var mu sync.Mutex
 	var calls, patches []string
@@ -51,13 +58,18 @@ func apiServerWith(t *testing.T, repoJSON string) (*GitHub, func() []string, fun
 			patches = append(patches, string(body))
 		}
 		mu.Unlock()
+		if o, ok := override[r.Method+" "+r.URL.Path]; ok {
+			w.WriteHeader(o.code)
+			_, _ = io.WriteString(w, o.body)
+			return
+		}
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		resp, ok := get[r.URL.Path]
 		if !ok {
-			http.NotFound(w, r) // vulnerability alerts are off
+			http.NotFound(w, r) // vulnerability alerts are off; no code security configuration
 			return
 		}
 		_, _ = io.WriteString(w, resp)
@@ -80,7 +92,7 @@ func TestGitHubDryRunOnlyReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"GET /installation/repositories", "GET /repos/o/a", "GET /repos/o/a/vulnerability-alerts",
+		"GET /installation/repositories", "GET /repos/o/a", "GET /repos/o/a/code-security-configuration", "GET /repos/o/a/vulnerability-alerts",
 		"GET /repos/o/a/automated-security-fixes", "GET /repos/o/a/rulesets", "GET /repos/o/a/rulesets/7",
 	}
 	if got := calls(); !slices.Equal(got, want) {
@@ -100,8 +112,8 @@ func TestGitHubApplyWrites(t *testing.T) {
 		}
 	}
 	want := []string{
-		"PATCH /repos/o/a", "PUT /repos/o/a/vulnerability-alerts", "DELETE /repos/o/a/automated-security-fixes",
-		"POST /repos/o/a/rulesets", "PUT /repos/o/a/rulesets/7",
+		"PATCH /repos/o/a", "POST /repos/o/a/rulesets", "PUT /repos/o/a/rulesets/7",
+		"PUT /repos/o/a/vulnerability-alerts", "DELETE /repos/o/a/automated-security-fixes",
 	}
 	if !slices.Equal(writes, want) {
 		t.Errorf("writes = %v, want %v", writes, want)
@@ -110,7 +122,7 @@ func TestGitHubApplyWrites(t *testing.T) {
 
 func TestGitHubMergeSettingsAbsentVsFalse(t *testing.T) {
 	// A token with Administration read gets no merge settings; here two are present, one false.
-	gh, _, patches := apiServerWith(t, `{"allow_merge_commit":false,"allow_auto_merge":false,"squash_merge_commit_title":null,"default_branch":"main"}`)
+	gh, _, patches := apiServerWith(t, `{"allow_merge_commit":false,"allow_auto_merge":false,"squash_merge_commit_title":null,"default_branch":"main"}`, nil)
 	cur, err := gh.MergeSettings(context.Background(), "o/a")
 	if err != nil {
 		t.Fatal(err)
@@ -149,5 +161,117 @@ func TestGitHubMergeSettingsAbsentVsFalse(t *testing.T) {
 	}
 	if want := toMap(desired(t).Merge); !reflect.DeepEqual(sent, want) {
 		t.Errorf("PATCH body = %v, want %v", sent, want)
+	}
+}
+
+func TestGitHubSecurityUpdates(t *testing.T) {
+	const path = "GET /repos/o/a/automated-security-fixes"
+	off, on := false, true
+	for _, c := range []struct {
+		name  string
+		reply reply
+		want  *bool
+	}{
+		{"disabled", reply{200, `{"enabled":false,"paused":false}`}, &off},
+		{"enabled", reply{200, `{"enabled":true,"paused":false}`}, &on},
+		{"field absent", reply{200, `{"paused":false}`}, nil},
+		{"empty", reply{204, ``}, nil},
+		{"forbidden", reply{403, `{"message":"Resource not accessible by integration"}`}, nil},
+		{"dependabot off", reply{404, `{"message":"Not Found"}`}, &off},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			gh, _, _ := apiServerWith(t, defaultRepoJSON, map[string]reply{path: c.reply})
+			got, err := gh.SecurityUpdates(context.Background(), "o/a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+				t.Errorf("SecurityUpdates = %v, want %v", ptrString(got), ptrString(c.want))
+			}
+		})
+	}
+	gh, _, _ := apiServerWith(t, defaultRepoJSON, map[string]reply{path: {500, "boom"}})
+	if _, err := gh.SecurityUpdates(context.Background(), "o/a"); err == nil {
+		t.Error("a 500 is not an error")
+	}
+}
+
+func ptrString(b *bool) string {
+	if b == nil {
+		return "unknown"
+	}
+	return stateName[*b]
+}
+
+// baselineJSON is GET /repos/{o}/{r}/code-security-configuration on the CCF repos (abridged).
+const baselineJSON = `{"status":"enforced","configuration":{"id":227600,"target_type":"organization","name":"Baseline Security Profile","dependabot_alerts":"enabled","dependabot_security_updates":"disabled","enforcement":"enforced"}}`
+
+func TestGitHubSecurityConfiguration(t *testing.T) {
+	const path = "GET /repos/o/a/code-security-configuration"
+	for _, c := range []struct {
+		name  string
+		reply reply
+		want  *SecurityConfiguration
+	}{
+		{"enforced", reply{200, baselineJSON}, baseline()},
+		{"unenforced", reply{200, strings.NewReplacer(`"status":"enforced"`, `"status":"attached"`, `"enforcement":"enforced"`, `"enforcement":"unenforced"`).Replace(baselineJSON)},
+			&SecurityConfiguration{Name: "Baseline Security Profile", DependabotAlerts: "enabled", DependabotSecurityUpdates: "disabled"}},
+		{"detached", reply{200, strings.Replace(baselineJSON, `"status":"enforced"`, `"status":"removed"`, 1)}, nil},
+		{"none", reply{204, ``}, nil},
+		{"not found", reply{404, `{"message":"Not Found"}`}, nil},
+		{"forbidden", reply{403, `{"message":"Resource not accessible by integration"}`}, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			gh, _, _ := apiServerWith(t, defaultRepoJSON, map[string]reply{path: c.reply})
+			got, err := gh.SecurityConfiguration(context.Background(), "o/a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("SecurityConfiguration = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestGitHubEnforcedConfigNotWritten replays the first real apply: the repo reads as enabled while
+// the enforced org configuration says disabled. Nothing is written to the security settings.
+func TestGitHubEnforcedConfigNotWritten(t *testing.T) {
+	gh, calls, _ := apiServerWith(t, defaultRepoJSON, map[string]reply{"GET /repos/o/a/code-security-configuration": {200, baselineJSON}})
+	var out bytes.Buffer
+	if err := Run(context.Background(), gh, Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range calls() {
+		if strings.Contains(c, "automated-security-fixes") || strings.Contains(c, "vulnerability-alerts") {
+			t.Errorf("called %s for an org-managed setting", c)
+		}
+	}
+	if !strings.Contains(out.String(), `security.dependabot_security_updates: managed by org configuration "Baseline Security Profile" (disabled)`) {
+		t.Errorf("output:\n%s", out.String())
+	}
+}
+
+// TestGitHubRefusedStepKeepsApplying: a 422 on the security write doesn't stop the rulesets, and
+// the run fails at the end.
+func TestGitHubRefusedStepKeepsApplying(t *testing.T) {
+	refusal := reply{422, `{"message":"An enforced security configuration prevented modifying dependabot security updates enablement."}`}
+	gh, calls, _ := apiServerWith(t, defaultRepoJSON, map[string]reply{
+		"GET /repos/o/a/code-security-configuration": {403, `{"message":"Resource not accessible by integration"}`},
+		"DELETE /repos/o/a/automated-security-fixes": refusal,
+	})
+	var out bytes.Buffer
+	err := Run(context.Background(), gh, Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}, &out)
+	if err == nil || !strings.Contains(err.Error(), "422") {
+		t.Fatalf("err = %v, want the 422", err)
+	}
+	got := calls()
+	for _, want := range []string{"POST /repos/o/a/rulesets", "PUT /repos/o/a/rulesets/7", "PUT /repos/o/a/vulnerability-alerts"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("missing %s: %v", want, got)
+		}
+	}
+	if !strings.Contains(out.String(), "o/a: partly applied: 1 of 5 step(s) failed") {
+		t.Errorf("output:\n%s", out.String())
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -38,9 +39,13 @@ func (e *statusError) Error() string {
 	return fmt.Sprintf("%s %s: %d %s: %.200s", e.method, e.path, e.code, http.StatusText(e.code), e.body)
 }
 
-func isNotFound(err error) bool {
+func isNotFound(err error) bool { return hasStatus(err, http.StatusNotFound) }
+
+func isForbidden(err error) bool { return hasStatus(err, http.StatusForbidden) }
+
+func hasStatus(err error, code int) bool {
 	var se *statusError
-	return errors.As(err, &se) && se.code == http.StatusNotFound
+	return errors.As(err, &se) && se.code == code
 }
 
 // InstallationRepos lists the repos an installation token can reach.
@@ -89,17 +94,59 @@ func (g *GitHub) SetVulnerabilityAlerts(ctx context.Context, repo string, enable
 	return g.do(ctx, onOff(enabled), repoPath(repo, "/vulnerability-alerts"), nil, nil)
 }
 
-// SecurityUpdates reports whether Dependabot security updates (automated security fixes) are on.
-func (g *GitHub) SecurityUpdates(ctx context.Context, repo string) (bool, error) {
+// SecurityUpdates reports whether Dependabot security updates (automated security fixes) are on,
+// from GET /repos/{owner}/{repo}/automated-security-fixes. A 404 means off (GitHub returns it when
+// Dependabot is off for the repo). nil is unknown: a 403, or a response without "enabled".
+func (g *GitHub) SecurityUpdates(ctx context.Context, repo string) (*bool, error) {
 	var s struct {
-		Enabled bool `json:"enabled"`
+		Enabled *bool `json:"enabled"`
 	}
 	err := g.do(ctx, http.MethodGet, repoPath(repo, "/automated-security-fixes"), nil, &s)
-	if isNotFound(err) {
-		return false, nil
+	switch {
+	case isNotFound(err):
+		off := false
+		return &off, nil
+	case isForbidden(err):
+		return nil, nil
+	case err != nil:
+		return nil, err
 	}
-	return s.Enabled, err
+	return s.Enabled, nil
 }
+
+// SecurityConfiguration returns the org code security configuration attached to the repo, from
+// GET /repos/{owner}/{repo}/code-security-configuration. nil means none is attached, or the token
+// can't read it (404, 403 or an empty response).
+func (g *GitHub) SecurityConfiguration(ctx context.Context, repo string) (*SecurityConfiguration, error) {
+	var s struct {
+		Status        string `json:"status"`
+		Configuration *struct {
+			Name                      string `json:"name"`
+			Enforcement               string `json:"enforcement"`
+			DependabotAlerts          string `json:"dependabot_alerts"`
+			DependabotSecurityUpdates string `json:"dependabot_security_updates"`
+		} `json:"configuration"`
+	}
+	err := g.do(ctx, http.MethodGet, repoPath(repo, "/code-security-configuration"), nil, &s)
+	switch {
+	case isNotFound(err) || isForbidden(err):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case s.Configuration == nil || slices.Contains(detachedStatuses, s.Status):
+		return nil, nil
+	}
+	c := s.Configuration
+	return &SecurityConfiguration{
+		Name:                      c.Name,
+		Enforced:                  c.Enforcement == "enforced" || s.Status == "enforced",
+		DependabotAlerts:          c.DependabotAlerts,
+		DependabotSecurityUpdates: c.DependabotSecurityUpdates,
+	}, nil
+}
+
+// detachedStatuses are attachment statuses of a configuration that no longer applies to the repo.
+var detachedStatuses = []string{"detached", "removed", "removed_by_enterprise"}
 
 func (g *GitHub) SetSecurityUpdates(ctx context.Context, repo string, enabled bool) error {
 	return g.do(ctx, onOff(enabled), repoPath(repo, "/automated-security-fixes"), nil, nil)
