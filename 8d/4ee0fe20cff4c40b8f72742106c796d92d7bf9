@@ -1,0 +1,4 @@
+lisa-design:
+- Group key is `<name>-${{ github.event.pull_request.number || github.ref }}`: PR events (open or merged) key on the PR number, push keeps the ref. A bare number can't collide with a `refs/heads/...` ref.
+- cancel-in-progress left unchanged in both places (ci.yml: PR-only; README preview snippet: true); the bug was the key, not the cancel policy.
+- Repo-wide grep found only two github.ref-keyed groups (ci.yml, README preview caller snippet); all other groups are fixed names or github.repository and unaffected. No reusable workflow changes, so ci: type, no release.
