@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -16,7 +17,11 @@ type fakeRepo struct {
 	// hideMerge reads the merge settings as a token with Administration read does: all unknown.
 	hideMerge       bool
 	alerts, updates bool
-	rulesets        map[int64]Ruleset
+	// hideUpdates reads Dependabot security updates as unknown.
+	hideUpdates bool
+	// config is the attached org code security configuration (nil: none).
+	config   *SecurityConfiguration
+	rulesets map[int64]Ruleset
 }
 
 // fakeGitHub keeps repo state in memory, records every call and applies writes to the state. Rulesets
@@ -26,11 +31,16 @@ type fakeGitHub struct {
 	installation  []string
 	nextID        int64
 	reads, writes []string
+	// fail makes the write "op repo" (as recorded in writes) fail with this error.
+	fail map[string]error
 }
 
 func (f *fakeGitHub) repo(op, repo string, write bool) (*fakeRepo, error) {
 	if write {
 		f.writes = append(f.writes, op+" "+repo)
+		if err := f.fail[op+" "+repo]; err != nil {
+			return nil, err
+		}
 	} else {
 		f.reads = append(f.reads, op+" "+repo)
 	}
@@ -62,9 +72,21 @@ func (f *fakeGitHub) VulnerabilityAlerts(_ context.Context, repo string) (bool, 
 	return err == nil && r.alerts, err
 }
 
-func (f *fakeGitHub) SecurityUpdates(_ context.Context, repo string) (bool, error) {
+func (f *fakeGitHub) SecurityUpdates(_ context.Context, repo string) (*bool, error) {
 	r, err := f.repo("updates", repo, false)
-	return err == nil && r.updates, err
+	if err != nil || r.hideUpdates {
+		return nil, err
+	}
+	on := r.updates
+	return &on, nil
+}
+
+func (f *fakeGitHub) SecurityConfiguration(_ context.Context, repo string) (*SecurityConfiguration, error) {
+	r, err := f.repo("config", repo, false)
+	if err != nil {
+		return nil, err
+	}
+	return r.config, nil
 }
 
 func (f *fakeGitHub) Rulesets(_ context.Context, repo string) (map[int64]Ruleset, error) {
@@ -252,7 +274,7 @@ func TestRunApplyIsIdempotent(t *testing.T) {
 	if err := Run(context.Background(), f, opts, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"PATCH repo o/a", "alerts=true o/a", "updates=false o/a", "create ccf-required o/a", "update 7 ccf-review o/a"}
+	want := []string{"PATCH repo o/a", "create ccf-required o/a", "update 7 ccf-review o/a", "alerts=true o/a", "updates=false o/a"}
 	if !slices.Equal(f.writes, want) {
 		t.Fatalf("writes = %v, want %v", f.writes, want)
 	}
@@ -389,5 +411,148 @@ func TestRunApplyWritesUnknownMergeSettings(t *testing.T) {
 	}
 	if len(f.writes) > 0 || !strings.Contains(out.String(), "o/a: up to date") || strings.Contains(out.String(), "unknown") {
 		t.Errorf("writes = %v, output:\n%s", f.writes, out.String())
+	}
+}
+
+// baseline is the org configuration on the CCF repos: alerts on, security updates off, enforced.
+func baseline() *SecurityConfiguration {
+	return &SecurityConfiguration{Name: "Baseline Security Profile", Enforced: true, DependabotAlerts: "enabled", DependabotSecurityUpdates: "disabled"}
+}
+
+func TestPlanRepoSecurityUpdatesRead(t *testing.T) {
+	f := newFake("a")
+	r := f.repos["o/a"]
+	r.updates = false // read as {"enabled":false}: already desired
+	p, err := PlanRepo(context.Background(), f, "o/a", desired(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range slices.Concat(p.Changes, p.Unknown) {
+		if strings.HasPrefix(c.Key, "security.dependabot_security_updates") {
+			t.Errorf("unexpected %s", c)
+		}
+	}
+	if p.securityUpdates != nil {
+		t.Error("plans a security updates write for a setting already off")
+	}
+
+	r.hideUpdates = true // unreadable: unknown, never assumed on
+	p, err = PlanRepo(context.Background(), f, "o/a", desired(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := changeStrings(p.Unknown), []string{"security.dependabot_security_updates: unknown (not readable) -> disabled"}; !slices.Equal(got, want) {
+		t.Errorf("unknown = %v, want %v", got, want)
+	}
+	if slices.ContainsFunc(p.Changes, func(c Change) bool { return c.Key == "security.dependabot_security_updates" }) {
+		t.Error("an unknown setting is reported as a change")
+	}
+	if p.securityUpdates == nil || *p.securityUpdates {
+		t.Errorf("security updates write = %v, want disabled", p.securityUpdates)
+	}
+}
+
+func TestRunOrgConfigMatchingIsSkipped(t *testing.T) {
+	f := newFake("a")
+	r := f.repos["o/a"]
+	r.config = baseline()
+	r.updates = true // what the API reports doesn't matter: the org configuration owns it
+	var out bytes.Buffer
+	if err := Run(context.Background(), f, Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range f.writes {
+		if strings.HasPrefix(w, "alerts=") || strings.HasPrefix(w, "updates=") {
+			t.Errorf("wrote an org-managed setting: %s", w)
+		}
+	}
+	if slices.Contains(f.reads, "updates o/a") || slices.Contains(f.reads, "alerts o/a") {
+		t.Errorf("read an org-managed setting: %v", f.reads)
+	}
+	for _, want := range []string{
+		`  security.dependabot_security_updates: managed by org configuration "Baseline Security Profile" (disabled)`,
+		`  security.vulnerability_alerts: managed by org configuration "Baseline Security Profile" (enabled)`,
+		"o/a: applied 3 step(s)",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "warning") {
+		t.Errorf("a matching configuration is reported as a warning:\n%s", out.String())
+	}
+
+	f.writes, out = nil, bytes.Buffer{}
+	if err := Run(context.Background(), f, Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writes) > 0 || !strings.Contains(out.String(), "o/a: up to date") {
+		t.Errorf("second apply: writes = %v, output:\n%s", f.writes, out.String())
+	}
+}
+
+func TestRunOrgConfigDifferingWarns(t *testing.T) {
+	f := newFake("a")
+	r := f.repos["o/a"]
+	r.config = baseline()
+	r.config.DependabotSecurityUpdates = "enabled"
+	r.alerts, r.updates = true, true
+	opts := Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}
+	var out bytes.Buffer
+	if err := Run(context.Background(), f, opts, &out); err != nil {
+		t.Fatalf("a differing org configuration fails the run: %v", err)
+	}
+	if slices.ContainsFunc(f.writes, func(w string) bool { return strings.HasPrefix(w, "updates=") }) {
+		t.Errorf("wrote the org-enforced setting: %v", f.writes)
+	}
+	for _, want := range []string{
+		`  security.dependabot_security_updates: managed by org configuration "Baseline Security Profile": wants disabled, org enforces enabled — change it in the org configuration`,
+		", 1 warning(s) in 1 of 1 repo(s) (applied)",
+		warningHint,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+
+	// Nothing else to do: the warning stays, nothing is written.
+	f.writes, out = nil, bytes.Buffer{}
+	if err := Run(context.Background(), f, opts, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writes) > 0 || !strings.Contains(out.String(), "o/a: 0 change(s), 1 warning(s)") {
+		t.Errorf("writes = %v, output:\n%s", f.writes, out.String())
+	}
+}
+
+func TestRunApplyContinuesAfterFailedStep(t *testing.T) {
+	f := newFake("a", "b")
+	refused := errors.New("422 An enforced security configuration prevented modifying dependabot security updates enablement")
+	f.fail = map[string]error{"updates=false o/a": refused}
+	var out bytes.Buffer
+	err := Run(context.Background(), f, Options{Owner: "o", Repos: []string{"a", "b"}, Desired: desired(t), Apply: true}, &out)
+	if !errors.Is(err, refused) || !strings.Contains(err.Error(), "o/a: apply: security.dependabot_security_updates") {
+		t.Fatalf("err = %v, want the refused step named", err)
+	}
+	if strings.Contains(err.Error(), "o/b") {
+		t.Errorf("o/b failed: %v", err)
+	}
+	for _, w := range []string{"PATCH repo o/a", "create ccf-required o/a", "update 7 ccf-review o/a", "alerts=true o/a", "updates=false o/b"} {
+		if !slices.Contains(f.writes, w) {
+			t.Errorf("missing write %q after the failed step: %v", w, f.writes)
+		}
+	}
+	for _, want := range []string{
+		"o/a: security.dependabot_security_updates failed: 422",
+		"o/a: partly applied: 1 of 5 step(s) failed",
+		"o/b: applied 5 step(s)",
+		"(applied; steps failed in 1 repo(s))",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	if _, ok := f.repos["o/a"].rulesets[101]; !ok {
+		t.Error("ccf-required was not created on o/a")
 	}
 }

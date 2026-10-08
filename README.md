@@ -700,6 +700,24 @@ Administration **read**, so a dry run can't see them. They print as
 totals says apply writes them. Apply PATCHes the full desired merge settings whenever any of them
 is unknown or differs; the PATCH is idempotent.
 
+Dependabot security updates are read from `GET /repos/{owner}/{repo}/automated-security-fixes`
+(`enabled`); if the token can't read it, it prints as `unknown (not readable)`, never as enabled.
+
+**Org-managed security settings.** An org code security configuration (Settings, Code security,
+Configurations) that is attached with enforcement on owns the Dependabot settings it sets, and
+GitHub refuses a repo-level write with a 422. The tool reads
+`GET /repos/{owner}/{repo}/code-security-configuration` (404 or 403: none) and skips those
+settings. If the configuration already sets the desired value it prints
+`security.dependabot_security_updates: managed by org configuration "Baseline Security Profile" (disabled)`;
+if it sets another value it prints a warning (`... wants disabled, org enforces enabled — change it
+in the org configuration`), counted as `N warning(s)`, which doesn't fail the run. Change those in
+the org configuration, not here.
+
+Apply runs each step on its own: the merge settings, each ruleset, then the security settings. A
+failed step (say a 422) is printed (`<repo>: <step> failed: ...`) and doesn't stop the others; the
+repo ends with `applied N step(s)` or `partly applied: F of N step(s) failed`, and the run fails at
+the end if any step failed.
+
 How to run it:
 
 1. **Dry run** (anyone, any time): Actions, `repo-settings`, Run workflow, with `apply` off. Or
@@ -753,6 +771,12 @@ all in a `Release train YYYY-MM` issue and a Slack thread. See [docs/train.md](d
 `stack-smoke.yml` (reusable and `workflow_dispatch`) runs postgres, the API, the UI and one agent
 from their published images at given tags and checks they work together (`smoke/run.sh`). See
 [docs/stack-smoke.md](docs/stack-smoke.md).
+
+## Plugin probe
+
+`cmd/plugin-probe` and the reusable `plugin-probe.yml` load plugins through the agent's runner
+library, report each one's protocol (v1 or v2) and agent library version, and check policy
+bundles with the agent's OPA version. See [docs/plugin-probe.md](docs/plugin-probe.md).
 
 ## Development
 
