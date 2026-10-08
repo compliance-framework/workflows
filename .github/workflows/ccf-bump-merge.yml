@@ -1,0 +1,77 @@
+name: ccf-bump-merge
+
+# Merges the manifest repos' open ccf-bump PRs labelled ccf-bump:automerge whose ci / required
+# passed, as the release bot (cmd/ccf-bump merge, docs/ccf-bump.md): the ones whose CI finished
+# after ccf-bump-sync.yml's own merge pass. Scheduled runs are dry runs until the repo variable
+# CCF_BUMP_SYNC_LIVE is "true" (the same gate as the sync).
+
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Manifest to read the repos from
+        type: choice
+        options: [repos.mock.yaml, repos.yaml]
+        default: repos.mock.yaml
+      dry_run:
+        description: Print what it would merge instead of merging
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccf-bump-merge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # A scheduled run has no inputs: keep this fallback equal to the input's default.
+      MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+      DRY_RUN: ${{ github.event_name == 'schedule' && vars.CCF_BUMP_SYNC_LIVE != 'true' || github.event_name != 'schedule' && inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Select repos
+        id: select
+        run: |
+          repos="$(go run ./cmd/ccf-bump list --manifest "$MANIFEST")"
+          # An empty list would mint a token for every repo the app is installed on (all of them).
+          if [ -z "$repos" ]; then
+            echo "::error::no repos selected"
+            exit 1
+          fi
+          {
+            echo "repos=$repos"
+            echo "dry_run=$([ "$DRY_RUN" = true ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: token
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ steps.select.outputs.repos }}
+          permission-contents: ${{ steps.select.outputs.dry_run == 'true' && 'read' || 'write' }}
+          permission-pull-requests: ${{ steps.select.outputs.dry_run == 'true' && 'read' || 'write' }}
+          # Merging a PR that edits .github/workflows files; the permission has no read level.
+          permission-workflows: ${{ steps.select.outputs.dry_run != 'true' && 'write' || '' }}
+          permission-checks: read
+      - name: Merge
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          SLUG: ${{ steps.token.outputs.app-slug }}
+          REPOS: ${{ steps.select.outputs.repos }}
+          DRY_RUN: ${{ steps.select.outputs.dry_run }}
+        run: go run ./cmd/ccf-bump merge --manifest "$MANIFEST" --repos "$REPOS" --author "${SLUG}[bot]" --wait 0 --dry-run="$DRY_RUN"

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/compliance-framework/workflows/internal/bump"
 	"github.com/compliance-framework/workflows/internal/manifest"
 )
 
@@ -28,7 +29,7 @@ type world struct {
 	reruns   []int64
 	external []string // issues opened in repos
 	id       int64
-	// manualBumps: ccf-bump leaves auto-merge off; closedBumps: someone closes the bump PRs.
+	// manualBumps: ccf-bump leaves the automerge label off; closedBumps: someone closes the bump PRs.
 	manualBumps, closedBumps bool
 }
 
@@ -222,7 +223,7 @@ func (w *world) EnsureIssue(_ context.Context, repo, title, body string) (string
 	return "https://github.com/o/" + repo + "/issues/1", nil
 }
 
-// Bump plays ccf-bump: with a repo's bumped set, it opens a green bump PR with auto-merge.
+// Bump plays ccf-bump: with a repo's bumped set, it opens a green bump PR labelled ccf-bump:automerge.
 func (w *world) Bump(_ context.Context, path, repo string, sets map[string]string, dryRun bool) (BumpResult, error) {
 	var s []string
 	for _, k := range slices.Sorted(maps.Keys(sets)) {
@@ -238,7 +239,10 @@ func (w *world) Bump(_ context.Context, path, repo string, sets map[string]strin
 	}
 	pr := r.openPR("ccf-bump/")
 	if pr == nil {
-		pr = &PR{Number: int(w.nextID()), URL: "ccf-bump/train-x", Open: !w.closedBumps, AutoMerge: !w.manualBumps, HeadSHA: fmt.Sprintf("%s-bump%d", repo, w.id)}
+		pr = &PR{Number: int(w.nextID()), URL: "ccf-bump/train-x", Open: !w.closedBumps, HeadSHA: fmt.Sprintf("%s-bump%d", repo, w.id)}
+		if !w.manualBumps {
+			pr.Labels = []string{bump.AutomergeLabel}
+		}
 		r.prs[pr.Number] = pr
 		w.green(r, pr.HeadSHA, true)
 	}

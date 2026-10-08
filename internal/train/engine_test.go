@@ -190,7 +190,7 @@ func TestHolds(t *testing.T) {
 		hold   Hold
 		detail string
 	}{
-		{"bump PR without auto-merge", func(w *world) { w.manualBumps = true }, "mock-agent", NeedsHuman, "left auto-merge off on #"},
+		{"bump PR without the automerge label", func(w *world) { w.manualBumps = true }, "mock-agent", NeedsHuman, "to a person (no ccf-bump:automerge label"},
 		{"bump PR closed", func(w *world) { w.closedBumps = true }, "mock-agent", NeedsHuman, "was closed without merging; `/retry mock-agent`"},
 		{"release-please failed", func(w *world) { w.get("mock-api").failReleasePlease = true }, "mock-api", Blocked, "release-please failed on mock-ap"},
 	}

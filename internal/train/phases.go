@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/compliance-framework/workflows/internal/bump"
 	"github.com/compliance-framework/workflows/internal/release"
 )
 
@@ -40,8 +41,8 @@ func (e *Engine) bump(ctx context.Context, st *State, r *RepoState) error {
 		r.next(ReleasePR)
 	case !pr.Open:
 		r.hold(NeedsHuman, false, "bump PR #%d was closed without merging; `/retry %s` bumps again, `/skip %s` skips the repo", pr.Number, r.Name, r.Name)
-	case !pr.AutoMerge:
-		r.hold(NeedsHuman, false, "ccf-bump left auto-merge off on #%d (a major update, or a pin that was not a version); review and merge it by hand", pr.Number)
+	case !slices.Contains(pr.Labels, bump.AutomergeLabel) && !pr.AutoMerge: // AutoMerge: a PR from an older ccf-bump
+		r.hold(NeedsHuman, false, "ccf-bump left #%d to a person (no %s label: a major update, or a pin that was not a version); review and merge it by hand", pr.Number, bump.AutomergeLabel)
 	default:
 		merged, err := e.mergeGreen(ctx, r, pr)
 		if merged {

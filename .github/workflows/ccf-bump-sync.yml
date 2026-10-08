@@ -1,7 +1,8 @@
 name: ccf-bump-sync
 
 # Bumps every manifest repo's internal dependencies to their latest final releases, one PR per repo
-# (cmd/ccf-bump, docs/ccf-bump.md). Scheduled runs are dry runs until the repo variable
+# (cmd/ccf-bump, docs/ccf-bump.md), then merges the green ccf-bump:automerge ones (live runs only;
+# ccf-bump-merge.yml merges the rest daily). Scheduled runs are dry runs until the repo variable
 # CCF_BUMP_SYNC_LIVE is "true".
 
 on:
@@ -65,8 +66,9 @@ jobs:
           repositories: ${{ steps.select.outputs.repos }}
           permission-contents: ${{ steps.select.outputs.dry_run == 'true' && 'read' || 'write' }}
           permission-pull-requests: ${{ steps.select.outputs.dry_run == 'true' && 'read' || 'write' }}
-          # Bumps edit .github/workflows files; the permission has no read level, so only when live.
+          # Bumps (and merging them) edit .github/workflows files; the permission has no read level, so only when live.
           permission-workflows: ${{ steps.select.outputs.dry_run != 'true' && 'write' || '' }}
+          permission-checks: read # ccf-bump merge reads ci / required
       - name: Commit as the release bot
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -86,3 +88,13 @@ jobs:
           REPOS: ${{ steps.select.outputs.repos }}
           DRY_RUN: ${{ steps.select.outputs.dry_run }}
         run: go run ./cmd/ccf-bump sync --manifest "$MANIFEST" --repos "$REPOS" --batch 10 --pr --dry-run="$DRY_RUN"
+      - name: Merge green bump PRs
+        # After a failed repo too: the others' PRs are open. GitHub's auto-merge can't merge them
+        # (docs/ccf-bump.md#why-ccf-bump-merges-not-github).
+        if: ${{ !cancelled() && steps.token.outcome == 'success' && steps.select.outputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          SLUG: ${{ steps.token.outputs.app-slug }}
+          MANIFEST: ${{ steps.select.outputs.manifest }}
+          REPOS: ${{ steps.select.outputs.repos }}
+        run: go run ./cmd/ccf-bump merge --manifest "$MANIFEST" --repos "$REPOS" --author "${SLUG}[bot]" --wait 20m

@@ -791,8 +791,7 @@ severity, to Slack every Monday (and on `workflow_dispatch`). See
 
 ## Bot PRs that need a human
 
-Bot PRs that wait for a person (Renovate majors and api OPA bumps, ccf-bump PRs with auto-merge
-off) get the `needs-human` label, and `notify-failure.yml` posts each one, and each release PR
+Bot PRs that wait for a person (Renovate majors and api OPA bumps, ccf-bump PRs it doesn't merge) get the `needs-human` label, and `notify-failure.yml` posts each one, and each release PR
 blocked by `release-checks`, once to `SLACK_CHANNEL_NEEDS_HUMAN`; `attention-digest.yml` lists
 every PR still waiting there each Monday. See [docs/attention.md](docs/attention.md).
 
@@ -801,7 +800,8 @@ every PR still waiting there each Monday. See [docs/attention.md](docs/attention
 `ccf-bump` moves internal dependency pins (Go modules, `go install` pins, the action's source image,
 policy OPA versions, the ui sync, helm appVersions and image tags, shared-workflow refs) to their
 latest final releases, one `fix(deps)` PR per repo; `ccf-bump-sync.yml` runs it on the 8th and 22nd.
-See [docs/ccf-bump.md](docs/ccf-bump.md).
+`ccf-bump merge` merges its green `ccf-bump:automerge` PRs as the release bot (after each sync, and
+daily in `ccf-bump-merge.yml`). See [docs/ccf-bump.md](docs/ccf-bump.md).
 
 ## Release train
 

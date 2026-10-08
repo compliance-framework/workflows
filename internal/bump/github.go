@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"time"
 
 	"golang.org/x/mod/semver"
@@ -29,16 +30,35 @@ type PR struct {
 	Number int    `json:"number"`
 	NodeID string `json:"node_id"`
 	URL    string `json:"html_url"`
+	Title  string `json:"title"`
+	State  string `json:"state"` // open, closed
 	User   struct {
 		Login string `json:"login"`
 		Type  string `json:"type"` // "Bot" for a GitHub App
 	} `json:"user"`
 	Head struct {
 		Ref  string `json:"ref"`
+		SHA  string `json:"sha"`
 		Repo *struct {
 			FullName string `json:"full_name"`
 		} `json:"repo"` // nil when the fork is gone
 	} `json:"head"`
+	Labels    []PRLabel `json:"labels"`
+	AutoMerge any       `json:"auto_merge"` // non-nil while GitHub's native auto-merge is enabled
+	// Mergeable and MergeableState are only in a single PR's response (PullRequest); Mergeable is
+	// nil while GitHub computes it.
+	Mergeable      *bool  `json:"mergeable"`
+	MergeableState string `json:"mergeable_state"`
+}
+
+// PRLabel is a label on a PR.
+type PRLabel struct {
+	Name string `json:"name"`
+}
+
+// HasLabel reports whether the PR carries label name.
+func (p PR) HasLabel(name string) bool {
+	return slices.ContainsFunc(p.Labels, func(l PRLabel) bool { return l.Name == name })
 }
 
 var finalTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
@@ -167,10 +187,12 @@ func (g *GitHub) UpdatePR(ctx context.Context, repo string, number int, title, b
 	return g.do(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/%s/pulls/%d", g.Owner, repo, number), in, nil)
 }
 
-// EnableAutoMerge turns on squash auto-merge for the PR with GraphQL node ID id.
-func (g *GitHub) EnableAutoMerge(ctx context.Context, id string) error {
+// DisableAutoMerge turns off GitHub's native auto-merge on the PR with GraphQL node ID id.
+// ccf-bump no longer enables it (it never applies the ccf-review bypass); this clears it from PRs
+// opened by older runs.
+func (g *GitHub) DisableAutoMerge(ctx context.Context, id string) error {
 	q := map[string]any{
-		"query":     `mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }`,
+		"query":     `mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }`,
 		"variables": map[string]string{"id": id},
 	}
 	var out struct {
@@ -182,24 +204,31 @@ func (g *GitHub) EnableAutoMerge(ctx context.Context, id string) error {
 		return err
 	}
 	if len(out.Errors) > 0 {
-		return errors.New("enable auto-merge: " + out.Errors[0].Message)
+		return errors.New("disable auto-merge: " + out.Errors[0].Message)
 	}
 	return nil
 }
 
-// NeedsHumanLabel marks a bot PR waiting for a person (also the train's hold, docs/attention.md).
 const (
-	NeedsHumanLabel       = "needs-human"
-	needsHumanColor       = "d93f0b"
-	needsHumanDescription = "A bot PR waiting for a person"
+	// NeedsHumanLabel marks a bot PR waiting for a person (also the train's hold, docs/attention.md).
+	NeedsHumanLabel = "needs-human"
+	// AutomergeLabel marks a ccf-bump PR that `ccf-bump merge` merges once its required check passes.
+	AutomergeLabel = "ccf-bump:automerge"
 )
 
-// LabelNeedsHuman adds the needs-human label to the PR, creating the label in repo first when
-// it is missing.
-func (g *GitHub) LabelNeedsHuman(ctx context.Context, repo string, number int) error {
-	err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/labels/%s", g.Owner, repo, url.PathEscape(NeedsHumanLabel)), nil, nil)
+// Label is a label ccf-bump adds, created in the repo when missing.
+type Label struct{ Name, Color, Description string }
+
+var (
+	NeedsHuman = Label{NeedsHumanLabel, "d93f0b", "A bot PR waiting for a person"}
+	Automerge  = Label{AutomergeLabel, "0e8a16", "ccf-bump merges this once CI is green"}
+)
+
+// AddLabel adds l to the PR, creating it in repo first when it is missing.
+func (g *GitHub) AddLabel(ctx context.Context, repo string, number int, l Label) error {
+	err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/labels/%s", g.Owner, repo, url.PathEscape(l.Name)), nil, nil)
 	if se := (*StatusError)(nil); errors.As(err, &se) && se.Code == http.StatusNotFound {
-		in := map[string]string{"name": NeedsHumanLabel, "color": needsHumanColor, "description": needsHumanDescription}
+		in := map[string]string{"name": l.Name, "color": l.Color, "description": l.Description}
 		err = g.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/labels", g.Owner, repo), in, nil)
 		// 422: created meanwhile (already_exists).
 		if se := (*StatusError)(nil); errors.As(err, &se) && se.Code == http.StatusUnprocessableEntity {
@@ -209,8 +238,56 @@ func (g *GitHub) LabelNeedsHuman(ctx context.Context, repo string, number int) e
 	if err != nil {
 		return err
 	}
-	in := map[string][]string{"labels": {NeedsHumanLabel}}
+	in := map[string][]string{"labels": {l.Name}}
 	return g.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/labels", g.Owner, repo, number), in, nil)
+}
+
+// RemoveLabel removes label name from the PR; a label it doesn't carry is not an error.
+func (g *GitHub) RemoveLabel(ctx context.Context, repo string, number int, name string) error {
+	err := g.do(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/%s/issues/%d/labels/%s", g.Owner, repo, number, url.PathEscape(name)), nil, nil)
+	if se := (*StatusError)(nil); errors.As(err, &se) && se.Code == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
+
+// PullRequest returns PR number, with its mergeable state.
+func (g *GitHub) PullRequest(ctx context.Context, repo string, number int) (*PR, error) {
+	var pr PR
+	err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d", g.Owner, repo, number), nil, &pr)
+	return &pr, err
+}
+
+// CheckRun is the latest run of a named check on a commit.
+type CheckRun struct {
+	ID         int64  `json:"id"`
+	Status     string `json:"status"`     // queued, in_progress, completed
+	Conclusion string `json:"conclusion"` // success, failure, ... once completed
+	URL        string `json:"html_url"`
+}
+
+// LatestCheck returns the latest check run named name on commit sha, or nil when there is none.
+func (g *GitHub) LatestCheck(ctx context.Context, repo, sha, name string) (*CheckRun, error) {
+	var r struct {
+		CheckRuns []CheckRun `json:"check_runs"`
+	}
+	q := url.Values{"check_name": {name}, "filter": {"latest"}, "per_page": {"100"}}
+	if err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?%s", g.Owner, repo, url.PathEscape(sha), q.Encode()), nil, &r); err != nil {
+		return nil, err
+	}
+	var latest *CheckRun
+	for i, c := range r.CheckRuns {
+		if latest == nil || c.ID > latest.ID {
+			latest = &r.CheckRuns[i]
+		}
+	}
+	return latest, nil
+}
+
+// Merge squash-merges the PR if its head is still sha, with title as the commit title.
+func (g *GitHub) Merge(ctx context.Context, repo string, number int, sha, title string) error {
+	in := map[string]string{"merge_method": "squash", "sha": sha, "commit_title": title}
+	return g.do(ctx, http.MethodPut, fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", g.Owner, repo, number), in, nil)
 }
 
 // StatusError is a non-2xx API response.

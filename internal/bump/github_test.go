@@ -32,7 +32,7 @@ func TestGitHub(t *testing.T) {
 		case "/repos/o/agent/contents/go.mod":
 			fmt.Fprint(w, `{"content":"cmVxdWlyZSBn\nbyAxLjI2Cg=="}`) // "require go 1.26\n", wrapped as GitHub does
 		case "/graphql":
-			fmt.Fprint(w, `{"errors":[{"message":"auto-merge is not allowed"}]}`)
+			fmt.Fprint(w, `{"errors":[{"message":"auto-merge is not enabled"}]}`)
 		case "/repos/o/agent/pulls":
 			if r.URL.Query().Get("head") != "o:ccf-bump/sync-2026-10-08" {
 				t.Errorf("head = %q", r.URL.Query().Get("head"))
@@ -63,8 +63,8 @@ func TestGitHub(t *testing.T) {
 	if pr, err := g.OpenPR(ctx, "agent", "ccf-bump/sync-2026-10-08"); err != nil || pr != nil {
 		t.Errorf("OpenPR = %v, %v", pr, err)
 	}
-	if err := g.EnableAutoMerge(ctx, "PR_1"); err == nil || !strings.Contains(err.Error(), "not allowed") {
-		t.Errorf("EnableAutoMerge error = %v", err)
+	if err := g.DisableAutoMerge(ctx, "PR_1"); err == nil || !strings.Contains(err.Error(), "disable auto-merge: auto-merge is not enabled") {
+		t.Errorf("DisableAutoMerge error = %v", err)
 	}
 	if _, err := g.DefaultBranch(ctx, "missing"); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("DefaultBranch(missing) error = %v", err)
@@ -141,7 +141,7 @@ func TestGitHubNeedsHuman(t *testing.T) {
 	g := &GitHub{BaseURL: srv.URL, Owner: "o"}
 	ctx := context.Background()
 	for _, repo := range []string{"ui", "api"} {
-		if err := g.LabelNeedsHuman(ctx, repo, 3); err != nil {
+		if err := g.AddLabel(ctx, repo, 3, NeedsHuman); err != nil {
 			t.Fatalf("%s: %v", repo, err)
 		}
 	}
@@ -155,8 +155,65 @@ func TestGitHubNeedsHuman(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	err := g.LabelNeedsHuman(ctx, "ui", 4) // adding the label is refused
+	err := g.AddLabel(ctx, "ui", 4, NeedsHuman) // adding the label is refused
 	if se := (*StatusError)(nil); !errors.As(err, &se) || se.Code != http.StatusUnprocessableEntity {
-		t.Errorf("LabelNeedsHuman(#4) error = %v, want a 422 StatusError", err)
+		t.Errorf("AddLabel(#4) error = %v, want a 422 StatusError", err)
+	}
+}
+
+func TestGitHubMerge(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.RequestURI()+" "+string(body))
+		switch r.Method + " " + r.URL.Path {
+		case "DELETE /repos/o/ui/issues/3/labels/ccf-bump:automerge":
+			fmt.Fprint(w, `[]`)
+		case "GET /repos/o/ui/pulls/3":
+			fmt.Fprint(w, `{"number":3,"title":"t","mergeable":false,"mergeable_state":"dirty","auto_merge":{"merge_method":"squash"},
+				"head":{"ref":"ccf-bump/sync-x","sha":"abc"},"labels":[{"name":"ccf-bump:automerge"}]}`)
+		case "GET /repos/o/ui/commits/abc/check-runs":
+			fmt.Fprint(w, `{"check_runs":[{"id":1,"status":"completed","conclusion":"failure"},{"id":2,"status":"in_progress","html_url":"u"}]}`)
+		case "GET /repos/o/ui/commits/none/check-runs":
+			fmt.Fprint(w, `{"check_runs":[]}`)
+		case "PUT /repos/o/ui/pulls/3/merge":
+			fmt.Fprint(w, `{"merged":true}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	g := &GitHub{BaseURL: srv.URL, Owner: "o"}
+	ctx := context.Background()
+	if err := g.RemoveLabel(ctx, "ui", 3, AutomergeLabel); err != nil {
+		t.Error(err)
+	}
+	if err := g.RemoveLabel(ctx, "ui", 4, AutomergeLabel); err != nil { // not on the PR: 404
+		t.Errorf("RemoveLabel of a missing label: %v", err)
+	}
+	pr, err := g.PullRequest(ctx, "ui", 3)
+	if err != nil || pr.Mergeable == nil || *pr.Mergeable || pr.MergeableState != "dirty" || pr.AutoMerge == nil ||
+		pr.Head.SHA != "abc" || pr.Title != "t" || !pr.HasLabel(AutomergeLabel) || pr.HasLabel(NeedsHumanLabel) {
+		t.Errorf("PullRequest = %+v, %v", pr, err)
+	}
+	if c, err := g.LatestCheck(ctx, "ui", "abc", "ci / required"); err != nil || c == nil || c.ID != 2 || c.Status != "in_progress" {
+		t.Errorf("LatestCheck = %+v, %v", c, err)
+	}
+	if c, err := g.LatestCheck(ctx, "ui", "none", "ci / required"); err != nil || c != nil {
+		t.Errorf("LatestCheck(none) = %+v, %v", c, err)
+	}
+	if err := g.Merge(ctx, "ui", 3, "abc", "t (#3)"); err != nil {
+		t.Error(err)
+	}
+	want := []string{
+		"DELETE /repos/o/ui/issues/3/labels/ccf-bump:automerge ",
+		"DELETE /repos/o/ui/issues/4/labels/ccf-bump:automerge ",
+		"GET /repos/o/ui/pulls/3 ",
+		"GET /repos/o/ui/commits/abc/check-runs?check_name=ci+%2F+required&filter=latest&per_page=100 ",
+		"GET /repos/o/ui/commits/none/check-runs?check_name=ci+%2F+required&filter=latest&per_page=100 ",
+		`PUT /repos/o/ui/pulls/3/merge {"commit_title":"t (#3)","merge_method":"squash","sha":"abc"}`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
