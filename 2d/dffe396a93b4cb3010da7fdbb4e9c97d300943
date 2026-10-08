@@ -6,3 +6,9 @@ lisa-design:
 - notify-failure: workflows-ref default v1 -> "" and checkout `inputs.workflows-ref || job.workflow_sha` (+ a guard step failing when both are empty), like the other workflows use job.workflow_sha.
 - Manifest: new kind `workflows` (not `action`): at most one, release: false, no depends_on, nobody depends on it. Stages() orders only release: true repos; Validate still cycle-checks all repos. Renovate and vuln-summary default selection skip kind workflows (named explicitly still works) so mock runs don't touch the workflows repo.
 - Split into a 2-PR stack to stay under 1000 changed lines: this PR (self-release, manifest, notify, docs) and ra/w1-s4-t02-bump-sha-pins (ccf-bump). README here already describes ccf-bump's SHA-pin behaviour from the PR above.
+
+lisa-selfreview:
+pass 1 (strict, run on the combined change before the stack split), verdict request_changes:
+- CORE-TEST-001 (must-fix): first-release config and notify's tool ref had no test -> fixed (internal/ciworkflows/self_release_test.go).
+- CORE-NAME-001 (should-fix, PR above): bumper.finals doubled as a commit cache -> fixed (commits map).
+- CORE-STYLE-001 (nit): over-long lines in files.go doc and docs/ccf-bump.md -> fixed.
