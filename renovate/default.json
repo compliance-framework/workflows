@@ -39,9 +39,11 @@
       "automergeType": "pr"
     },
     {
-      "description": "Majors open a PR for a human.",
+      "description": "Majors open a PR for a human: labelled needs-human, with a review request to team admins (docs/attention.md).",
       "matchUpdateTypes": ["major"],
-      "automerge": false
+      "automerge": false,
+      "addLabels": ["needs-human"],
+      "reviewers": ["team:admins"]
     },
     {
       "description": "OPA follows the api via ccf-bump everywhere else (agent, policy and plugin repos), so Renovate leaves it alone there.",
@@ -57,7 +59,7 @@
       "enabled": false
     },
     {
-      "description": "In the api, OPA gets its own PR and never auto-merges: a bump forces agent and the policies to follow.",
+      "description": "In the api, OPA gets its own PR and never auto-merges: a bump forces agent and the policies to follow. Labelled needs-human, with a review request to team admins.",
       "matchPackageNames": [
         "github.com/open-policy-agent/opa",
         "open-policy-agent/opa",
@@ -69,7 +71,9 @@
       ],
       "groupName": "opa",
       "groupSlug": "opa",
-      "automerge": false
+      "automerge": false,
+      "addLabels": ["needs-human"],
+      "reviewers": ["team:admins"]
     },
     {
       "description": "Internal packages, images and reusable workflows are ccf-bump's, so the two tools never fight over a version.",

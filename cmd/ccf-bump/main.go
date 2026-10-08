@@ -41,6 +41,8 @@ type GitHub interface {
 	OpenPRs(ctx context.Context, repo string) ([]bump.PR, error)
 	ClosePR(ctx context.Context, repo string, number int, comment string) error
 	DeleteBranch(ctx context.Context, repo, branch string) error
+	LabelNeedsHuman(ctx context.Context, repo string, number int) error
+	RequestTeamReview(ctx context.Context, repo string, number int, team string) error
 }
 
 // env is everything run depends on, so tests can fake it.
@@ -84,6 +86,7 @@ func (s setFlag) Set(v string) error {
 
 type options struct {
 	owner, mode, clones, workflowsRef string
+	reviewTeam                        string // org team asked to review a PR that needs a human
 	set                               setFlag
 	pr, dryRun                        bool
 	batch                             int
@@ -108,6 +111,11 @@ func run(ctx context.Context, args []string, e env) error {
 	fs.BoolVar(&o.pr, "pr", false, "push a branch and open or update a PR per repo")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "with --pr: print the PR instead of pushing")
 	fs.IntVar(&o.batch, "batch", 0, "sync: open at most this many PRs per hour (0: no limit)")
+	team := e.getenv("CCF_BUMP_REVIEW_TEAM")
+	if team == "" {
+		team = "admins"
+	}
+	fs.StringVar(&o.reviewTeam, "review-team", team, "org team (slug) asked to review a PR with auto-merge off; \"\" for none (env CCF_BUMP_REVIEW_TEAM)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

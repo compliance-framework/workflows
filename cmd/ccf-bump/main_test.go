@@ -25,6 +25,8 @@ type fakeGH struct {
 	nextPR   int
 	autoErr  error
 	closeErr error
+	labelErr error
+	teamErr  error
 	anon     bool // CreatePR returns a PR without its author
 }
 
@@ -110,6 +112,14 @@ func (f *fakeGH) DeleteBranch(_ context.Context, repo, branch string) error {
 	f.calls = append(f.calls, "delete "+repo+" "+branch)
 	return nil
 }
+func (f *fakeGH) LabelNeedsHuman(_ context.Context, repo string, n int) error {
+	f.calls = append(f.calls, fmt.Sprintf("label %s#%d", repo, n))
+	return f.labelErr
+}
+func (f *fakeGH) RequestTeamReview(_ context.Context, repo string, n int, team string) error {
+	f.calls = append(f.calls, fmt.Sprintf("review %s#%d team %s", repo, n, team))
+	return f.teamErr
+}
 
 const testManifest = `repos:
   - {name: mock-api, kind: go-service, release: true}
@@ -189,6 +199,8 @@ func TestSyncAllPR(t *testing.T) {
 		`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
 		"automerge PR_1",
 		`create mock-agent-action main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-agent to v0.2.0"`,
+		"label mock-agent-action#2",
+		"review mock-agent-action#2 team admins",
 		`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0"`,
 		"automerge PR_3",
 		`create mock-plugin-policies-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump opa to v1.15.0"`,
@@ -272,7 +284,8 @@ func TestWorkflowsPins(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", s, out)
 		}
 	}
-	if want := []string{`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0, workflows to v1.1.0"`}; !slices.Equal(gh.calls, want) {
+	if want := []string{`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0, workflows to v1.1.0"`,
+		"label mock-plugin-1#1", "review mock-plugin-1#1 team admins"}; !slices.Equal(gh.calls, want) {
 		t.Errorf("calls %q, want %q", gh.calls, want)
 	}
 	got := git(t, root, "--git-dir", filepath.Join("remotes", "mock-plugin-1.git"), "show", "ccf-bump/sync-2026-10-08:.github/workflows/ci.yaml")
@@ -463,5 +476,77 @@ func TestWithoutTokens(t *testing.T) {
 	got := withoutTokens([]string{"PATH=/bin", "GH_TOKEN=x", "GITHUB_TOKEN=y", "GH_TOKENS=z"})
 	if !slices.Equal(got, []string{"PATH=/bin", "GH_TOKENS=z"}) {
 		t.Errorf("withoutTokens = %q", got)
+	}
+}
+
+func TestNeedsHuman(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fake  func(*fakeGH)
+		args  []string
+		env   map[string]string
+		calls []string
+		out   []string
+	}{
+		"auto-merge refused": {
+			fake:  func(f *fakeGH) { f.autoErr = fmt.Errorf("enable auto-merge: clean status") },
+			calls: []string{"automerge PR_1", "label mock-ui#1", "review mock-ui#1 team admins"},
+			out:   []string{"asking a human: label needs-human, review from team admins"},
+		},
+		"failures are warnings": {
+			fake: func(f *fakeGH) {
+				f.autoErr, f.labelErr, f.teamErr = fmt.Errorf("refused"), fmt.Errorf("403 Forbidden"), fmt.Errorf("422 not a collaborator")
+			},
+			calls: []string{"automerge PR_1", "label mock-ui#1", "review mock-ui#1 team admins"},
+			out: []string{"::warning::ccf-bump: mock-ui#1: label needs-human: 403 Forbidden",
+				"::warning::ccf-bump: mock-ui#1: request review from team admins: 422 not a collaborator"},
+		},
+		"team from the environment": {
+			fake:  func(f *fakeGH) { f.autoErr = fmt.Errorf("refused") },
+			env:   map[string]string{"CCF_BUMP_REVIEW_TEAM": "release-owners"},
+			calls: []string{"automerge PR_1", "label mock-ui#1", "review mock-ui#1 team release-owners"},
+		},
+		"no team": {
+			fake:  func(f *fakeGH) { f.autoErr = fmt.Errorf("refused") },
+			args:  []string{"--review-team", ""},
+			env:   map[string]string{"CCF_BUMP_REVIEW_TEAM": "release-owners"},
+			calls: []string{"automerge PR_1", "label mock-ui#1"},
+			out:   []string{"asking a human: label needs-human\n"},
+		},
+		"auto-merge on": {
+			fake:  func(*fakeGH) {},
+			calls: []string{"automerge PR_1"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, e, gh, out := setup(t)
+			tc.fake(gh)
+			e.getenv = func(k string) string { return tc.env[k] }
+			args := append([]string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}, tc.args...)
+			if err := run(context.Background(), args, e); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if got := gh.calls[1:]; !slices.Equal(got, tc.calls) { // [0] is the create
+				t.Errorf("calls %q, want %q", got, tc.calls)
+			}
+			for _, s := range tc.out {
+				if !strings.Contains(out.String(), s) {
+					t.Errorf("output lacks %q:\n%s", s, out)
+				}
+			}
+		})
+	}
+}
+
+func TestNeedsHumanDryRun(t *testing.T) {
+	root, e, gh, out := setup(t)
+	args := []string{"--repo", "mock-agent-action", "--manifest", filepath.Join(root, "repos.yaml"), "--pr", "--dry-run"}
+	if err := run(context.Background(), args, e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(gh.calls) != 0 {
+		t.Errorf("dry run called the API: %q", gh.calls)
+	}
+	if s := "dry run: auto-merge off; would ask a human: label needs-human, review from team admins"; !strings.Contains(out.String(), s) {
+		t.Errorf("output lacks %q:\n%s", s, out)
 	}
 }

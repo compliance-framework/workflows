@@ -2,6 +2,7 @@ package bump
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -109,5 +110,57 @@ func TestGitHubSupersededPRs(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestGitHubNeedsHuman(t *testing.T) {
+	var got []string
+	labels := map[string]bool{"ui": false, "api": true} // repo -> needs-human exists
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.Path+" "+string(body))
+		repo := strings.Split(r.URL.Path, "/")[3]
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/labels/needs-human"):
+			if !labels[repo] {
+				http.NotFound(w, r)
+				return
+			}
+			fmt.Fprint(w, `{}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/"+repo+"/labels":
+			labels[repo] = true
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{}`)
+		case r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/issues/3/labels") || strings.HasSuffix(r.URL.Path, "/requested_reviewers")):
+			fmt.Fprint(w, `[]`)
+		default:
+			http.Error(w, `{"message":"Validation Failed"}`, http.StatusUnprocessableEntity)
+		}
+	}))
+	defer srv.Close()
+	g := &GitHub{BaseURL: srv.URL, Owner: "o"}
+	ctx := context.Background()
+	for _, repo := range []string{"ui", "api"} {
+		if err := g.LabelNeedsHuman(ctx, repo, 3); err != nil {
+			t.Fatalf("%s: %v", repo, err)
+		}
+	}
+	if err := g.RequestTeamReview(ctx, "ui", 3, "admins"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"GET /repos/o/ui/labels/needs-human ",
+		`POST /repos/o/ui/labels {"color":"d93f0b","description":"A bot PR waiting for a person","name":"needs-human"}`,
+		`POST /repos/o/ui/issues/3/labels {"labels":["needs-human"]}`,
+		"GET /repos/o/api/labels/needs-human ",
+		`POST /repos/o/api/issues/3/labels {"labels":["needs-human"]}`,
+		`POST /repos/o/ui/pulls/3/requested_reviewers {"team_reviewers":["admins"]}`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	err := g.LabelNeedsHuman(ctx, "ui", 4) // adding the label is refused
+	if se := (*StatusError)(nil); !errors.As(err, &se) || se.Code != http.StatusUnprocessableEntity {
+		t.Errorf("LabelNeedsHuman(#4) error = %v, want a 422 StatusError", err)
 	}
 }

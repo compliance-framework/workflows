@@ -84,6 +84,7 @@ jobs:
           permission-pull-requests: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # PRs and merges
           permission-issues: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # Dependency Dashboard, labels
           permission-workflows: ${{ env.DRY_RUN == 'off' && 'write' || '' }} # action updates in .github/workflows
+          permission-members: ${{ env.DRY_RUN == 'off' && 'read' || '' }} # team:admins reviewers (docs/attention.md)
           permission-checks: read # branch status
           permission-vulnerability-alerts: read # Dependabot alerts, for vulnerability fixes
       - uses: renovatebot/github-action@230ce922b08968d0a4f6f70f295601daff09ef1d # v46.3.7

@@ -95,7 +95,8 @@ A train started while another is open only moves the open one on: one train at a
   repos (`train select` lists them; an open train's repos come from its state and must be in its
   manifest with `release: true`). Read-only for a dry run; otherwise contents, pull requests,
   issues (chart issues) and actions (`/retry`) write, workflows write (bumps edit workflow files),
-  and checks and statuses read. Its commits are authored by the bot.
+  checks and statuses read, and organization Members read (ccf-bump asks team `admins` to review a
+  bump PR with auto-merge off, [attention.md](attention.md)). Its commits are authored by the bot.
 - ccf-release-bot scoped to `workflows` with organization Members read, for comment commands. If
   the app lacks that permission, minting fails without failing the run, and commands are refused.
 

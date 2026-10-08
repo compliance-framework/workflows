@@ -789,6 +789,12 @@ Scheduled runs are dry runs until the repo variable `RENOVATE_LIVE` is `true`. S
 severity, to Slack every Monday (and on `workflow_dispatch`). See
 [docs/vuln-summary.md](docs/vuln-summary.md).
 
+## Bot PRs that need a human
+
+Bot PRs that wait for a person (Renovate majors and api OPA bumps, ccf-bump PRs with auto-merge
+off) get the `needs-human` label and a review request from team `admins`. See
+[docs/attention.md](docs/attention.md).
+
 ## ccf-bump
 
 `ccf-bump` moves internal dependency pins (Go modules, `go install` pins, the action's source image,

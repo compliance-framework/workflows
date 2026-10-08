@@ -67,6 +67,8 @@ jobs:
           permission-pull-requests: ${{ steps.select.outputs.dry_run == 'true' && 'read' || 'write' }}
           # Bumps edit .github/workflows files; the permission has no read level, so only when live.
           permission-workflows: ${{ steps.select.outputs.dry_run != 'true' && 'write' || '' }}
+          # A PR with auto-merge off asks team admins for a review (docs/attention.md).
+          permission-members: ${{ steps.select.outputs.dry_run != 'true' && 'read' || '' }}
       - name: Commit as the release bot
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
