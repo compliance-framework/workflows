@@ -31,6 +31,7 @@ type world struct {
 	id       int64
 	// manualBumps: ccf-bump leaves the automerge label off; closedBumps: someone closes the bump PRs.
 	manualBumps, closedBumps bool
+	mergeErrs                []error // returned by the first merges
 }
 
 type fakeRepo struct {
@@ -172,6 +173,11 @@ func (w *world) Merge(_ context.Context, repo string, n int, sha string) error {
 	pr := r.prs[n]
 	if pr == nil || !pr.Open || pr.HeadSHA != sha {
 		return fmt.Errorf("can't merge %s#%d at %s", repo, n, sha)
+	}
+	if len(w.mergeErrs) > 0 {
+		err := w.mergeErrs[0]
+		w.mergeErrs = w.mergeErrs[1:]
+		return err
 	}
 	w.merges = append(w.merges, fmt.Sprintf("%s#%d", repo, n))
 	pr.Open, pr.Merged, pr.MergeSHA = false, true, fmt.Sprintf("%s-m%d", repo, n)

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeAPI serves canned responses by "METHOD path?query" and records request bodies.
@@ -42,11 +43,11 @@ func TestGitHubRepos(t *testing.T) {
 		"GET /repos/o/r/contents/.release-please-manifest.json?ref=abc": `{"content":"eyIuIjoi\nMC4xLjAifQ=="}`,
 		"GET /repos/o/r/pulls?state=open&sort=created&direction=asc&per_page=100&page=1": `[{"number":3,"head":{"ref":"ccf-bump/train-x"}},
 			{"number":4,"state":"open","html_url":"u4","auto_merge":{"merge_method":"squash"},"head":{"ref":"release-please--branches--main","sha":"h"},"base":{"sha":"b"},"labels":[{"name":"l"}]}]`,
-		"GET /repos/o/r/pulls/4":                                  `{"number":4,"state":"closed","merged_at":"2026-12-01T00:00:00Z","merge_commit_sha":"m","head":{"sha":"h"},"base":{"sha":"b"}}`,
-		"GET /repos/o/r/commits/h/check-runs?per_page=100&page=1": `{"check_runs":[{"id":1,"name":"ci / required","status":"completed","conclusion":"success"}]}`,
-		"GET /repos/o/r/commits/h/status?per_page=100":            `{"statuses":[{"id":7,"context":"osv","state":"error"},{"id":8,"context":"cla","state":"pending"}]}`,
-		"GET /repos/o/r/tags?per_page=100&page=1":                 `[{"name":"v0.2.0","commit":{"sha":"m"}},{"name":"v0.1.0","commit":{"sha":"x"}}]`,
-		"PUT /repos/o/r/pulls/4/merge":                            `{"merged":true}`,
+		"GET /repos/o/r/pulls/4": `{"number":4,"state":"closed","merged_at":"2026-12-01T00:00:00Z","merge_commit_sha":"m","head":{"sha":"h"},"base":{"sha":"b"}}`,
+		"GET /repos/o/r/commits/h/check-runs?filter=all&per_page=100&page=1": `{"check_runs":[{"id":1,"name":"ci / required","status":"completed","conclusion":"success","started_at":"2026-10-08T05:01:00Z"}]}`,
+		"GET /repos/o/r/commits/h/status?per_page=100":                       `{"statuses":[{"id":7,"context":"osv","state":"error"},{"id":8,"context":"cla","state":"pending"}]}`,
+		"GET /repos/o/r/tags?per_page=100&page=1":                            `[{"name":"v0.2.0","commit":{"sha":"m"}},{"name":"v0.1.0","commit":{"sha":"x"}}]`,
+		"PUT /repos/o/r/pulls/4/merge":                                       `{"merged":true}`,
 	})
 	branch, sha, err := g.DefaultBranch(ctx, "r")
 	if err != nil || branch != "main" || sha != "abc" {
@@ -66,7 +67,8 @@ func TestGitHubRepos(t *testing.T) {
 		t.Errorf("PR = %+v %v", pr, err)
 	}
 	checks, err := g.Checks(ctx, "r", "h")
-	if state, detail := EvaluateChecks(checks, "ci / required"); err != nil || state != ChecksFailing || detail != "osv" {
+	if state, detail := EvaluateChecks(checks, "ci / required"); err != nil || state != ChecksFailing || detail != "osv" ||
+		!checks[0].StartedAt.Equal(time.Date(2026, 10, 8, 5, 1, 0, 0, time.UTC)) {
 		t.Errorf("Checks = %+v %v -> %s %s", checks, err, state, detail)
 	}
 	if tags, err := g.TagsAt(ctx, "r", "m"); err != nil || !reflect.DeepEqual(tags, []string{"v0.2.0"}) {

@@ -67,7 +67,11 @@ func (e *Engine) mergeGreen(ctx context.Context, r *RepoState, pr *PR) (bool, er
 		r.hold(Blocked, false, "checks failing on #%d at %s: %s", pr.Number, short(pr.HeadSHA), detail)
 		return false, nil
 	}
-	if err := e.Repos.Merge(ctx, r.Name, pr.Number, pr.HeadSHA); err != nil {
+	if err := e.Repos.Merge(ctx, r.Name, pr.Number, pr.HeadSHA); ExpectsCheck(err) {
+		// A run of a required check started after the checks were read: the next reconcile retries.
+		r.wait("waiting for checks on #%d: GitHub still expects a required check", pr.Number)
+		return false, nil
+	} else if err != nil {
 		r.hold(Blocked, false, "merging #%d failed: %v", pr.Number, err)
 		return false, nil
 	}

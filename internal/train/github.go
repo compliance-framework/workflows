@@ -39,6 +39,14 @@ func notFound(err error) bool {
 	return errors.As(err, &se) && se.Status == http.StatusNotFound
 }
 
+// ExpectsCheck reports whether err is GitHub refusing a merge because a required status check is
+// still expected (it hasn't reported on the head yet, or a new run of it is in progress).
+func ExpectsCheck(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Status == http.StatusMethodNotAllowed &&
+		strings.Contains(se.Body, "status check") && strings.Contains(se.Body, "is expected")
+}
+
 // maxPages bounds every listing (100 per page).
 const maxPages = 10
 
@@ -194,17 +202,19 @@ func (g *GitHub) Checks(ctx context.Context, repo, sha string) ([]Check, error) 
 	for page := 1; page <= maxPages; page++ {
 		var r struct {
 			CheckRuns []struct {
-				ID         int64  `json:"id"`
-				Name       string `json:"name"`
-				Status     string `json:"status"`
-				Conclusion string `json:"conclusion"`
+				ID         int64     `json:"id"`
+				Name       string    `json:"name"`
+				Status     string    `json:"status"`
+				Conclusion string    `json:"conclusion"`
+				StartedAt  time.Time `json:"started_at"`
 			} `json:"check_runs"`
 		}
-		if err := g.do(ctx, http.MethodGet, fmt.Sprintf("%s/commits/%s/check-runs?per_page=100&page=%d", g.repoPath(repo), url.PathEscape(sha), page), nil, &r); err != nil {
+		// filter=all: the default (latest, by completed_at) hides a newer run still in progress.
+		if err := g.do(ctx, http.MethodGet, fmt.Sprintf("%s/commits/%s/check-runs?filter=all&per_page=100&page=%d", g.repoPath(repo), url.PathEscape(sha), page), nil, &r); err != nil {
 			return nil, err
 		}
 		for _, c := range r.CheckRuns {
-			out = append(out, Check{ID: c.ID, Name: c.Name, Status: c.Status, Conclusion: c.Conclusion})
+			out = append(out, Check{ID: c.ID, Name: c.Name, Status: c.Status, Conclusion: c.Conclusion, StartedAt: c.StartedAt})
 		}
 		if len(r.CheckRuns) < 100 {
 			break
