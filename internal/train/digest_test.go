@@ -1,9 +1,12 @@
 package train
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 const apiNotes = `## [0.2.0](https://github.com/o/mock-api/compare/v0.1.0...v0.2.0) (2026-12-01)
@@ -56,6 +59,41 @@ func TestDigest(t *testing.T) {
 	}
 	if strings.Index(got, "handle empty input") > strings.Index(got, "agent fix") {
 		t.Error("want repos within a section in train order")
+	}
+}
+
+func TestDigestCard(t *testing.T) {
+	repos := []*RepoState{
+		{Name: "mock-api", Phase: Released, From: map[string]string{".": "0.1.0"}, Versions: map[string]string{".": "0.2.0"}},
+		{Name: "mock-gooci", Phase: Released, From: map[string]string{".": "0.0.7"}}, // nothing released
+		{Name: "mock-ui", Phase: Skipped},
+		{Name: "mock-agent", Phase: Released, Versions: map[string]string{".": "0.3.1"}},
+	}
+	notes := []Notes{
+		{Repo: "mock-api", Tag: "v0.2.0", URL: "https://r/api", Body: "### Features\n\n* **api:** add <widgets> ([#2](https://github.com/o/mock-api/issues/2))\n  continued\n"},
+		{Repo: "mock-agent", Tag: "v0.3.1", URL: "https://r/agent", Body: "### Bug Fixes\n\n* agent fix\n"},
+	}
+	got := DigestCard("2026-12", repos, notes, "https://issue")
+	want := slackkit.DigestCard(slackkit.Digest{
+		Title: "Release digest 2026-12", Draft: true, IssueURL: "https://issue",
+		Repos: []slackkit.DigestRepo{
+			{Name: "mock-api", From: "v0.1.0", To: "v0.2.0", ChangelogURL: "https://r/api"},
+			{Name: "mock-agent", To: "v0.3.1", ChangelogURL: "https://r/agent"},
+		},
+		Highlights: []string{"*mock-api*: *api:* add &lt;widgets&gt; (<https://github.com/o/mock-api/issues/2|#2>)"},
+	})
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("card = %+v\nwant %+v", got, want)
+	}
+
+	var many strings.Builder
+	many.WriteString("### Features\n\n")
+	for i := range maxHighlights + 3 {
+		fmt.Fprintf(&many, "- feature %d\n", i)
+	}
+	got = DigestCard("2026-12", repos[:1], []Notes{{Repo: "mock-api", Body: many.String()}}, "")
+	if text := got.Blocks[len(got.Blocks)-1].Text.Text; !strings.Contains(text, "feature 9") || strings.Contains(text, "feature 10") || !strings.Contains(text, "and 3 more in the tracking issue's digest") {
+		t.Errorf("highlights past the cap: %s", text)
 	}
 }
 

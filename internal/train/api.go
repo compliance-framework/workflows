@@ -94,12 +94,6 @@ type Members interface {
 	IsOrgAdmin(ctx context.Context, user string) (bool, error)
 }
 
-// Slack posts to the releases channel.
-type Slack interface {
-	// Post posts text, as a reply in thread threadTS unless it is empty, and returns its ts.
-	Post(ctx context.Context, channel, text, threadTS string) (ts string, err error)
-}
-
 // BumpResult is what a ccf-bump run did.
 type BumpResult struct {
 	PR      int  // the PR it opened or updated; 0 if none

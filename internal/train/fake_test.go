@@ -12,6 +12,7 @@ import (
 
 	"github.com/compliance-framework/workflows/internal/bump"
 	"github.com/compliance-framework/workflows/internal/manifest"
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 // world is a fake GitHub (the repos and the tracking issues), Slack and ccf-bump. tick plays
@@ -22,10 +23,12 @@ type world struct {
 	issues   []*Issue
 	comments map[int][]Comment
 	admins   []string
-	slack    []string // "thread|text"; the parent's ts is "ts-1"
-	bumps    []string // "repo sets dry"
-	merges   []string // "repo#n"
-	releases []string // repos, in the order their release PRs merged
+	slack    []string           // "thread|text" in the releases channel; the parent's ts is "ts-1"
+	updates  []string           // "channel|ts|text" of chat.update
+	digests  []slackkit.Message // posted to another channel (the digest channel)
+	bumps    []string           // "repo sets dry"
+	merges   []string           // "repo#n"
+	releases []string           // repos, in the order their release PRs merged
 	reruns   []int64
 	external []string // issues opened in repos
 	id       int64
@@ -312,9 +315,22 @@ func (w *world) IsOrgAdmin(_ context.Context, user string) (bool, error) {
 
 // Slack.
 
-func (w *world) Post(_ context.Context, channel, text, thread string) (string, error) {
-	w.slack = append(w.slack, thread+"|"+text)
-	return fmt.Sprintf("ts-%d", len(w.slack)), nil
+func (w *world) Post(ctx context.Context, channel string, m slackkit.Message) (slackkit.Posted, error) {
+	return w.Reply(ctx, channel, "", m)
+}
+
+func (w *world) Reply(_ context.Context, channel, thread string, m slackkit.Message) (slackkit.Posted, error) {
+	if channel != "C1" {
+		w.digests = append(w.digests, m)
+		return slackkit.Posted{Channel: channel, TS: "d"}, nil
+	}
+	w.slack = append(w.slack, thread+"|"+m.Text)
+	return slackkit.Posted{Channel: "C1", TS: fmt.Sprintf("ts-%d", len(w.slack))}, nil
+}
+
+func (w *world) Update(_ context.Context, channel, ts string, m slackkit.Message) error {
+	w.updates = append(w.updates, channel+"|"+ts+"|"+m.Text)
+	return nil
 }
 
 func (w *world) state(n int) *State {
@@ -332,6 +348,7 @@ func (w *world) engine(now time.Time) *Engine {
 		Load:                  func(p string) (*manifest.Manifest, error) { return manifest.Load("../../" + p) },
 		ReposURL:              "https://github.com/compliance-framework",
 		Channel:               "C1",
+		DigestChannel:         "CDIG",
 		RequiredCheck:         "ci / required",
 		ReleasePleaseWorkflow: "release-please.yml",
 		RunURL:                "https://run",

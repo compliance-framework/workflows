@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"golang.org/x/mod/semver"
+
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 // Notes is one release's notes, for the digest.
@@ -75,6 +77,54 @@ func Digest(month string, repos []*RepoState, notes []Notes) string {
 		fmt.Fprintf(&b, "\n### %s\n\n%s", s, strings.Join(bySection[s], "\n"))
 	}
 	return b.String()
+}
+
+// maxHighlights caps the digest card's highlights; the issue comment has them all.
+const maxHighlights = 10
+
+// DigestCard is the release digest draft for #ccf-release-digests: each released repo's from →
+// to versions with its release notes, and the features as highlights. issueURL is the
+// tracking issue, whose digest comment has the full draft.
+func DigestCard(month string, repos []*RepoState, notes []Notes, issueURL string) slackkit.Message {
+	d := slackkit.Digest{Title: "Release digest " + month, Draft: true, IssueURL: issueURL}
+	for _, r := range repos {
+		to := Versions(r.Versions)
+		if r.Phase == Skipped || to == "" {
+			continue
+		}
+		dr := slackkit.DigestRepo{Name: r.Name, From: Versions(r.From), To: to}
+		if i := slices.IndexFunc(notes, func(n Notes) bool { return n.Repo == r.Name }); i >= 0 {
+			dr.ChangelogURL = notes[i].URL
+		}
+		d.Repos = append(d.Repos, dr)
+	}
+	var highlights []string
+	for _, n := range notes {
+		_, lines := Sections(n.Body)
+		for _, l := range lines["Features"] {
+			if item, ok := bullet(l); ok {
+				highlights = append(highlights, "*"+slackkit.Escape(n.Repo)+"*: "+item)
+			}
+		}
+	}
+	if len(highlights) > maxHighlights {
+		highlights = append(highlights[:maxHighlights], fmt.Sprintf("and %d more in the tracking issue's digest", len(highlights)-maxHighlights))
+	}
+	d.Highlights = highlights
+	return slackkit.DigestCard(d)
+}
+
+// bullet turns a release-please notes bullet ("* **scope:** text ([#1](url))") into mrkdwn;
+// a continuation line is not a bullet.
+func bullet(l string) (string, bool) {
+	t := strings.TrimSpace(l)
+	item, ok := strings.CutPrefix(t, "* ")
+	if !ok {
+		if item, ok = strings.CutPrefix(t, "- "); !ok {
+			return "", false
+		}
+	}
+	return SlackText(strings.ReplaceAll(slackkit.Escape(item), "**", "*")), true
 }
 
 // MinorUp reports whether to is a higher major.minor than from (X.Y.Z versions without "v").

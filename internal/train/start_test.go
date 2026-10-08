@@ -14,8 +14,16 @@ func TestStartPostsTheParentMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := w.state(1)
-	if st.ThreadTS != "ts-1" || !strings.HasPrefix(w.slack[0], "|:steam_locomotive: *Release train 2026-12*: 10 repos in 4 stages (mock-api, mock-gooci → mock-agent, mock-ui → ") {
+	// The parent message is the board, edited at the end of the run (stage 1 moved on).
+	if st.ThreadTS != "ts-1" || st.Channel != "C1" || w.slack[0] != "|Release train 2026-12: Stage 1 of 4 · running" {
 		t.Errorf("thread %q, parent %q", st.ThreadTS, w.slack[0])
+	}
+	if len(w.updates) != 1 || w.updates[0] != "C1|ts-1|Release train 2026-12: Stage 1 of 4 · running" || st.Board == "" {
+		t.Errorf("board updates %q, hash %q", w.updates, st.Board)
+	}
+	// A run that changes nothing leaves the board alone.
+	if err := w.engine(trainDay).Reconcile(ctx); err != nil || len(w.updates) != 1 {
+		t.Errorf("rerun: %v, updates %q", err, w.updates)
 	}
 	// The first run already merged stage 1's release PRs.
 	if st.Repo("mock-api").Phase != Publishing || !w.issues[0].Open || !slices.Contains(w.issues[0].Labels, LabelOpen) {

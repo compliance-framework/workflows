@@ -107,10 +107,17 @@ func TestTrainReleasesStageByStage(t *testing.T) {
 		!strings.Contains(w.external[0], "mock-api: v0.1.0 → v0.2.0") || strings.Contains(w.external[0], "mock-agent:") {
 		t.Errorf("chart issues = %q", w.external)
 	}
+	// The board ends finished, and the digest draft went to the digest channel once.
+	if u := w.updates[len(w.updates)-1]; u != "C1|ts-0|Release train 2026-12: Finished · 4 stages" {
+		t.Errorf("last board update %q", u)
+	}
+	if len(w.digests) != 1 || w.digests[0].Header != ":memo: Release digest 2026-12 (draft)" || !strings.Contains(fmt.Sprint(w.digests[0].Blocks), "`v0.1.0` → `v0.2.0`") {
+		t.Errorf("digests = %+v", w.digests)
+	}
 	// Repeating a run on a finished train changes nothing.
-	n := len(w.merges)
-	if err := e.Reconcile(ctx); err != nil || len(w.merges) != n {
-		t.Errorf("rerun: %v, merges %d -> %d", err, n, len(w.merges))
+	n, u := len(w.merges), len(w.updates)
+	if err := e.Reconcile(ctx); err != nil || len(w.merges) != n || len(w.updates) != u || len(w.digests) != 1 {
+		t.Errorf("rerun: %v, merges %d -> %d, board updates %d -> %d, digests %d", err, n, len(w.merges), u, len(w.updates), len(w.digests))
 	}
 }
 

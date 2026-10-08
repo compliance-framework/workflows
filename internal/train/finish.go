@@ -3,6 +3,7 @@ package train
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/compliance-framework/workflows/internal/manifest"
@@ -27,6 +28,7 @@ func (e *Engine) finish(ctx context.Context, is Issue, st *State) error {
 		}
 		st.Digest = url
 	}
+	e.postDigest(ctx, is, st, notes)
 	charts, err := e.chartIssues(ctx, st, false)
 	if err != nil {
 		return err
@@ -38,6 +40,22 @@ func (e *Engine) finish(ctx context.Context, is Issue, st *State) error {
 	}
 	e.notify(ctx, st, "finished", msg)
 	return nil
+}
+
+// postDigest posts the digest draft card to DigestChannel once; without the channel or Slack it
+// does nothing. A failed post is logged and retried by the next run that finishes the train.
+func (e *Engine) postDigest(ctx context.Context, is Issue, st *State, notes []Notes) {
+	const key = "digest"
+	if e.Slack == nil || e.DigestChannel == "" || slices.Contains(st.Notified, key) {
+		return
+	}
+	card := DigestCard(st.Month, st.Repos, notes, is.URL)
+	e.logf("slack (digests): %s", card.Text)
+	if _, err := e.Slack.Post(ctx, e.DigestChannel, card); err != nil {
+		e.logf("::warning::posting the digest draft to Slack failed: %v", err)
+		return
+	}
+	st.MarkNotified(key)
 }
 
 // chartIssues opens, in each helm repo of the manifest, an issue listing its go-service and
