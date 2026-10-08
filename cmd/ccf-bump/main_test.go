@@ -16,13 +16,15 @@ import (
 )
 
 type fakeGH struct {
-	failFor string // LatestFinal fails for this repo
-	finals  map[string]string
-	files   map[string]string // "repo@ref:path" -> content
-	open    map[string]*bump.PR
-	calls   []string
-	nextPR  int
-	autoErr error
+	failFor  string // LatestFinal fails for this repo
+	finals   map[string]string
+	files    map[string]string // "repo@ref:path" -> content
+	open     map[string]*bump.PR
+	calls    []string
+	nextPR   int
+	autoErr  error
+	closeErr error
+	anon     bool // CreatePR returns a PR without its author
 }
 
 func (f *fakeGH) LatestFinal(_ context.Context, repo string) (string, error) {
@@ -59,6 +61,9 @@ func newPR(n int, owner, repo, branch, login, typ string) *bump.PR {
 func (f *fakeGH) CreatePR(_ context.Context, repo, base, head, title, _ string) (*bump.PR, error) {
 	f.nextPR++
 	pr := newPR(f.nextPR, "compliance-framework", repo, head, "ccf-release-bot[bot]", "Bot")
+	if f.anon {
+		pr.User.Login = ""
+	}
 	f.open[repo+" "+head] = pr
 	f.calls = append(f.calls, fmt.Sprintf("create %s %s<-%s %q", repo, base, head, title))
 	return pr, nil
@@ -83,6 +88,9 @@ func (f *fakeGH) OpenPRs(_ context.Context, repo string) ([]bump.PR, error) {
 }
 func (f *fakeGH) ClosePR(_ context.Context, repo string, n int, comment string) error {
 	f.calls = append(f.calls, fmt.Sprintf("close %s#%d %q", repo, n, comment))
+	if f.closeErr != nil {
+		return f.closeErr
+	}
 	for k, pr := range f.open {
 		if strings.HasPrefix(k, repo+" ") && pr.Number == n {
 			delete(f.open, k)
@@ -338,6 +346,41 @@ func TestSupersededPRsClosed(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "closed #50 (ccf-bump/sync-2026-09-22): superseded by #100") {
 		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestSupersededPRsWarnings(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fake  func(*fakeGH)
+		warn  string
+		calls []string
+	}{
+		"close fails": {
+			fake: func(f *fakeGH) { f.closeErr = fmt.Errorf("403 Forbidden") },
+			warn: "mock-ui#50: close superseded PR: 403 Forbidden",
+			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
+				`close mock-ui#50 "Superseded by #100."`, "automerge PR_100"},
+		},
+		"author unknown": {
+			fake:  func(f *fakeGH) { f.anon = true },
+			warn:  "mock-ui#100: author unknown; earlier ccf-bump PRs left open",
+			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`, "automerge PR_100"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, e, gh, out := setup(t)
+			stalePRs(gh)
+			tc.fake(gh)
+			if err := run(context.Background(), []string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}, e); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if !slices.Equal(gh.calls, tc.calls) {
+				t.Errorf("calls %q, want %q", gh.calls, tc.calls)
+			}
+			if !strings.Contains(out.String(), "::warning::ccf-bump: "+tc.warn) {
+				t.Errorf("no warning %q:\n%s", tc.warn, out)
+			}
+		})
 	}
 }
 

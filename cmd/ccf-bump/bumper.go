@@ -289,7 +289,8 @@ func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, p
 }
 
 // superseded returns repo's other open PRs that ccf-bump opened in this mode: head branch
-// ccf-bump/<mode>-* in repo itself (not a fork), other than branch, and mine.
+// ccf-bump/<mode>-* in repo itself (not a fork), other than branch, for which mine (who opened
+// it) is true.
 func (b *bumper) superseded(ctx context.Context, repo, branch string, mine func(bump.PR) bool) ([]bump.PR, error) {
 	prs, err := b.e.gh.OpenPRs(ctx, repo)
 	if err != nil {
