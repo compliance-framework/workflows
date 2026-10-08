@@ -1,0 +1,9 @@
+lisa-design:
+- slack-preview needs no GitHub token (sample data only), so the workflow mints no app token; contents: read only.
+- With --which all, a sample whose SLACK_CHANNEL_* variable is unset is skipped with a ::warning:: (so one missing channel doesn't block the others); naming a sample whose variable is unset fails; no channel at all fails.
+- Edits wait --pause (default 10s) via an injected sleep so tests run instantly; the releases sample posts the board at stage 1 and edits it 3 times (stage 2, stage 3, finished) with one thread reply per edit.
+- Thread replies are previews too (Preview() on every call), so nothing a viewer sees looks like a real event.
+- --dry-run swaps in slackkit.Fake and prints the calls; it needs no token.
+
+lisa-selfreview:
+pass 1: fixed (pre-split) — dry-run built the real client before checking the flag. pass 2: no findings.
