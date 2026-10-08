@@ -1,0 +1,10 @@
+lisa-design:
+- Status bar: Block Kit has no color, so a colored Message sends its body blocks inside ONE secondary attachment {color, fallback, blocks}; the header stays a top-level block so Slack never renders the plain `text` fallback above the bar (it does when a message has no top-level blocks). Slack labels attachments legacy but documents `blocks` inside them; this is the only way to get the side bar. A message without Color has all blocks top-level.
+- `text` is always sent (notifications, screen readers); every card fills it.
+- Update always sends `blocks` and `attachments` (empty arrays when unused) because chat.update keeps fields it isn't sent; update payload omits unfurl_* (postMessage-only).
+- Post/Reply return Posted{Channel ID, TS}: callers must store the channel ID, chat.update rejects names.
+- Only chat:write is needed (bot edits its own messages). Link buttons only (no interactivity); without an app interactivity URL Slack may show a warning icon on click — documented, no scope.
+- Builders return []Block for Fields/Buttons/Context so limits (10 fields/section, 25 buttons/actions, 10 context elements, no empty context) are enforced by chunking or omission, never by an invalid payload.
+- internal/notify's existing Slack client is NOT touched in this PR (a parallel fix branch edits internal/notify); later PRs in this stack move notify/attention/train onto slackkit.
+- No 429/Retry-After handling: every caller posts a handful of messages per run; add it if a caller ever bursts.
+- PR1 of the spec (kit + preview) is split into three stacked PRs (kit, cards, preview) to stay under lisa's 1000-line limit.
