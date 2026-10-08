@@ -1,0 +1,10 @@
+lisa-design:
+- Renovate: majors and the api OPA rule use addLabels (merged with defaults, not replacing labels) + reviewers ["team:admins"]; `team:` prefix verified in renovate dist/modules/platform/github/index.js (addReviewers strips /^team:/ into team_reviewers). Validator --strict passes (repo + global).
+- ccf-bump flags a PR as needing a human both when auto-merge is off by plan (major/unversioned pin) AND when GitHub refuses EnableAutoMerge: in both cases nobody merges it automatically, and the train treats a bump PR without auto-merge as needs-human too.
+- Label is ensured (GET labels/needs-human, POST on 404, 422 tolerated as a race) before POST issues/{n}/labels, so the label gets color d93f0b + description instead of GitHub's auto-created grey one.
+- Label/review failures are warnings (same pattern as auto-merge/superseded PRs, #41): the PR is open either way.
+- Team slug: --review-team flag, default from env CCF_BUMP_REVIEW_TEAM, else "admins"; --review-team "" disables the request (label still added).
+- bump.GitHub.do now returns *StatusError (same Error() text as before) so callers can branch on 404/422; additive.
+- permission-members: read added to live tokens only (ccf-bump-sync, renovate, and the train's main token since it runs ccf-bump). The app has members:read (verified via GET /orgs/compliance-framework/installations). Dry-run tokens stay without it.
+- No label removal when a later run of the same PR becomes auto-mergeable: same-day reruns are rare and superseded PRs are closed; kept additive.
+- release-checks gets no write permissions (spec 1c); the digest (stacked PR) lists release PRs that need release:major-approved.
