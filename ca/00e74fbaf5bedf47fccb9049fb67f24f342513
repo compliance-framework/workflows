@@ -5,3 +5,6 @@ lisa-design:
 - Failing conclusions: failure, timed_out, action_required, startup_failure; check_name + filter=latest so re-runs supersede earlier runs. cancelled/pending/success do not count.
 - Per-PR read errors keep the reasons found so far and are reported (the run fails after posting); per-repo list errors skip the repo.
 - Split from the command/workflow/docs PR to stay under 1000 lines.
+
+lisa-selfreview:
+pass 1 (strict): approve. No defects. Question (not fixed, listed for reviewers): release-please PRs are "bot PRs" per the spec, so one waiting for the monthly train is listed as "open over 7d" most weeks; exclude them from the stale rule (keep only blocked ones)?
