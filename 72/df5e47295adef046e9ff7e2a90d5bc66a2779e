@@ -1,0 +1,4 @@
+lisa-design:
+- SPEC CHANGE (user, via coordinator): no GitHub review requests anywhere. Renovate `reviewers`, ccf-bump RequestTeamReview/--review-team/CCF_BUMP_REVIEW_TEAM and the permission-members token additions were removed; supersedes the earlier design notes about team:admins and members:read. Only the needs-human label remains; Slack posting is done by notify-failure (stacked PR) and the weekly digest (stacked PR).
+- Label endpoints need Pull requests: write OR Issues: write (docs: permissions-required-for-github-apps), which ccf-bump-sync and the train's live tokens already have; no workflow token change in this PR.
+- ccf-bump prints "label: needs-human" only after the label call succeeded; on failure only the warning.
