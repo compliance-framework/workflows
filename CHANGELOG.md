@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.0](https://github.com/compliance-framework/workflows/compare/v1.0.0...v1.1.0) (2026-10-08)
+
+
+### Features
+
+* **attention:** rules and read-only GitHub client for the attention digest ([cd3346b](https://github.com/compliance-framework/workflows/commit/cd3346b790295ec1d0f4be1b66013f53a32b7f14))
+* **attention:** weekly attention digest to SLACK_CHANNEL_NEEDS_HUMAN ([85b5382](https://github.com/compliance-framework/workflows/commit/85b5382f224213542b6abbe683e2d8989256ee13))
+* **attention:** weekly attention-digest workflow posting to SLACK_CHANNEL_NEEDS_HUMAN ([37f50f8](https://github.com/compliance-framework/workflows/commit/37f50f8ac5f859885a734683b05ba8548fb94565))
+* **ccf-bump:** title a workflows-only bump ci(deps) so it proposes no release ([b12b068](https://github.com/compliance-framework/workflows/commit/b12b0687d01207fbf78a6b9142cdb4c7dd59314e))
+* **notify:** post bot PRs that need a human to SLACK_CHANNEL_NEEDS_HUMAN once ([a9378d5](https://github.com/compliance-framework/workflows/commit/a9378d5947e58035b364639a2a2e96dc29d7d2f1))
+
+
+### Bug Fixes
+
+* **attention:** release-please PRs are never stale; they wait for the train ([3069a93](https://github.com/compliance-framework/workflows/commit/3069a93d21226efee0f3eaf142a3fabd57002bb3))
+* **renovate:** indirect Go module updates are fix(deps), so they release ([fbee0b2](https://github.com/compliance-framework/workflows/commit/fbee0b2febfbcdff12749b4ba8654925ea3d5861))
+
 ## 1.0.0 (2026-10-08)
 
 
