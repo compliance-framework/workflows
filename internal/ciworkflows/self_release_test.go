@@ -7,10 +7,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"golang.org/x/mod/semver"
 )
 
 // TestSelfReleaseConfig pins this repo's own release-please setup: the shared defaults, a simple
-// package whose first release is 1.0.0, and no floating tag job.
+// package whose first release is 1.0.0 (the manifest is 0.0.0 until then), and no floating tag job.
 func TestSelfReleaseConfig(t *testing.T) {
 	need(t, "jq")
 	root := filepath.Join("..", "..")
@@ -27,9 +29,15 @@ func TestSelfReleaseConfig(t *testing.T) {
 			t.Fatalf("%s: %v", file, err)
 		}
 	}
-	// 0.0.0 is "no release" to release-please, so the first PR proposes initial-version.
-	if want := map[string]string{".": "0.0.0"}; !reflect.DeepEqual(manifest, want) {
-		t.Errorf(".release-please-manifest.json = %v, want %v", manifest, want)
+	// The manifest holds only the "." package. Before the first release its version is 0.0.0,
+	// "no release" to release-please, so the first release PR proposes initial-version (1.0.0);
+	// release-please then writes each released version, which is never below 1.0.0.
+	if v, ok := manifest["."]; len(manifest) != 1 || !ok {
+		t.Errorf(".release-please-manifest.json = %v, want only the \".\" package", manifest)
+	} else if sv := "v" + v; !semver.IsValid(sv) || semver.Canonical(sv) != sv {
+		t.Errorf(`.release-please-manifest.json["."] = %q, want a full semver version`, v)
+	} else if v != "0.0.0" && semver.Compare(sv, "v1.0.0") < 0 {
+		t.Errorf(`.release-please-manifest.json["."] = %q, want 0.0.0 (unreleased) or >= 1.0.0`, v)
 	}
 	if want := map[string]any{"release-type": "simple", "initial-version": "1.0.0"}; !reflect.DeepEqual(config.Packages["."], want) {
 		t.Errorf(`packages["."] = %v, want %v`, config.Packages["."], want)
