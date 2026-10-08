@@ -17,7 +17,8 @@
     "minimumReleaseAge": null
   },
   "osvVulnerabilityAlerts": true,
-  "platformAutomerge": true,
+  "platformAutomerge": false,
+  "automergeStrategy": "squash",
   "prHourlyLimit": 4,
   "prConcurrentLimit": 8,
   "postUpdateOptions": ["gomodTidy"],
@@ -28,7 +29,7 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "One PR per repo for every non-major update (Go toolchain and golang image included), merged by GitHub once the required check passes.",
+      "description": "One PR per repo for every non-major update (Go toolchain and golang image included), merged by Renovate as ccf-release-bot on its next run once the required check passes.",
       "matchPackageNames": ["*"],
       "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
       "groupName": "all non-major dependencies",
