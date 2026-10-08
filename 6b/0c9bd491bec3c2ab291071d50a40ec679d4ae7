@@ -1,0 +1,6 @@
+lisa-design:
+- The board is edited from Engine.save (every run ends there), only when a content hash (the card without its update time) differs from State.Board; the hash is set only after a successful post/update, so a failed edit is retried next run and a no-op run makes no Slack call.
+- Start stores the channel ID Slack returns (chat.update rejects names) along with the board ts. A train started before this change has a plain-text parent: its first save turns that message into the board.
+- train.Slack is replaced by slackkit.API (Post/Reply/Update); cmd/train uses slackkit.Client directly, so the notify.Slack adapter is gone.
+- Digest card: posted once (Notified key "digest") from finish, before the chart issues; repos with no release or skipped are left out; highlights are the Features bullets (release-please markdown → mrkdwn: escaped, **x** → *x*, links converted), capped at 10 with "and N more". SLACK_CHANNEL_DIGESTS empty or no Slack → skipped quietly; the issue comment is unchanged.
+- Running stage = the first stage not all released/skipped.
