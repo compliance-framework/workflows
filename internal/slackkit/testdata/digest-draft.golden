@@ -1,0 +1,8 @@
+{"text":"Release digest 2026-10 (draft)","unfurl_links":false,"unfurl_media":false}
+blocks {"type":"header","text":{"type":"plain_text","text":":memo: Release digest 2026-10 (draft)","emoji":true}}
+attachment {"color":"#0969DA","fallback":"Release digest 2026-10 (draft)"}
+  blocks {"type":"context","elements":[{"type":"mrkdwn","text":":construction: Draft for review: edit it, then share it"}]}
+  blocks {"type":"section","text":{"type":"mrkdwn","text":"*Versions*"},"fields":[{"type":"mrkdwn","text":"*mock-api*\n`v1.3.2` → `v1.4.0`"},{"type":"mrkdwn","text":"*mock-ui*\nnew → `v0.1.0`"}]}
+  blocks {"type":"divider"}
+  blocks {"type":"section","text":{"type":"mrkdwn","text":"*Highlights*\n• *mock-api*: evidence streaming\n• *mock-ui*: first release"}}
+  blocks {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"mock-api changelog","emoji":true},"url":"https://github.com/compliance-framework/mock-api/releases/tag/v1.4.0","action_id":"link-0"},{"type":"button","text":{"type":"plain_text","text":"mock-ui changelog","emoji":true},"url":"https://github.com/compliance-framework/mock-ui/releases/tag/v0.1.0","action_id":"link-1"},{"type":"button","text":{"type":"plain_text","text":"Tracking issue","emoji":true},"url":"https://github.com/compliance-framework/workflows/issues/70","action_id":"link-2"}]}

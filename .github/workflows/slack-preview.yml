@@ -1,0 +1,45 @@
+name: slack-preview
+
+# Posts sample Block Kit messages, marked ":eyes: Preview", to the real CCF Slack channels so the
+# designs can be checked in Slack (docs/slack.md). The samples are built with the same cards the
+# tools post (internal/slackkit); the incident, needs-human and release samples are edited in
+# place about 10s after they are posted. Needs only SLACK_BOT_TOKEN (chat:write) and the
+# SLACK_CHANNEL_* variables; it touches no repo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      which:
+        description: The samples to post
+        type: choice
+        options: [all, ci-failures, needs-human, releases, digests]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slack-preview
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    name: preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Post the samples
+        env:
+          WHICH: ${{ inputs.which }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_CI_FAILURES: ${{ vars.SLACK_CHANNEL_CI_FAILURES }}
+          SLACK_CHANNEL_NEEDS_HUMAN: ${{ vars.SLACK_CHANNEL_NEEDS_HUMAN }}
+          SLACK_CHANNEL_RELEASES: ${{ vars.SLACK_CHANNEL_RELEASES }}
+          SLACK_CHANNEL_DIGESTS: ${{ vars.SLACK_CHANNEL_DIGESTS }}
+        run: go run ./cmd/slack-preview --which "$WHICH"

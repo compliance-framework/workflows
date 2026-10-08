@@ -4,9 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 func TestRoute(t *testing.T) {
@@ -68,28 +72,78 @@ func TestNeedsHumanKey(t *testing.T) {
 }
 
 func TestPostNeedsHuman(t *testing.T) {
-	r := Run{Repo: "o/mock-ui", ServerURL: "https://github.com", PRNumber: 13, PRTitle: "chore(deps): update typescript to v7 <major>"}
-	p := &fakePoster{}
-	rec, err := PostNeedsHuman(context.Background(), p, r, "major update", "C0HUMAN")
+	r := Run{Repo: "o/mock-ui", ServerURL: "https://github.com", PRNumber: 13, PRTitle: "chore(deps): update typescript to v7 <major>",
+		PRAuthor: "ccf-release-bot[bot]", PRCreatedAt: t0.Add(-26 * time.Hour)}
+	f := &slackkit.Fake{}
+	res := Result{Outcome: OutcomeFailure, FailedJobs: []string{"go", "required"}}
+	rec, err := PostNeedsHuman(context.Background(), f, r, res, "major update", "C0HUMAN", t0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ":raising_hand: <https://github.com/o/mock-ui/pull/13|mock-ui#13> chore(deps): update typescript to v7 &lt;major&gt; — needs a human: major update"
-	if len(p.posts) != 1 || p.posts[0].text != want || p.posts[0].channel != "C0HUMAN" || p.posts[0].threadTS != "" {
-		t.Errorf("posts = %+v, want %q", p.posts, want)
+	want := slackkit.NeedsHumanCard(slackkit.NeedsHuman{
+		Repo: "o/mock-ui", Ref: "o/mock-ui#13", URL: "https://github.com/o/mock-ui/pull/13", Title: r.PRTitle, Why: "Major update",
+		CI: ":x: Failing: go, required", OpenedBy: "ccf-release-bot[bot]", OpenedAt: r.PRCreatedAt, Now: t0,
+	})
+	if len(f.Calls) != 1 || f.Calls[0].Method != "post" || f.Calls[0].Channel != "C0HUMAN" || !reflect.DeepEqual(f.Calls[0].Message, want) {
+		t.Errorf("calls = %+v, want the card %+v", f.Calls, want)
 	}
-	if rec != (Posted{Key: NeedsHumanKey(r), Channel: "C0RESOLVED", TS: "1700000000.000100"}) {
+	if rec != (Posted{Key: NeedsHumanKey(r), Channel: "C0HUMAN", TS: "1.000001", Reason: "major update", CI: ":x: Failing: go, required"}) {
 		t.Errorf("record = %+v", rec)
 	}
 	path := filepath.Join(t.TempDir(), "rec.json")
 	if err := rec.Save(path); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), `"channel":"C0RESOLVED"`) {
+	if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), `"ts":"1.000001","reason":"major update"`) {
 		t.Errorf("saved %q, %v", data, err)
 	}
-	if _, err := PostNeedsHuman(context.Background(), p, r, "x", ""); err == nil {
+	if _, err := PostNeedsHuman(context.Background(), f, r, res, "x", "", t0); err == nil {
 		t.Error("no error without a channel")
+	}
+	for res, want := range map[Outcome]string{OutcomeSuccess: ":white_check_mark: Passing", OutcomeFailure: ":x: Failing", OutcomeNone: ":grey_question: Cancelled or skipped"} {
+		if got := ciStatus(Result{Outcome: res}); got != want {
+			t.Errorf("ciStatus(%s) = %q, want %q", res, got, want)
+		}
+	}
+}
+
+func TestMarkHandled(t *testing.T) {
+	r := Run{Repo: "o/mock-ui", ServerURL: "https://github.com", PRNumber: 13, PRTitle: "chore(deps): x", PRAuthor: "ccf-release-bot[bot]",
+		PRCreatedAt: t0.Add(-26 * time.Hour), PRClosed: true, PRMerged: true, PRClosedBy: "octocat"}
+	rec := Posted{Key: NeedsHumanKey(r), Channel: "C0HUMAN", TS: "1.5", Reason: "major update", CI: ":white_check_mark: Passing"}
+	f := &slackkit.Fake{}
+	if err := MarkHandled(context.Background(), f, rec, r, t0); err != nil {
+		t.Fatal(err)
+	}
+	want := slackkit.NeedsHumanCard(slackkit.NeedsHuman{
+		Repo: "o/mock-ui", Ref: "o/mock-ui#13", URL: "https://github.com/o/mock-ui/pull/13", Title: "chore(deps): x", Why: "Major update",
+		CI: ":white_check_mark: Passing", OpenedBy: "ccf-release-bot[bot]", OpenedAt: r.PRCreatedAt, Handled: "merged", HandledBy: "octocat", HandledAt: t0,
+	})
+	if len(f.Calls) != 1 || f.Calls[0].Method != "update" || f.Calls[0].Channel != "C0HUMAN" || f.Calls[0].TS != "1.5" || !reflect.DeepEqual(f.Calls[0].Message, want) {
+		t.Errorf("calls = %+v, want an update to %+v", f.Calls, want)
+	}
+	if err := MarkHandled(context.Background(), f, Posted{}, r, t0); err != nil || len(f.Calls) != 1 {
+		t.Errorf("no record: err %v, calls %+v", err, f.Calls)
+	}
+
+	path := filepath.Join(t.TempDir(), "rec.json")
+	if got, err := LoadPosted(path, rec.Key); err != nil || got != (Posted{}) {
+		t.Errorf("missing record: %+v, %v", got, err)
+	}
+	if err := rec.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := LoadPosted(path, rec.Key); err != nil || got != rec {
+		t.Errorf("LoadPosted = %+v, %v; want %+v", got, err, rec)
+	}
+	if _, err := LoadPosted(path, "other"); err == nil {
+		t.Error("a record for another key loads")
+	}
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPosted(path, rec.Key); err == nil {
+		t.Error("a broken record loads")
 	}
 }
 
@@ -99,6 +153,16 @@ func TestRunFromEnvClosed(t *testing.T) {
 			`{"pull_request":{"number":5,"state":`+state+`,"user":{"login":"renovate[bot]"},"head":{"ref":"renovate/x","sha":"2"}}}`))
 		if err != nil || r.PRClosed != want {
 			t.Errorf("state %s: PRClosed = %t, %v; want %t", state, r.PRClosed, err, want)
+		}
+	}
+	for event, want := range map[string]Run{
+		`"merged":true,"merged_by":{"login":"octocat"}},"sender":{"login":"ccf-release-bot[bot]"}`: {PRMerged: true, PRClosedBy: "octocat"},
+		`"merged":false,"merged_by":null},"sender":{"login":"hubot"}`:                              {PRClosedBy: "hubot"},
+	} {
+		r, err := RunFromEnv(getenv(t, "pull_request", "refs/pull/5/merge",
+			`{"pull_request":{"number":5,"state":"closed","user":{"login":"renovate[bot]"},"head":{"ref":"renovate/x","sha":"2"},`+event+`}`))
+		if err != nil || r.PRMerged != want.PRMerged || r.PRClosedBy != want.PRClosedBy {
+			t.Errorf("%s: merged %t by %q, %v; want %+v", event, r.PRMerged, r.PRClosedBy, err, want)
 		}
 	}
 }

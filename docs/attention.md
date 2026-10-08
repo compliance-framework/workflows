@@ -31,9 +31,9 @@ posts a tracked bot PR to the `SLACK_CHANNEL_NEEDS_HUMAN` channel, once per PR, 
   channel instead of a CI incident in `SLACK_CHANNEL_CI_FAILURES` (an incident still opens when
   other jobs failed too). `release-checks` itself stays read-only: it never labels or comments.
 
-```text
-:raising_hand: mock-ui#13 chore(deps): update typescript to v7 — needs a human: major update
-```
+The post is a card: "Needs a human · mock-ui", the PR (`compliance-framework/mock-ui#13`, linked)
+and its title, fields Why / CI / Opened by / Waiting, and a Review PR button
+([notify.md](notify.md#needs-a-human)).
 
 Human PRs are never posted.
 
@@ -54,18 +54,20 @@ listing every open PR of the manifest's repos (this `workflows` repo included) t
   at the head against the base and the PR lacks the label (what version-guard checks), else
   `release-checks / release-checks failed`.
 
+The post is a Block Kit card ([slack.md](slack.md)) with an amber bar: the header ":raising_hand:
+2 PRs need a human", then one compact section per repo, in manifest order, with a line per PR:
+
 ```text
-:raising_hand: 2 PRs need a human
-*mock-ui*
-• mock-ui#13 chore(deps): update typescript to v7 · labelled needs-human, open over 7d · 9d
-*workflows*
-• workflows#52 chore(main): release 2.0.0 · needs release:major-approved (.: v1.4.0 -> v2.0.0) · 3d
-run
+compliance-framework/mock-ui
+• compliance-framework/mock-ui#13 chore(deps): update typescript to v7 · labelled needs-human, open over 7d · 9d
+compliance-framework/workflows
+• compliance-framework/workflows#52 chore(main): release 2.0.0 · needs release:major-approved (.: v1.4.0 -> v2.0.0) · 3d
 ```
 
-Each line is `<url|repo#n> title · reasons · age`, grouped by repo in manifest order. With no PR to
-list it posts nothing (the run log says so). A repo or PR it could not read is listed under
-"Could not read" and fails the run, after posting.
+Each line is `<url|owner/repo#n> title · reasons · age`. A context line at the end says what could
+not be read and links the run. With no PR to list it posts nothing (the run log says so). A repo or
+PR it could not read is listed under "Could not read" and fails the run, after posting. The run log
+(and a dry run) prints the same digest as text.
 
 | Input (`workflow_dispatch`) | Default | What |
 | --- | --- | --- |

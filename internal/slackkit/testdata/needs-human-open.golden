@@ -1,0 +1,6 @@
+{"text":"Needs a human: compliance-framework/mock-agent#34 fix(deps): update module github.com/compliance-framework/mock-api to v2","unfurl_links":false,"unfurl_media":false}
+blocks {"type":"header","text":{"type":"plain_text","text":":raising_hand: Needs a human · mock-agent","emoji":true}}
+attachment {"color":"#BF8700","fallback":"Needs a human: compliance-framework/mock-agent#34 fix(deps): update module github.com/compliance-framework/mock-api to v2"}
+  blocks {"type":"section","text":{"type":"mrkdwn","text":"*<https://github.com/compliance-framework/mock-agent/pull/34|compliance-framework/mock-agent#34>* fix(deps): update module github.com/compliance-framework/mock-api to v2"}}
+  blocks {"type":"section","fields":[{"type":"mrkdwn","text":"*Why*\nRenovate major update"},{"type":"mrkdwn","text":"*CI*\n:white_check_mark: Passing"},{"type":"mrkdwn","text":"*Opened by*\nccf-release-bot[bot]"},{"type":"mrkdwn","text":"*Waiting*\n2d 3h"}]}
+  blocks {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"Review PR","emoji":true},"url":"https://github.com/compliance-framework/mock-agent/pull/34","action_id":"link-0","style":"primary"}]}

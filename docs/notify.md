@@ -12,10 +12,12 @@ A run is tracked when:
   `renovate/` or `ccf-bump/` (a pull request, or a push to that branch);
 - (b) it's for a push to the default branch.
 
-Every other run (a human's PR, a push to another branch, a tag, a schedule) does nothing, and
-so does a run for a closed pull request, merged or not (the event payload's `pull_request.state`
-is `closed`): release-please relabels its PR after the merge, and that re-runs CI on a PR no one
-can act on. It opens no incident, posts no reply and is never posted as needing a human.
+Every other run (a human's PR, a push to another branch, a tag, a schedule) does nothing. A run
+for a closed pull request, merged or not (the event payload's `pull_request.state` is `closed`),
+runs no failure logic whatever its result: it opens no incident, posts no failure or recovery and
+is never posted as needing a human (release-please relabels its PR after the merge, and that
+re-runs CI on a PR no one can act on). For a PR that rule (a) tracked, it only closes what is
+still open, see [Closed PRs](#closed-prs).
 
 ## Incidents
 
@@ -30,24 +32,28 @@ skips) it's a pass.
 
 | Result | Incident | Posts | Then |
 | --- | --- | --- | --- |
-| failure | none, or closed | a top-level message in the channel | open, with the message's `ts` |
+| failure | none, or closed | a top-level card in the channel (Failing) | open, with the card's `ts` |
 | failure | open, same commit and failed jobs | nothing (a re-run) | unchanged |
-| failure | open, another commit or other failed jobs | a reply in the thread | open |
-| pass | open | `✅ passing again` in the thread | closed: the next failure starts a new thread |
+| failure | open, another commit or other failed jobs | a reply in the thread, and the card edited to Failing again | open |
+| pass | open | `✅ passing again` in the thread, and the card edited to Resolved | closed: the next failure starts a new card |
 | pass | none, or closed | nothing | unchanged |
 | cancelled / all skipped | any | nothing | unchanged |
 
-Messages (Slack mrkdwn; the short SHA links to the commit, `run` to the run):
+The top-level message is a Block Kit card (`slackkit.IncidentCard`, [slack.md](slack.md)):
+a red bar while failing and green once resolved; the header `CI failing · <repo>` (or `failing
+again`, `resolved`); the fully qualified PR (`owner/repo#N`, linked) and its title, or
+`owner/repo@<branch>` for a push; fields Status, Workflow, Opened at (the commit the incident
+opened at, and when), Resolved (when, and after how long) and Failed jobs (the latest
+failure's, struck through once resolved); buttons View PR and Latest run. Every transition
+replies in the thread first and then edits the card with `chat.update`. If the edit fails
+(say, the message was deleted), the job logs a warning and still saves the state, so the reply
+is not posted twice.
+
+Thread replies (Slack mrkdwn; the short SHA links to the commit, `run` to the run):
 
 ```text
-❌ compliance-framework/mock-api PR #12 failed: ci, release-checks at 2222222 · run
-Pull request #12 chore(deps): bump x · workflow ci
-
-❌ compliance-framework/mock-api main failed: ci at abc1234 · run
-workflow ci
-
-❌ failed: ci at 3333333 · run                (a reply)
-✅ passing again at 4444444 · run             (a reply)
+❌ failed: ci at 3333333 · run
+✅ passing again at 4444444 · run
 ```
 
 The commit is the PR head for pull requests (not the test merge commit), so re-runs after
@@ -55,8 +61,10 @@ the base moves count as the same commit.
 
 ## State
 
-The state of an incident (`channel`, the top-level message `ts`, `open`, the last posted
-commit and failed jobs) is a small JSON file kept in the Actions cache:
+The state of an incident (`channel`, the card's `ts`, `open`, the last posted commit and failed
+jobs, and for the card `opened_sha`, `opened_at`, `again` and `resolved_at`) is a small JSON file
+kept in the Actions cache. A state saved before the cards lacks the card fields, and its card
+shows the last commit instead and no times:
 
 - the key is `ccf-notify-incident-<hash of the incident key>-<run id>-<run attempt>`, so
   every save is a new entry;
@@ -70,7 +78,8 @@ read. A PR's key never matches `main`'s, so PRs don't pick up `main`'s incident.
 
 Replies go to the incident's own channel; the `channel` input only picks where new incidents
 start. No GitHub permission beyond `contents: read` and no Slack scope beyond `chat:write`
-(replies are `chat.postMessage` with `thread_ts`).
+(replies are `chat.postMessage` with `thread_ts`; the bot edits its own cards with
+`chat.update`).
 
 Limits:
 
@@ -92,30 +101,52 @@ For a `pull_request` run tracked by rule (a) (`notify.Route`):
 
 | The PR | Posts to `SLACK_CHANNEL_NEEDS_HUMAN` | Incident |
 | --- | --- | --- |
-| carries the `needs-human` label (in the event payload) | `needs a human: <reason>`: `major update` (`renovate/*`), `OPA update in the api (never auto-merged)` (`renovate/opa`), `auto-merge off (...)` (`ccf-bump/*`), or `labelled needs-human` | as usual |
-| a release-please PR (`release-please--*`) whose `release-checks` job failed | `release PR blocked by release-checks (e.g. needs release:major-approved, or an internal dep isn't final)` | none when `release-checks` is the only failed job (the incident sees the run as cancelled and stays as it is); as usual when other jobs failed too |
+| carries the `needs-human` label (in the event payload) | Why: `Major update` (`renovate/*`), `OPA update in the api (never auto-merged)` (`renovate/opa`), `Auto-merge off (...)` (`ccf-bump/*`), or `Labelled needs-human` | as usual |
+| a release-please PR (`release-please--*`) whose `release-checks` job failed | Why: `Release PR blocked by release-checks (e.g. needs release:major-approved, or an internal dep isn't final)` | none when `release-checks` is the only failed job (the incident sees the run as cancelled and stays as it is); as usual when other jobs failed too |
 | anything else, or a human's PR | nothing | as usual |
 
-```text
-:raising_hand: mock-ui#13 chore(deps): update typescript to v7 — needs a human: major update
-```
+The post is a card (`slackkit.NeedsHumanCard`, amber bar): the PR (`owner/repo#N`, linked) and
+its title, fields Why, CI (the run's result: passing, or the failed jobs), Opened by and Waiting
+(since the PR was opened), and a Review PR button. The record saved for it keeps the card's
+channel, `ts`, reason and CI, to edit the card later.
 
-Once per PR: the job looks up the cache key `ccf-notify-needs-human-<hash of repo + PR>`
-(`lookup-only`), posts only on a miss, and then saves a small record under that key. Re-runs,
+Once per PR: the job restores the cache key `ccf-notify-needs-human-<hash of repo + PR>`, posts
+only on a miss, and then saves a small record under that key. Re-runs,
 pushes and other workflows of the same PR find it and post nothing. Like incident state, the
 record is evicted after 7 days without use, so a PR idle for a week may be posted again; two
 runs of one PR finishing at the same moment may both post. The weekly
 [attention digest](attention.md) lists every PR still waiting either way.
 
 The callers must run CI on `labeled` (`pull_request` `types: [opened, edited, synchronize,
-reopened, labeled, unlabeled]`, as every mock and the caller templates do), because Renovate and
+reopened, labeled, unlabeled, closed]`, see [Calling it](#calling-it)), because Renovate and
 ccf-bump add the label after opening the PR: the `labeled` run is the one that sees it. The job's
 `needs` must include the `release-checks` job under that name.
+
+## Closed PRs
+
+Callers add `closed` to their `pull_request` types (below). The CI jobs of the kind workflows
+skip on a closed PR, so only this job does anything, and for a PR that rule (a) tracked it runs
+`notify closed` instead of the failure logic:
+
+| Open item | Becomes |
+| --- | --- |
+| the PR's needs-human card | edited to Handled (green when merged, grey when closed): "Merged by <actor>" or "Closed by <actor>", and how long it waited |
+| an open incident on the PR | a reply `⚪ PR merged by <actor>; incident closed` in its thread, the card edited to "Closed (PR merged)" or "Closed (PR closed)" (grey bar, failed jobs struck through), and the incident closed |
+
+The actor is the PR's `merged_by`, or the event's `sender` for a PR closed without merging.
+Nothing open, nothing posted. Card edits that fail are warnings, as for incidents; a reply that
+fails fails the job. A closed PR whose needs-human record was evicted (7 days idle) keeps its
+card as it was.
 
 ## Calling it
 
 ```yaml
-# in the consuming repo's ci.yml, after the CI jobs
+# in the consuming repo's ci.yml
+on:
+  pull_request:
+    # labeled: the needs-human label; closed: mark the PR's cards handled / closed.
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled, closed]
+# ... the CI jobs, then:
   notify:
     needs: [ci, release-checks]  # every job whose failure should notify
     if: always()

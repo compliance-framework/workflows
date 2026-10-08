@@ -9,9 +9,12 @@
 //
 // A run for a closed pull request (merged or not) is never tracked: release-please relabels its
 // release PR after the merge, and a labeled event re-runs CI on a PR no one can act on any more.
+// Such a run only closes what is still open for the PR (ClosedReason, HandleClosed and
+// MarkHandled): its incident card and its needs-human card.
 //
-// A failed tracked run opens an incident (a top-level Slack message) or, while one is open,
-// replies in its thread; a passing run closes it with a reply. See Handle.
+// A failed tracked run opens an incident (a top-level Slack card) or, while one is open,
+// replies in its thread and edits the card; a passing run closes it with a reply and marks
+// the card resolved. See Handle.
 package notify
 
 import (
@@ -23,6 +26,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ReleaseBotLogin is the author of release PRs (release-please, ccf-bump).
@@ -56,8 +60,11 @@ type Run struct {
 	PRNumber      int
 	PRTitle       string
 	PRAuthor      string
-	PRNeedsHuman  bool // the PR carries NeedsHumanLabel (from the event payload)
-	PRClosed      bool // the PR is closed, merged or not (from the event payload)
+	PRCreatedAt   time.Time // when the PR was opened (from the event payload)
+	PRNeedsHuman  bool      // the PR carries NeedsHumanLabel (from the event payload)
+	PRClosed      bool      // the PR is closed, merged or not (from the event payload)
+	PRMerged      bool      // the closed PR was merged
+	PRClosedBy    string    // who merged or closed it: merged_by, else the event's sender
 }
 
 // RunFromEnv builds a Run from a workflow step's GITHUB_* variables and the event payload
@@ -86,10 +93,11 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 
 	var ev struct {
 		PullRequest *struct {
-			Number int    `json:"number"`
-			Title  string `json:"title"`
-			State  string `json:"state"`
-			User   struct {
+			Number    int       `json:"number"`
+			Title     string    `json:"title"`
+			State     string    `json:"state"`
+			CreatedAt time.Time `json:"created_at"`
+			User      struct {
 				Login string `json:"login"`
 			} `json:"user"`
 			Head struct {
@@ -99,7 +107,14 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 			Labels []struct {
 				Name string `json:"name"`
 			} `json:"labels"`
+			Merged   bool `json:"merged"`
+			MergedBy *struct {
+				Login string `json:"login"`
+			} `json:"merged_by"`
 		} `json:"pull_request"`
+		Sender struct {
+			Login string `json:"login"`
+		} `json:"sender"`
 		Repository struct {
 			DefaultBranch string `json:"default_branch"`
 		} `json:"repository"`
@@ -119,7 +134,14 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 	}
 	if pr := ev.PullRequest; pr != nil {
 		r.PRNumber, r.PRTitle, r.PRAuthor, r.Branch = pr.Number, pr.Title, pr.User.Login, pr.Head.Ref
-		r.PRClosed = pr.State == "closed"
+		r.PRCreatedAt = pr.CreatedAt
+		r.PRClosed, r.PRMerged = pr.State == "closed", pr.Merged
+		if r.PRClosed {
+			r.PRClosedBy = ev.Sender.Login
+			if pr.MergedBy != nil && pr.MergedBy.Login != "" {
+				r.PRClosedBy = pr.MergedBy.Login
+			}
+		}
 		for _, l := range pr.Labels {
 			r.PRNeedsHuman = r.PRNeedsHuman || l.Name == NeedsHumanLabel
 		}
@@ -134,17 +156,39 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 	return r, nil
 }
 
+// PRURL is the run's pull request on GitHub.
+func (r Run) PRURL() string {
+	return fmt.Sprintf("%s/%s/pull/%d", r.ServerURL, r.Repo, r.PRNumber)
+}
+
 // Decide returns why the run r is tracked, or ReasonNone. A run for a closed pull request is
 // not tracked, so it opens no incident, posts no reply and is never posted as needing a human.
 func Decide(r Run) Reason {
+	if isPR(r) && r.PRClosed {
+		return ReasonNone
+	}
+	return track(r)
+}
+
+// ClosedReason returns, for a run for a closed pull request, why the PR's runs were tracked
+// while it was open; ReasonNone for any other run. Such a run closes the PR's open items.
+func ClosedReason(r Run) Reason {
+	if !isPR(r) || !r.PRClosed {
+		return ReasonNone
+	}
+	return track(r)
+}
+
+func isPR(r Run) bool { return r.EventName == "pull_request" || r.EventName == "pull_request_target" }
+
+// track is Decide without the closed-PR rule.
+func track(r Run) Reason {
 	automation := false
 	for _, p := range AutomationBranchPrefixes {
 		automation = automation || strings.HasPrefix(r.Branch, p)
 	}
 	switch {
-	case (r.EventName == "pull_request" || r.EventName == "pull_request_target") && r.PRClosed:
-		return ReasonNone
-	case r.EventName == "pull_request" || r.EventName == "pull_request_target":
+	case isPR(r):
 		if r.PRAuthor == ReleaseBotLogin {
 			return ReasonReleaseBotPR
 		}

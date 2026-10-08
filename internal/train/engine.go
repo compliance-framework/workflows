@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/compliance-framework/workflows/internal/manifest"
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 // The head branch prefix of release-please PRs, and the release-please manifest.
@@ -26,14 +27,15 @@ const issueHelp = "Updated by `train.yml` (cmd/train, docs/train.md). Org owners
 type Engine struct {
 	Repos   Repos
 	Tracker Tracker
-	Members Members // nil: commands are refused, since no one's role can be checked
-	Slack   Slack   // nil: messages are only logged
+	Members Members      // nil: commands are refused, since no one's role can be checked
+	Slack   slackkit.API // nil: messages are only logged
 	Bumper  Bumper
 	// Load reads a manifest; the train's own path is in its state.
 	Load func(path string) (*manifest.Manifest, error)
 
 	ReposURL              string // web URL of the repos' owner (https://github.com/<owner>), for PR links
-	Channel               string // Slack channel for new trains
+	Channel               string // Slack channel for new trains (#ccf-releases)
+	DigestChannel         string // Slack channel for the finished train's digest draft; "" skips it
 	RequiredCheck         string // a check every merged PR must pass, e.g. "ci / required"
 	ReleasePleaseWorkflow string // file name of the repos' release-please workflow
 	RunURL                string // this workflow run, linked from failure messages
@@ -201,31 +203,38 @@ func (s *State) released(stage int) map[string]string {
 	return sets
 }
 
-// post posts text to the train's thread (or a new message when threadTS is ""), and logs it.
-func (e *Engine) post(ctx context.Context, st *State, threadTS, text string) (string, error) {
-	e.logf("slack: %s", text)
+// post posts m to the train's thread (or as a new message when threadTS is ""), and logs it.
+func (e *Engine) post(ctx context.Context, st *State, threadTS string, m slackkit.Message) (slackkit.Posted, error) {
+	e.logf("slack: %s", m.Text)
 	if e.Slack == nil || st.Channel == "" {
-		return "", errors.New("no Slack channel")
+		return slackkit.Posted{}, errors.New("no Slack channel")
 	}
-	ts, err := e.Slack.Post(ctx, st.Channel, text, threadTS)
+	var p slackkit.Posted
+	var err error
+	if threadTS == "" {
+		p, err = e.Slack.Post(ctx, st.Channel, m)
+	} else {
+		p, err = e.Slack.Reply(ctx, st.Channel, threadTS, m)
+	}
 	if err != nil {
 		e.logf("::warning::posting to Slack failed: %v", err)
 	}
-	return ts, err
+	return p, err
 }
 
-// notify posts text in the train's thread once per key.
+// notify posts text in the train's thread, as a small card, once per key.
 func (e *Engine) notify(ctx context.Context, st *State, key, text string) {
 	if slices.Contains(st.Notified, key) {
 		return
 	}
-	if _, err := e.post(ctx, st, st.ThreadTS, text); err == nil || e.Slack == nil || st.Channel == "" {
+	if _, err := e.post(ctx, st, st.ThreadTS, slackkit.Note(text)); err == nil || e.Slack == nil || st.Channel == "" {
 		st.MarkNotified(key)
 	}
 }
 
 // save writes the state and the table to the issue, closing it once the train is over.
 func (e *Engine) save(ctx context.Context, is Issue, st *State) error {
+	e.updateBoard(ctx, is, st)
 	body, err := Render(st, e.ReposURL, issueHelp)
 	if err != nil {
 		return err

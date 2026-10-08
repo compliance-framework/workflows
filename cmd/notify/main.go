@@ -8,6 +8,12 @@
 //	                    say, write the next state there and save=true|false to $GITHUB_OUTPUT
 //	notify needs-human  post the run's PR to NEEDS_HUMAN_CHANNEL, write the record to
 //	                    $NEEDS_HUMAN_STATE_FILE and save=true|false to $GITHUB_OUTPUT
+//	notify closed       for a closed PR: mark its needs-human card (record at
+//	                    $NEEDS_HUMAN_STATE_FILE) handled, close its open incident (state at
+//	                    $STATE_FILE), and write save=true|false to $GITHUB_OUTPUT
+//
+// plan also writes closed=true|false: a run for a closed tracked PR does no failure logic,
+// and only closed acts on it.
 //
 // NEEDS_HUMAN_CHANNEL (the SLACK_CHANNEL_NEEDS_HUMAN variable) turns on the needs-human rule,
 // which takes a release PR's release-checks failure away from the incidents (notify.Route);
@@ -25,8 +31,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/compliance-framework/workflows/internal/notify"
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 func main() {
@@ -44,8 +52,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return post(ctx, getenv, stdout)
 	case len(args) == 1 && args[0] == "needs-human":
 		return needsHuman(ctx, getenv, stdout)
+	case len(args) == 1 && args[0] == "closed":
+		return closed(ctx, getenv, stdout)
 	}
-	return errors.New("usage: notify plan | notify post | notify needs-human")
+	return errors.New("usage: notify plan | notify post | notify needs-human | notify closed")
 }
 
 func plan(getenv func(string) string, stdout io.Writer) error {
@@ -56,10 +66,13 @@ func plan(getenv func(string) string, stdout io.Writer) error {
 	res, human := notify.Route(r, res, getenv("NEEDS_HUMAN_CHANNEL") != "")
 	reason := notify.Decide(r)
 	track := reason != notify.ReasonNone && res.Outcome != notify.OutcomeNone
-	fmt.Fprintf(stdout, "%s %s on %q at %s: reason %q, outcome %s, failed jobs %v, incident %s, needs a human: %q\n",
-		r.Workflow, r.EventName, r.Branch, r.SHA, reason, res.Outcome, res.FailedJobs, notify.IncidentKey(r), human)
-	return writeOutputs(getenv, fmt.Sprintf("notify=%t\nreason=%s\nkey=%s\nrestore-key=%s\nneeds-human=%t\nneeds-human-key=%s\n",
-		track, reason, notify.StateKey(r), notify.IncidentKey(r), human != "", notify.NeedsHumanKey(r)))
+	// A closed tracked PR restores its incident and needs-human record for closed to update.
+	closed := notify.ClosedReason(r) != notify.ReasonNone
+	fmt.Fprintf(stdout, "%s %s on %q at %s: reason %q, outcome %s, failed jobs %v, incident %s, needs a human: %q, closed PR: %t\n",
+		r.Workflow, r.EventName, r.Branch, r.SHA, reason, res.Outcome, res.FailedJobs, notify.IncidentKey(r), human, closed)
+	return writeOutputs(getenv, fmt.Sprintf("notify=%t\nreason=%s\nkey=%s\nrestore-key=%s\nneeds-human=%t\nneeds-human-key=%s\nclosed=%t\n",
+		track || closed, reason, notify.StateKey(r), notify.IncidentKey(r), human != "" || closed && getenv("NEEDS_HUMAN_CHANNEL") != "",
+		notify.NeedsHumanKey(r), closed))
 }
 
 func post(ctx context.Context, getenv func(string) string, stdout io.Writer) error {
@@ -86,8 +99,12 @@ func post(ctx context.Context, getenv func(string) string, stdout io.Writer) err
 	if err != nil {
 		fmt.Fprintf(stdout, "ignoring the restored incident state: %v\n", err)
 	}
-	slack := &notify.Slack{BaseURL: envOr(getenv, "SLACK_API_URL", "https://slack.com/api"), Token: token}
-	next, action, err := notify.Handle(ctx, slack, key, prev, r, res, getenv("SLACK_CHANNEL"))
+	next, action, err := notify.Handle(ctx, slackClient(getenv, token), key, prev, r, res, getenv("SLACK_CHANNEL"), time.Now().UTC())
+	if cardErr := (*notify.CardError)(nil); errors.As(err, &cardErr) {
+		// The reply is posted; save the state so it isn't posted twice.
+		fmt.Fprintf(stdout, "::warning::%v\n", cardErr)
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -122,8 +139,7 @@ func needsHuman(ctx context.Context, getenv func(string) string, stdout io.Write
 		fmt.Fprintln(stdout, "this PR doesn't need a human; nothing to post")
 		return writeOutputs(getenv, "save=false\n")
 	}
-	slack := &notify.Slack{BaseURL: envOr(getenv, "SLACK_API_URL", "https://slack.com/api"), Token: token}
-	rec, err := notify.PostNeedsHuman(ctx, slack, r, reason, channel)
+	rec, err := notify.PostNeedsHuman(ctx, slackClient(getenv, token), r, res, reason, channel, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -132,6 +148,62 @@ func needsHuman(ctx context.Context, getenv func(string) string, stdout io.Write
 		return err
 	}
 	return writeOutputs(getenv, "save=true\n")
+}
+
+// closed updates a closed tracked PR's open items: its needs-human card becomes handled, and
+// an open incident gets a reply and its card closed. Card edits that fail are warnings, as in
+// post; a failed reply fails.
+func closed(ctx context.Context, getenv func(string) string, stdout io.Writer) error {
+	token := getenv("SLACK_BOT_TOKEN")
+	if token == "" {
+		fmt.Fprintln(stdout, "SLACK_BOT_TOKEN is not set; nothing to update")
+		return writeOutputs(getenv, "save=false\n")
+	}
+	statePath := getenv("STATE_FILE")
+	if statePath == "" {
+		return errors.New("STATE_FILE is not set")
+	}
+	r, err := notify.RunFromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	if notify.ClosedReason(r) == notify.ReasonNone {
+		fmt.Fprintln(stdout, "not a tracked closed PR; nothing to update")
+		return writeOutputs(getenv, "save=false\n")
+	}
+	api, now := slackClient(getenv, token), time.Now().UTC()
+	if path := getenv("NEEDS_HUMAN_STATE_FILE"); path != "" {
+		rec, err := notify.LoadPosted(path, notify.NeedsHumanKey(r))
+		if err == nil {
+			err = notify.MarkHandled(ctx, api, rec, r, now)
+		}
+		if err != nil {
+			fmt.Fprintf(stdout, "::warning::marking the needs-human card handled: %v\n", err)
+		} else if rec.TS != "" {
+			fmt.Fprintf(stdout, "needs-human card %s in %s marked handled\n", rec.TS, rec.Channel)
+		}
+	}
+	key := notify.IncidentKey(r)
+	prev, err := notify.LoadIncident(statePath, key)
+	if err != nil {
+		fmt.Fprintf(stdout, "ignoring the restored incident state: %v\n", err)
+	}
+	next, action, err := notify.HandleClosed(ctx, api, prev, r, now)
+	if cardErr := (*notify.CardError)(nil); errors.As(err, &cardErr) {
+		fmt.Fprintf(stdout, "::warning::%v\n", cardErr)
+		err = nil
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "incident: %s\n", action)
+	save := action == notify.ActionClose
+	if save {
+		if err := next.Save(statePath); err != nil {
+			return err
+		}
+	}
+	return writeOutputs(getenv, fmt.Sprintf("save=%t\n", save))
 }
 
 // load reads the run and its result.
@@ -157,9 +229,6 @@ func writeOutputs(getenv func(string) string, lines string) error {
 	return errors.Join(err, f.Close())
 }
 
-func envOr(getenv func(string) string, name, def string) string {
-	if v := getenv(name); v != "" {
-		return v
-	}
-	return def
+func slackClient(getenv func(string) string, token string) *slackkit.Client {
+	return &slackkit.Client{BaseURL: getenv("SLACK_API_URL"), Token: token}
 }

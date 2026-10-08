@@ -14,7 +14,7 @@ import (
 )
 
 // setup returns the step environment for a run, with a fake Slack server, and the
-// messages it receives. Each message gets a new ts.
+// calls it receives (each body with its "method" added). Each call returns a new ts.
 func setup(t *testing.T, eventName, ref, event string) (map[string]string, *[]map[string]any) {
 	t.Helper()
 	dir := t.TempDir()
@@ -23,11 +23,12 @@ func setup(t *testing.T, eventName, ref, event string) (map[string]string, *[]ma
 	}
 	posts := &[]map[string]any{}
 	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chat.postMessage" || r.Header.Get("Authorization") != "Bearer xoxb-test" {
+		if (r.URL.Path != "/chat.postMessage" && r.URL.Path != "/chat.update") || r.Header.Get("Authorization") != "Bearer xoxb-test" {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		body["method"] = strings.TrimPrefix(r.URL.Path, "/")
 		*posts = append(*posts, body)
 		_, _ = fmt.Fprintf(w, `{"ok":true,"channel":"C0CIFAIL","ts":"1700000000.%06d"}`, len(*posts))
 	}))
@@ -128,9 +129,9 @@ func TestIncidentLifecycle(t *testing.T) {
 		t.Fatalf("posts = %v", *posts)
 	}
 
-	step("aaaaaaaaaa", failed, "true") // failure, no incident: a new thread
-	if len(*posts) != 1 || (*posts)[0]["thread_ts"] != nil || (*posts)[0]["channel"] != "C0CIFAIL" ||
-		!strings.HasPrefix(text(0), "❌ o/r PR #5 failed: ci at <https://github.com/o/r/commit/aaaaaaaaaa|aaaaaaa>") {
+	step("aaaaaaaaaa", failed, "true") // failure, no incident: a new card
+	if len(*posts) != 1 || (*posts)[0]["thread_ts"] != nil || (*posts)[0]["channel"] != "C0CIFAIL" || text(0) != "CI failing: o/r#5 ci" ||
+		(*posts)[0]["attachments"] == nil {
 		t.Fatalf("posts = %v", *posts)
 	}
 
@@ -139,23 +140,63 @@ func TestIncidentLifecycle(t *testing.T) {
 		t.Fatalf("a re-run posted again: %v", (*posts)[1:])
 	}
 
-	step("bbbbbbbbbb", failed, "true") // a new commit fails: a reply in the thread
-	if len(*posts) != 2 || (*posts)[1]["thread_ts"] != "1700000000.000001" ||
-		!strings.HasPrefix(text(1), "❌ failed: ci at <https://github.com/o/r/commit/bbbbbbbbbb|bbbbbbb>") {
+	// A new commit fails: a reply in the thread, and the card edited in place.
+	step("bbbbbbbbbb", failed, "true")
+	if len(*posts) != 3 || (*posts)[1]["thread_ts"] != "1700000000.000001" ||
+		!strings.HasPrefix(text(1), "❌ failed: ci at <https://github.com/o/r/commit/bbbbbbbbbb|bbbbbbb>") ||
+		(*posts)[2]["method"] != "chat.update" || (*posts)[2]["ts"] != "1700000000.000001" || text(2) != "CI failing again: o/r#5 ci" {
 		t.Fatalf("posts = %v", (*posts)[1:])
 	}
 
-	step("cccccccccc", passed, "true") // a pass: the recovery in the thread
-	if len(*posts) != 3 || (*posts)[2]["thread_ts"] != "1700000000.000001" ||
-		!strings.HasPrefix(text(2), "✅ passing again at <https://github.com/o/r/commit/cccccccccc|ccccccc>") {
-		t.Fatalf("posts = %v", (*posts)[2:])
+	step("cccccccccc", passed, "true") // a pass: the recovery in the thread, the card resolved
+	if len(*posts) != 5 || (*posts)[3]["thread_ts"] != "1700000000.000001" ||
+		!strings.HasPrefix(text(3), "✅ passing again at <https://github.com/o/r/commit/cccccccccc|ccccccc>") ||
+		(*posts)[4]["method"] != "chat.update" || text(4) != "CI resolved: o/r#5 ci" {
+		t.Fatalf("posts = %v", (*posts)[3:])
 	}
 
 	step("dddddddddd", passed, "false") // another pass: nothing
-	step("eeeeeeeeee", failed, "true")  // failing again: a new thread
-	if len(*posts) != 4 || (*posts)[3]["thread_ts"] != nil || !strings.HasPrefix(text(3), "❌ o/r PR #5 failed: ci at ") {
-		t.Fatalf("posts = %v", (*posts)[3:])
+	step("eeeeeeeeee", failed, "true")  // failing again: a new card
+	if len(*posts) != 6 || (*posts)[5]["thread_ts"] != nil || (*posts)[5]["method"] != "chat.postMessage" || text(5) != "CI failing: o/r#5 ci" {
+		t.Fatalf("posts = %v", (*posts)[5:])
 	}
+}
+
+// TestCardEditFailureStillSaves: when chat.update fails after the reply, the state is saved
+// anyway, so the reply isn't posted again.
+func TestCardEditFailureStillSaves(t *testing.T) {
+	env, _ := setup(t, "pull_request", "refs/pull/5/merge", renovatePR("bbbbbbbbbb"))
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat.update" {
+			_, _ = w.Write([]byte(`{"ok":false,"error":"message_not_found"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"channel":"C0CIFAIL","ts":"1700000000.000009"}`))
+	}))
+	defer failing.Close()
+	env["SLACK_API_URL"], env["NEEDS"] = failing.URL, failed
+	open := `{"key":"` + incidentKey(t, env) + `","channel":"C0CIFAIL","ts":"1.1","open":true,"sha":"aaaaaaaaaa","failed_jobs":["ci"]}`
+	if err := os.WriteFile(env["STATE_FILE"], []byte(open), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := runCmd(t, env, "post")
+	if err != nil || !strings.Contains(stdout, "::warning::updating the incident card: chat.update: message_not_found") {
+		t.Fatalf("stdout %q, err %v", stdout, err)
+	}
+	if out := outputs(t, env); out != "save=true\n" {
+		t.Errorf("outputs = %q", out)
+	}
+}
+
+// incidentKey is the run's incident key, from plan's restore-key output.
+func incidentKey(t *testing.T, env map[string]string) string {
+	t.Helper()
+	if _, err := runCmd(t, env, "plan"); err != nil {
+		t.Fatal(err)
+	}
+	_, after, _ := strings.Cut(outputs(t, env), "restore-key=")
+	key, _, _ := strings.Cut(after, "\n")
+	return key
 }
 
 func TestPostWithoutTokenIsNoop(t *testing.T) {
@@ -164,6 +205,9 @@ func TestPostWithoutTokenIsNoop(t *testing.T) {
 	env["NEEDS"] = "not json"
 	if stdout, err := runCmd(t, env, "post"); err != nil || len(*posts) != 0 || !strings.Contains(stdout, "nothing to post") {
 		t.Errorf("stdout = %q, err = %v, posts = %v", stdout, err, *posts)
+	}
+	if stdout, err := runCmd(t, env, "closed"); err != nil || len(*posts) != 0 || !strings.Contains(stdout, "nothing to update") {
+		t.Errorf("closed: stdout = %q, err = %v, posts = %v", stdout, err, *posts)
 	}
 }
 
@@ -175,23 +219,30 @@ func TestPostUntrackedRunIsNoop(t *testing.T) {
 	if out := outputs(t, env); out != "save=false\n" {
 		t.Errorf("outputs = %q", out)
 	}
+	if stdout, err := runCmd(t, env, "closed"); err != nil || len(*posts) != 0 || !strings.Contains(stdout, "not a tracked closed PR") {
+		t.Errorf("closed: stdout = %q, err = %v, posts = %v", stdout, err, *posts)
+	}
+	if out := outputs(t, env); out != "save=false\n" {
+		t.Errorf("closed: outputs = %q", out)
+	}
 }
 
-// TestClosedPRIsIgnored: release-please relabels its PR after the merge, and the labeled event
-// re-runs CI on the closed PR. Whatever that run's result, notify posts nothing.
-func TestClosedPRIsIgnored(t *testing.T) {
-	closed := strings.Replace(releasePR(`[{"name":"needs-human"}]`), `"number":7,`, `"number":7,"state":"closed",`, 1)
+// TestClosedPRDoesNoFailureLogic: release-please relabels its PR after the merge, and the labeled
+// event re-runs CI on the closed PR. Whatever that run's result, post and needs-human post
+// nothing; plan restores the PR's state for closed, which has nothing open to update here.
+func TestClosedPRDoesNoFailureLogic(t *testing.T) {
+	closedPR := strings.Replace(releasePR(`[{"name":"needs-human"}]`), `"number":7,`, `"number":7,"state":"closed","merged":true,`, 1)
 	for _, needs := range []string{failed, releaseChecksFailed, passed} {
-		env, posts := setup(t, "pull_request", "refs/pull/7/merge", closed)
+		env, posts := setup(t, "pull_request", "refs/pull/7/merge", closedPR)
 		env["NEEDS"], env["NEEDS_HUMAN_CHANNEL"] = needs, "C0HUMAN"
 		env["NEEDS_HUMAN_STATE_FILE"] = filepath.Join(t.TempDir(), "needs-human.json")
 		if _, err := runCmd(t, env, "plan"); err != nil {
 			t.Fatal(err)
 		}
-		if out := outputs(t, env); !strings.HasPrefix(out, "notify=false\nreason=\n") || !strings.Contains(out, "needs-human=false\n") {
+		if out := outputs(t, env); !strings.HasPrefix(out, "notify=true\nreason=\n") || !strings.Contains(out, "needs-human=true\n") || !strings.HasSuffix(out, "closed=true\n") {
 			t.Errorf("needs %s: plan outputs = %q", needs, out)
 		}
-		for _, cmd := range []string{"post", "needs-human"} {
+		for _, cmd := range []string{"post", "needs-human", "closed"} {
 			if _, err := runCmd(t, env, cmd); err != nil {
 				t.Fatal(err)
 			}
@@ -205,6 +256,66 @@ func TestClosedPRIsIgnored(t *testing.T) {
 	}
 }
 
+// TestClosedPRUpdatesItsCards: the closed run marks the needs-human card handled and closes the
+// open incident with a reply and its card edited.
+func TestClosedPRUpdatesItsCards(t *testing.T) {
+	closedPR := `{"pull_request":{"number":5,"state":"closed","merged":true,"merged_by":{"login":"octocat"},"title":"chore(deps): x",` +
+		`"user":{"login":"renovate[bot]"},"head":{"ref":"renovate/test","sha":"bbbbbbbbbb"}},"sender":{"login":"octocat"}}`
+	env, posts := setup(t, "pull_request", "refs/pull/5/merge", closedPR)
+	env["NEEDS"], env["NEEDS_HUMAN_CHANNEL"] = passed, "C0HUMAN"
+	env["NEEDS_HUMAN_STATE_FILE"] = filepath.Join(t.TempDir(), "needs-human.json")
+	key := incidentKey(t, env)
+	open := `{"key":"` + key + `","channel":"C0CIFAIL","ts":"1.1","open":true,"sha":"aaaaaaaaaa","failed_jobs":["ci"]}`
+	if err := os.WriteFile(env["STATE_FILE"], []byte(open), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCmd(t, env, "plan"); err != nil {
+		t.Fatal(err)
+	}
+	_, nhKey, _ := strings.Cut(outputs(t, env), "needs-human-key=")
+	nhKey, _, _ = strings.Cut(nhKey, "\n")
+	rec := `{"key":"` + nhKey + `","channel":"C0HUMAN","ts":"2.2","reason":"major update","ci":":white_check_mark: Passing"}`
+	if err := os.WriteFile(env["NEEDS_HUMAN_STATE_FILE"], []byte(rec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := runCmd(t, env, "closed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := outputs(t, env); out != "save=true\n" {
+		t.Errorf("outputs = %q, stdout:\n%s", out, stdout)
+	}
+	var got []string
+	for _, p := range *posts {
+		got = append(got, fmt.Sprint(p["method"], " ", p["channel"], " ", p["ts"], p["thread_ts"], " ", p["text"]))
+	}
+	want := []string{
+		"chat.update C0HUMAN 2.2<nil> Handled (merged): o/r#5 chore(deps): x",
+		"chat.postMessage C0CIFAIL <nil>1.1 ⚪ PR merged by octocat; incident closed",
+		"chat.update C0CIFAIL 1.1<nil> CI closed (PR merged): o/r#5 ci",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	data, err := os.ReadFile(env["STATE_FILE"])
+	if err != nil || !strings.Contains(string(data), `"open":false`) || !strings.Contains(string(data), `"closed_as":"merged"`) {
+		t.Errorf("state %s, %v", data, err)
+	}
+	// A broken needs-human record is a warning; the incident is still closed.
+	if err := os.WriteFile(env["NEEDS_HUMAN_STATE_FILE"], []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(env["STATE_FILE"], []byte(open), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if stdout, err := runCmd(t, env, "closed"); err != nil || !strings.Contains(stdout, "::warning::marking the needs-human card handled") {
+		t.Errorf("stdout %q, err %v", stdout, err)
+	}
+	if out := outputs(t, env); out != "save=true\n" {
+		t.Errorf("outputs = %q", out)
+	}
+}
+
 func TestPostIgnoresBrokenState(t *testing.T) {
 	env, posts := setup(t, "pull_request", "refs/pull/5/merge", renovatePR("abc"))
 	if err := os.WriteFile(env["STATE_FILE"], []byte("{"), 0o600); err != nil {
@@ -212,7 +323,7 @@ func TestPostIgnoresBrokenState(t *testing.T) {
 	}
 	stdout, err := runCmd(t, env, "post") // no NEEDS: a legacy if: failure() caller
 	if err != nil || len(*posts) != 1 || !strings.Contains(stdout, "ignoring the restored incident state") ||
-		!strings.HasPrefix((*posts)[0]["text"].(string), "❌ o/r PR #5 failed at ") {
+		(*posts)[0]["text"] != "CI failing: o/r#5 ci" {
 		t.Errorf("stdout = %q, err = %v, posts = %v", stdout, err, *posts)
 	}
 }
@@ -231,6 +342,7 @@ func TestErrors(t *testing.T) {
 		{"post without STATE_FILE", []string{"post"}, "STATE_FILE", "", "STATE_FILE"},
 		{"post without channel", []string{"post"}, "SLACK_CHANNEL", "", "channel"},
 		{"post with no needs jobs", []string{"post"}, "", "{}", "no jobs"},
+		{"closed without STATE_FILE", []string{"closed"}, "STATE_FILE", "", "STATE_FILE"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -301,8 +413,9 @@ func TestNeedsHumanPost(t *testing.T) {
 	if out := outputs(t, env); out != "save=true\n" {
 		t.Errorf("outputs = %q", out)
 	}
-	want := ":raising_hand: <https://github.com/o/r/pull/7|r#7> chore(main): release 2.0.0 — needs a human: release PR blocked by release-checks"
-	if len(*posts) != 1 || (*posts)[0]["channel"] != "C0HUMAN" || !strings.HasPrefix((*posts)[0]["text"].(string), want) {
+	want := "Needs a human: o/r#7 chore(main): release 2.0.0"
+	if len(*posts) != 1 || (*posts)[0]["channel"] != "C0HUMAN" || (*posts)[0]["text"] != want ||
+		!strings.Contains(fmt.Sprint((*posts)[0]["attachments"]), "Release PR blocked by release-checks") {
 		t.Fatalf("posts = %v, want %q", *posts, want)
 	}
 	if strings.Contains(stdout, "xoxb-test") {

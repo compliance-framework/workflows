@@ -99,7 +99,8 @@ type State struct {
 	DryRun   bool         `json:"dry_run,omitempty"`
 	Status   string       `json:"status"`
 	Channel  string       `json:"channel,omitempty"`   // Slack channel ID
-	ThreadTS string       `json:"thread_ts,omitempty"` // the parent message
+	ThreadTS string       `json:"thread_ts,omitempty"` // the parent message: the board
+	Board    string       `json:"board,omitempty"`     // hash of the board last posted, to edit it only on a change
 	Repos    []*RepoState `json:"repos"`               // in stage order
 	// Notified holds the dedupe keys of the Slack messages already posted.
 	Notified []string `json:"notified,omitempty"`

@@ -69,7 +69,8 @@ When every repo is done the train:
    by section across repos, features first, then bug fixes, then the rest;
 2. opens an issue in each helm repo of the manifest listing its `depends_on` repos that went up a
    minor (`api`, `ui` and `agent` for `helm-charts`), so the charts pick up their new settings;
-3. posts the versions and the digest link in the Slack thread, and closes the issue.
+3. posts the versions and the digest link in the Slack thread, posts the digest draft card to
+   `vars.SLACK_CHANNEL_DIGESTS` (see Slack), and closes the issue.
 
 ### Comment commands
 
@@ -87,11 +88,25 @@ when the run has no members token (see Tokens).
 
 ## Slack
 
-The train posts to `vars.SLACK_CHANNEL_RELEASES`: a parent message when a train starts (its `ts`
-is kept in the state), then thread replies when a repo becomes blocked or needs a human (once per
-cause), when a run fails, when a repo is skipped and when the train finishes or is aborted. A
-train still open when a new month starts gets one message in the channel itself, on the first
-run of that month. Without `SLACK_BOT_TOKEN` messages are only printed.
+The train posts to `vars.SLACK_CHANNEL_RELEASES`. Its parent message is a **live board**
+(`train.Board`, a `slackkit` card, [slack.md](slack.md)): the title, "Stage n of m · running" (or
+"· k held", Finished, Aborted), one section per stage with each repo's pill (:large_green_circle:
+released, :large_yellow_circle: in progress, :red_circle: held, :white_circle: waiting,
+:fast_forward: skipped), its status and released version, a Tracking issue button, and a bar that is
+amber while running, red while a repo is held, green finished and grey aborted. The board's channel
+ID and `ts` are kept in the state with a hash of its content, and every run whose save changes the
+content edits it with `chat.update` (a failed edit is a warning, retried next run). Thread replies,
+small cards, follow when a repo becomes blocked or needs a human (once per cause), when a run
+fails, when a repo is skipped and when the train finishes or is aborted. A train still open when a
+new month starts gets one message in the channel itself, on the first run of that month. Without
+`SLACK_BOT_TOKEN` messages are only printed.
+
+When the train finishes it also posts the **digest draft** card, once, to
+`vars.SLACK_CHANNEL_DIGESTS` (#ccf-release-digests): the title "Release digest YYYY-MM (draft)"
+with a draft line and a blue bar, each released repo's from → to versions, up to 10 features as
+highlights, and buttons to each release's notes and the tracking issue (whose digest comment has
+the full draft). People edit and share it from there. Without the variable it is skipped quietly;
+the issue comment is posted either way.
 
 ## Dry run
 

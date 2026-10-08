@@ -23,7 +23,8 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `repos.yaml` | Manifest of the product repos: `name`, `kind`, `depends_on`, `release`, `charts`, plus top-level `holidays`, `include_patterns` and `exclude`. |
 | `repos.mock.yaml` | The same schema for the `mock-*` repos, used to develop and test changes without touching product repos. |
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
-| `internal/notify` | The CI incident rules (which runs, incident key, transitions), the Slack messages and the Slack client ([docs/notify.md](docs/notify.md)). |
+| `internal/slackkit` | The Block Kit message kit for the Slack messages: blocks, the status bar, and a client that posts, replies and edits in place ([docs/slack.md](docs/slack.md)). |
+| `internal/notify` | The CI incident rules (which runs, incident key, transitions), the incident and needs-human cards, and a plain-text Slack client on `internal/slackkit` ([docs/notify.md](docs/notify.md)). |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
 | `internal/reposettings` | The desired repo settings and rulesets, the current-vs-desired diff, and the GitHub client [`repo-settings.yml`](#repo-settings) uses. |
 | `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag, the preview tags, the release tags and the chart a helm release tag is for. |
@@ -83,7 +84,8 @@ release of this repo with the version in a comment, as third-party actions are:
 name: ci
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    # closed: notify marks the PR's Slack cards handled; the CI jobs skip on a closed PR.
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled, closed]
   push:
     branches: [main]
 permissions:
@@ -137,8 +139,10 @@ grant `actions: read`, `contents: read`, `pull-requests: read` and `security-eve
 
 Keeps one Slack thread per CI incident (a pull request, or a branch for pushes) for release-bot
 PRs, `renovate/` and `ccf-bump/` branches and the default branch: the first failure posts a
-top-level message, later failures reply in its thread, and the first pass after them replies
-`✅ passing again` and closes the incident. The calling job runs `if: always()` and passes
+top-level card, later failures reply in its thread, and the first pass after them replies
+`✅ passing again` and closes the incident; each reply also edits the card's status in place. On a
+closed PR (callers add `closed` to their `pull_request` types) it only closes the PR's open items:
+the needs-human card becomes Handled and an open incident is closed. The calling job runs `if: always()` and passes
 `needs: ${{ toJSON(needs) }}`. State lives in the Actions cache; without `SLACK_BOT_TOKEN` it
 does nothing. Callers still on `if: failure()` keep working but never get recoveries. Inputs,
 caller snippet, state and migration: [docs/notify.md](docs/notify.md).
@@ -809,7 +813,15 @@ daily in `ccf-bump-merge.yml`). See [docs/ccf-bump.md](docs/ccf-bump.md).
 
 `train.yml` releases the manifest's repos once a month, stage by stage: it bumps each repo's
 internal dependencies with `ccf-bump`, merges the release PRs, waits for the releases, and tracks it
-all in a `Release train YYYY-MM` issue and a Slack thread. See [docs/train.md](docs/train.md).
+all in a `Release train YYYY-MM` issue and a live Slack board with a thread; when it finishes it posts
+the digest draft to #ccf-release-digests. See [docs/train.md](docs/train.md).
+
+## Slack messages
+
+`internal/slackkit` builds the Slack messages as Block Kit cards (header, fields, link buttons,
+context line, a colored status bar) and posts, replies to and edits them in place; the tools move
+to it one by one. `slack-preview.yml` (`workflow_dispatch`) posts a sample of each card, marked
+":eyes: Preview", to the real channels. See [docs/slack.md](docs/slack.md).
 
 ## Stack smoke test
 

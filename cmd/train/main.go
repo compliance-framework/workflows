@@ -12,7 +12,8 @@
 //
 // Environment: GH_TOKEN (the release bot, scoped to the train's repos; ccf-bump uses it too),
 // TRACKER_TOKEN (issues in the workflows repo), MEMBERS_TOKEN (optional: org members read, for
-// comment commands), SLACK_BOT_TOKEN and SLACK_CHANNEL (optional), GITHUB_API_URL.
+// comment commands), SLACK_BOT_TOKEN, SLACK_CHANNEL (the board and its thread) and
+// SLACK_CHANNEL_DIGESTS (the finished train's digest draft) (all optional), GITHUB_API_URL.
 package main
 
 import (
@@ -32,7 +33,7 @@ import (
 	"time"
 
 	"github.com/compliance-framework/workflows/internal/manifest"
-	"github.com/compliance-framework/workflows/internal/notify"
+	"github.com/compliance-framework/workflows/internal/slackkit"
 	"github.com/compliance-framework/workflows/internal/train"
 )
 
@@ -88,6 +89,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		Load:                  load,
 		ReposURL:              server + "/" + *owner,
 		Channel:               getenv("SLACK_CHANNEL"),
+		DigestChannel:         getenv("SLACK_CHANNEL_DIGESTS"),
 		RequiredCheck:         *required,
 		ReleasePleaseWorkflow: *rpWorkflow,
 		RunURL:                fmt.Sprintf("%s/%s/actions/runs/%s", server, getenv("GITHUB_REPOSITORY"), getenv("GITHUB_RUN_ID")),
@@ -98,7 +100,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		e.Members = &train.GitHub{BaseURL: api, Token: tok, Owner: *owner}
 	}
 	if tok := getenv("SLACK_BOT_TOKEN"); tok != "" {
-		e.Slack = slack{&notify.Slack{BaseURL: envOr(getenv, "SLACK_API_URL", "https://slack.com/api"), Token: tok}}
+		e.Slack = &slackkit.Client{BaseURL: getenv("SLACK_API_URL"), Token: tok}
 	}
 	var err error
 	if cmd == "reconcile" {
@@ -203,14 +205,6 @@ func envOr(getenv func(string) string, name, def string) string {
 		return v
 	}
 	return def
-}
-
-// slack adapts notify.Slack to train.Slack.
-type slack struct{ s *notify.Slack }
-
-func (s slack) Post(ctx context.Context, channel, text, threadTS string) (string, error) {
-	_, ts, err := s.s.Post(ctx, channel, text, threadTS)
-	return ts, err
 }
 
 // execBumper runs the ccf-bump binary (cmd/ccf-bump) in train mode.

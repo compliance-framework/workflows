@@ -153,6 +153,8 @@ jobs:
           MEMBERS_TOKEN: ${{ steps.members.outputs.token }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ vars.SLACK_CHANNEL_RELEASES }}
+          # The finished train's digest draft card; empty skips it.
+          SLACK_CHANNEL_DIGESTS: ${{ vars.SLACK_CHANNEL_DIGESTS }}
           MODE: ${{ steps.plan.outputs.mode }}
           MANIFEST: ${{ steps.plan.outputs.manifest }}
           REPOS: ${{ inputs.repos }}

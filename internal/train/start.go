@@ -1,12 +1,14 @@
 package train
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
+
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 // Start opens this month's train, or reconciles the train still open. A dry run plans every
@@ -60,17 +62,8 @@ func (e *Engine) Start(ctx context.Context, o StartOptions) error {
 		return err
 	}
 	e.logf("opened %s: %s", is.Title, is.URL)
-	mode := ""
-	if st.DryRun {
-		mode = " (dry run: nothing is merged)"
-	}
-	var stages []string
-	for i := 1; i <= st.Stages(); i++ {
-		stages = append(stages, strings.Join(st.stage(i), ", "))
-	}
-	if ts, err := e.post(ctx, st, "", fmt.Sprintf(":steam_locomotive: *%s*%s: %d repos in %d stages (%s). <%s|Tracking issue>; updates follow in this thread.",
-		is.Title, mode, len(st.Repos), st.Stages(), strings.Join(stages, " → "), is.URL)); err == nil {
-		st.ThreadTS = ts
+	if p, err := e.post(ctx, st, "", Board(st, e.ReposURL, is.URL, e.Now())); err == nil {
+		st.Channel, st.ThreadTS, st.Board = cmp.Or(p.Channel, st.Channel), p.TS, boardHash(st, e.ReposURL, is.URL)
 	}
 	if st.DryRun {
 		return errors.Join(e.plan(ctx, is, st), e.save(ctx, is, st))
@@ -85,19 +78,8 @@ func (e *Engine) escalate(ctx context.Context, is Issue, st *State) {
 	if st.Month >= now || slices.Contains(st.Notified, "escalate|"+now) {
 		return
 	}
-	if _, err := e.post(ctx, st, "", fmt.Sprintf(":rotating_light: *%s* is still open at the start of %s. Finish it, or `/abort` it, so the next train can start: <%s|tracking issue>.",
-		is.Title, now, is.URL)); err == nil || e.Slack == nil || st.Channel == "" {
+	if _, err := e.post(ctx, st, "", slackkit.Note(fmt.Sprintf(":rotating_light: *%s* is still open at the start of %s. Finish it, or `/abort` it, so the next train can start: <%s|tracking issue>.",
+		is.Title, now, is.URL))); err == nil || e.Slack == nil || st.Channel == "" {
 		st.MarkNotified("escalate|" + now)
 	}
-}
-
-// stage returns the repos of stage n.
-func (s *State) stage(n int) []string {
-	var out []string
-	for _, r := range s.Repos {
-		if r.Stage == n {
-			out = append(out, r.Name)
-		}
-	}
-	return out
 }
