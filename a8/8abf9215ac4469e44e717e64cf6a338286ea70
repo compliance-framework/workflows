@@ -1,0 +1,3 @@
+lisa-design:
+- Required check: read ALL runs of `ci / required` on the head (filter=all, paginated, client-side name filter: check_name is a GitHub filter but we don't rely on it alone). Any queued/in_progress run → pending (even when an older run succeeded); else newest by started_at then ID decides (bump.RequiredCheck). filter=latest was the bug: it filters by completed_at, hiding a running re-trigger (labeled event).
+- A merge refused with 405 whose body says a required "status check" "is expected" is pending (bump.ExpectsCheck), retried within --wait; any other refusal stays a warning.
