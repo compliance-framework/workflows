@@ -31,9 +31,9 @@ posts a tracked bot PR to the `SLACK_CHANNEL_NEEDS_HUMAN` channel, once per PR, 
   channel instead of a CI incident in `SLACK_CHANNEL_CI_FAILURES` (an incident still opens when
   other jobs failed too). `release-checks` itself stays read-only: it never labels or comments.
 
-```text
-:raising_hand: mock-ui#13 chore(deps): update typescript to v7 — needs a human: major update
-```
+The post is a card: "Needs a human · mock-ui", the PR (`compliance-framework/mock-ui#13`, linked)
+and its title, fields Why / CI / Opened by / Waiting, and a Review PR button
+([notify.md](notify.md#needs-a-human)).
 
 Human PRs are never posted.
 

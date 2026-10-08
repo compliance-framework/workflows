@@ -1,9 +1,11 @@
 // The needs-human rule of the notify-failure workflow, separate from CI incidents: a tracked
-// bot PR that waits for a person is posted once to the needs-human channel (docs/attention.md).
+// bot PR that waits for a person is posted once to the needs-human channel, as a card
+// (docs/attention.md).
 
 package notify
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,10 +13,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 const (
@@ -72,33 +76,55 @@ func NeedsHumanKey(r Run) string {
 	return "ccf-notify-needs-human-" + hex.EncodeToString(sum[:16])
 }
 
-// NeedsHumanMessage is the post for r's PR.
-func NeedsHumanMessage(r Run, reason string) string {
-	url := fmt.Sprintf("%s/%s/pull/%d", r.ServerURL, r.Repo, r.PRNumber)
-	return fmt.Sprintf(":raising_hand: %s %s — needs a human: %s",
-		link(url, fmt.Sprintf("%s#%d", path.Base(r.Repo), r.PRNumber)), escape(r.PRTitle), escape(reason))
+// NeedsHumanCard is the card for r's PR: why it needs a person, its CI (res, the run's result)
+// and how long it has been open.
+func NeedsHumanCard(r Run, res Result, reason string, now time.Time) slackkit.Message {
+	return slackkit.NeedsHumanCard(slackkit.NeedsHuman{
+		Repo: r.Repo, Ref: fmt.Sprintf("%s#%d", r.Repo, r.PRNumber), URL: r.PRURL(), Title: r.PRTitle,
+		Why: upperFirst(slackkit.Escape(reason)), CI: ciStatus(res), OpenedBy: r.PRAuthor, OpenedAt: r.PRCreatedAt, Now: now,
+	})
 }
 
-// Posted is the saved record of a needs-human post.
+// ciStatus is the CI field of a needs-human card.
+func ciStatus(res Result) string {
+	switch {
+	case res.Outcome == OutcomeSuccess:
+		return ":white_check_mark: Passing"
+	case res.Outcome == OutcomeFailure && len(res.FailedJobs) > 0:
+		return ":x: Failing: " + slackkit.Escape(strings.Join(res.FailedJobs, ", "))
+	case res.Outcome == OutcomeFailure:
+		return ":x: Failing"
+	}
+	return ":grey_question: Cancelled or skipped"
+}
+
+// Posted is the saved record of a needs-human post: where its card is, and what the card
+// showed, to edit it later.
 type Posted struct {
 	Key     string `json:"key"`
 	Channel string `json:"channel"`
 	TS      string `json:"ts"`
+	Reason  string `json:"reason,omitempty"`
+	CI      string `json:"ci,omitempty"`
 }
 
-// PostNeedsHuman posts r's PR to channel and returns the record to save.
-func PostNeedsHuman(ctx context.Context, p Poster, r Run, reason, channel string) (Posted, error) {
+// PostNeedsHuman posts r's PR card to channel and returns the record to save.
+func PostNeedsHuman(ctx context.Context, api slackkit.API, r Run, res Result, reason, channel string, now time.Time) (Posted, error) {
 	if channel == "" {
 		return Posted{}, errors.New("no needs-human channel")
 	}
-	posted, ts, err := p.Post(ctx, channel, NeedsHumanMessage(r, reason), "")
+	posted, err := api.Post(ctx, channel, NeedsHumanCard(r, res, reason, now))
 	if err != nil {
 		return Posted{}, err
 	}
-	if posted == "" {
-		posted = channel
+	return Posted{Key: NeedsHumanKey(r), Channel: cmp.Or(posted.Channel, channel), TS: posted.TS, Reason: reason, CI: ciStatus(res)}, nil
+}
+
+func upperFirst(s string) string {
+	if s == "" {
+		return s
 	}
-	return Posted{Key: NeedsHumanKey(r), Channel: posted, TS: ts}, nil
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // Save writes the record to path.

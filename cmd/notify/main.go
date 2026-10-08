@@ -25,8 +25,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/compliance-framework/workflows/internal/notify"
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 func main() {
@@ -86,8 +88,12 @@ func post(ctx context.Context, getenv func(string) string, stdout io.Writer) err
 	if err != nil {
 		fmt.Fprintf(stdout, "ignoring the restored incident state: %v\n", err)
 	}
-	slack := &notify.Slack{BaseURL: envOr(getenv, "SLACK_API_URL", "https://slack.com/api"), Token: token}
-	next, action, err := notify.Handle(ctx, slack, key, prev, r, res, getenv("SLACK_CHANNEL"))
+	next, action, err := notify.Handle(ctx, slackClient(getenv, token), key, prev, r, res, getenv("SLACK_CHANNEL"), time.Now().UTC())
+	if cardErr := (*notify.CardError)(nil); errors.As(err, &cardErr) {
+		// The reply is posted; save the state so it isn't posted twice.
+		fmt.Fprintf(stdout, "::warning::%v\n", cardErr)
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -122,8 +128,7 @@ func needsHuman(ctx context.Context, getenv func(string) string, stdout io.Write
 		fmt.Fprintln(stdout, "this PR doesn't need a human; nothing to post")
 		return writeOutputs(getenv, "save=false\n")
 	}
-	slack := &notify.Slack{BaseURL: envOr(getenv, "SLACK_API_URL", "https://slack.com/api"), Token: token}
-	rec, err := notify.PostNeedsHuman(ctx, slack, r, reason, channel)
+	rec, err := notify.PostNeedsHuman(ctx, slackClient(getenv, token), r, res, reason, channel, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -157,9 +162,6 @@ func writeOutputs(getenv func(string) string, lines string) error {
 	return errors.Join(err, f.Close())
 }
 
-func envOr(getenv func(string) string, name, def string) string {
-	if v := getenv(name); v != "" {
-		return v
-	}
-	return def
+func slackClient(getenv func(string) string, token string) *slackkit.Client {
+	return &slackkit.Client{BaseURL: getenv("SLACK_API_URL"), Token: token}
 }

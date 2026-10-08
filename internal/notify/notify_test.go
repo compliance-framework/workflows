@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func getenv(t *testing.T, eventName, ref, event string) func(string) string {
@@ -24,12 +25,13 @@ func getenv(t *testing.T, eventName, ref, event string) func(string) string {
 
 func TestRunFromEnv(t *testing.T) {
 	pr, err := RunFromEnv(getenv(t, "pull_request", "refs/pull/5/merge",
-		`{"pull_request":{"number":5,"title":"t","user":{"login":"renovate[bot]"},"head":{"ref":"renovate/x","sha":"2222222222"}},"repository":{"default_branch":"trunk"}}`))
+		`{"pull_request":{"number":5,"title":"t","created_at":"2026-10-08T09:00:00Z","user":{"login":"renovate[bot]"},"head":{"ref":"renovate/x","sha":"2222222222"}},"repository":{"default_branch":"trunk"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := (Run{Repo: "o/r", Workflow: "ci", WorkflowPath: ".github/workflows/ci.yml", EventName: "pull_request", SHA: "2222222222", Branch: "renovate/x",
-		DefaultBranch: "trunk", ServerURL: "https://github.com", RunID: "42", RunAttempt: "1", PRNumber: 5, PRTitle: "t", PRAuthor: "renovate[bot]"}); pr != want {
+		DefaultBranch: "trunk", ServerURL: "https://github.com", RunID: "42", RunAttempt: "1", PRNumber: 5, PRTitle: "t", PRAuthor: "renovate[bot]",
+		PRCreatedAt: time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)}); pr != want {
 		t.Errorf("PR run = %+v, want %+v", pr, want)
 	}
 

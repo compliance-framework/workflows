@@ -10,8 +10,9 @@
 // A run for a closed pull request (merged or not) is never tracked: release-please relabels its
 // release PR after the merge, and a labeled event re-runs CI on a PR no one can act on any more.
 //
-// A failed tracked run opens an incident (a top-level Slack message) or, while one is open,
-// replies in its thread; a passing run closes it with a reply. See Handle.
+// A failed tracked run opens an incident (a top-level Slack card) or, while one is open,
+// replies in its thread and edits the card; a passing run closes it with a reply and marks
+// the card resolved. See Handle.
 package notify
 
 import (
@@ -23,6 +24,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ReleaseBotLogin is the author of release PRs (release-please, ccf-bump).
@@ -56,8 +58,9 @@ type Run struct {
 	PRNumber      int
 	PRTitle       string
 	PRAuthor      string
-	PRNeedsHuman  bool // the PR carries NeedsHumanLabel (from the event payload)
-	PRClosed      bool // the PR is closed, merged or not (from the event payload)
+	PRCreatedAt   time.Time // when the PR was opened (from the event payload)
+	PRNeedsHuman  bool      // the PR carries NeedsHumanLabel (from the event payload)
+	PRClosed      bool      // the PR is closed, merged or not (from the event payload)
 }
 
 // RunFromEnv builds a Run from a workflow step's GITHUB_* variables and the event payload
@@ -86,10 +89,11 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 
 	var ev struct {
 		PullRequest *struct {
-			Number int    `json:"number"`
-			Title  string `json:"title"`
-			State  string `json:"state"`
-			User   struct {
+			Number    int       `json:"number"`
+			Title     string    `json:"title"`
+			State     string    `json:"state"`
+			CreatedAt time.Time `json:"created_at"`
+			User      struct {
 				Login string `json:"login"`
 			} `json:"user"`
 			Head struct {
@@ -119,6 +123,7 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 	}
 	if pr := ev.PullRequest; pr != nil {
 		r.PRNumber, r.PRTitle, r.PRAuthor, r.Branch = pr.Number, pr.Title, pr.User.Login, pr.Head.Ref
+		r.PRCreatedAt = pr.CreatedAt
 		r.PRClosed = pr.State == "closed"
 		for _, l := range pr.Labels {
 			r.PRNeedsHuman = r.PRNeedsHuman || l.Name == NeedsHumanLabel
@@ -132,6 +137,11 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 		r.Branch = ref
 	}
 	return r, nil
+}
+
+// PRURL is the run's pull request on GitHub.
+func (r Run) PRURL() string {
+	return fmt.Sprintf("%s/%s/pull/%d", r.ServerURL, r.Repo, r.PRNumber)
 }
 
 // Decide returns why the run r is tracked, or ReasonNone. A run for a closed pull request is

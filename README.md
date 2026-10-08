@@ -24,7 +24,7 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `repos.mock.yaml` | The same schema for the `mock-*` repos, used to develop and test changes without touching product repos. |
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/slackkit` | The Block Kit message kit for the Slack messages: blocks, the status bar, and a client that posts, replies and edits in place ([docs/slack.md](docs/slack.md)). |
-| `internal/notify` | The CI incident rules (which runs, incident key, transitions), the Slack messages and the Slack client ([docs/notify.md](docs/notify.md)). |
+| `internal/notify` | The CI incident rules (which runs, incident key, transitions), the incident and needs-human cards, and a plain-text Slack client on `internal/slackkit` ([docs/notify.md](docs/notify.md)). |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
 | `internal/reposettings` | The desired repo settings and rulesets, the current-vs-desired diff, and the GitHub client [`repo-settings.yml`](#repo-settings) uses. |
 | `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag, the preview tags, the release tags and the chart a helm release tag is for. |
@@ -138,8 +138,8 @@ grant `actions: read`, `contents: read`, `pull-requests: read` and `security-eve
 
 Keeps one Slack thread per CI incident (a pull request, or a branch for pushes) for release-bot
 PRs, `renovate/` and `ccf-bump/` branches and the default branch: the first failure posts a
-top-level message, later failures reply in its thread, and the first pass after them replies
-`✅ passing again` and closes the incident. The calling job runs `if: always()` and passes
+top-level card, later failures reply in its thread, and the first pass after them replies
+`✅ passing again` and closes the incident; each reply also edits the card's status in place. The calling job runs `if: always()` and passes
 `needs: ${{ toJSON(needs) }}`. State lives in the Actions cache; without `SLACK_BOT_TOKEN` it
 does nothing. Callers still on `if: failure()` keep working but never get recoveries. Inputs,
 caller snippet, state and migration: [docs/notify.md](docs/notify.md).

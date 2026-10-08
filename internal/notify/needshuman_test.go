@@ -4,9 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 func TestRoute(t *testing.T) {
@@ -68,28 +72,38 @@ func TestNeedsHumanKey(t *testing.T) {
 }
 
 func TestPostNeedsHuman(t *testing.T) {
-	r := Run{Repo: "o/mock-ui", ServerURL: "https://github.com", PRNumber: 13, PRTitle: "chore(deps): update typescript to v7 <major>"}
-	p := &fakePoster{}
-	rec, err := PostNeedsHuman(context.Background(), p, r, "major update", "C0HUMAN")
+	r := Run{Repo: "o/mock-ui", ServerURL: "https://github.com", PRNumber: 13, PRTitle: "chore(deps): update typescript to v7 <major>",
+		PRAuthor: "ccf-release-bot[bot]", PRCreatedAt: t0.Add(-26 * time.Hour)}
+	f := &slackkit.Fake{}
+	res := Result{Outcome: OutcomeFailure, FailedJobs: []string{"go", "required"}}
+	rec, err := PostNeedsHuman(context.Background(), f, r, res, "major update", "C0HUMAN", t0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ":raising_hand: <https://github.com/o/mock-ui/pull/13|mock-ui#13> chore(deps): update typescript to v7 &lt;major&gt; — needs a human: major update"
-	if len(p.posts) != 1 || p.posts[0].text != want || p.posts[0].channel != "C0HUMAN" || p.posts[0].threadTS != "" {
-		t.Errorf("posts = %+v, want %q", p.posts, want)
+	want := slackkit.NeedsHumanCard(slackkit.NeedsHuman{
+		Repo: "o/mock-ui", Ref: "o/mock-ui#13", URL: "https://github.com/o/mock-ui/pull/13", Title: r.PRTitle, Why: "Major update",
+		CI: ":x: Failing: go, required", OpenedBy: "ccf-release-bot[bot]", OpenedAt: r.PRCreatedAt, Now: t0,
+	})
+	if len(f.Calls) != 1 || f.Calls[0].Method != "post" || f.Calls[0].Channel != "C0HUMAN" || !reflect.DeepEqual(f.Calls[0].Message, want) {
+		t.Errorf("calls = %+v, want the card %+v", f.Calls, want)
 	}
-	if rec != (Posted{Key: NeedsHumanKey(r), Channel: "C0RESOLVED", TS: "1700000000.000100"}) {
+	if rec != (Posted{Key: NeedsHumanKey(r), Channel: "C0HUMAN", TS: "1.000001", Reason: "major update", CI: ":x: Failing: go, required"}) {
 		t.Errorf("record = %+v", rec)
 	}
 	path := filepath.Join(t.TempDir(), "rec.json")
 	if err := rec.Save(path); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), `"channel":"C0RESOLVED"`) {
+	if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), `"ts":"1.000001","reason":"major update"`) {
 		t.Errorf("saved %q, %v", data, err)
 	}
-	if _, err := PostNeedsHuman(context.Background(), p, r, "x", ""); err == nil {
+	if _, err := PostNeedsHuman(context.Background(), f, r, res, "x", "", t0); err == nil {
 		t.Error("no error without a channel")
+	}
+	for res, want := range map[Outcome]string{OutcomeSuccess: ":white_check_mark: Passing", OutcomeFailure: ":x: Failing", OutcomeNone: ":grey_question: Cancelled or skipped"} {
+		if got := ciStatus(Result{Outcome: res}); got != want {
+			t.Errorf("ciStatus(%s) = %q, want %q", res, got, want)
+		}
 	}
 }
 

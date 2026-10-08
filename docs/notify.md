@@ -30,24 +30,28 @@ skips) it's a pass.
 
 | Result | Incident | Posts | Then |
 | --- | --- | --- | --- |
-| failure | none, or closed | a top-level message in the channel | open, with the message's `ts` |
+| failure | none, or closed | a top-level card in the channel (Failing) | open, with the card's `ts` |
 | failure | open, same commit and failed jobs | nothing (a re-run) | unchanged |
-| failure | open, another commit or other failed jobs | a reply in the thread | open |
-| pass | open | `✅ passing again` in the thread | closed: the next failure starts a new thread |
+| failure | open, another commit or other failed jobs | a reply in the thread, and the card edited to Failing again | open |
+| pass | open | `✅ passing again` in the thread, and the card edited to Resolved | closed: the next failure starts a new card |
 | pass | none, or closed | nothing | unchanged |
 | cancelled / all skipped | any | nothing | unchanged |
 
-Messages (Slack mrkdwn; the short SHA links to the commit, `run` to the run):
+The top-level message is a Block Kit card (`slackkit.IncidentCard`, [slack.md](slack.md)):
+a red bar while failing and green once resolved; the header `CI failing · <repo>` (or `failing
+again`, `resolved`); the fully qualified PR (`owner/repo#N`, linked) and its title, or
+`owner/repo@<branch>` for a push; fields Status, Workflow, Opened at (the commit the incident
+opened at, and when), Resolved (when, and after how long) and Failed jobs (the latest
+failure's, struck through once resolved); buttons View PR and Latest run. Every transition
+replies in the thread first and then edits the card with `chat.update`. If the edit fails
+(say, the message was deleted), the job logs a warning and still saves the state, so the reply
+is not posted twice.
+
+Thread replies (Slack mrkdwn; the short SHA links to the commit, `run` to the run):
 
 ```text
-❌ compliance-framework/mock-api PR #12 failed: ci, release-checks at 2222222 · run
-Pull request #12 chore(deps): bump x · workflow ci
-
-❌ compliance-framework/mock-api main failed: ci at abc1234 · run
-workflow ci
-
-❌ failed: ci at 3333333 · run                (a reply)
-✅ passing again at 4444444 · run             (a reply)
+❌ failed: ci at 3333333 · run
+✅ passing again at 4444444 · run
 ```
 
 The commit is the PR head for pull requests (not the test merge commit), so re-runs after
@@ -55,8 +59,10 @@ the base moves count as the same commit.
 
 ## State
 
-The state of an incident (`channel`, the top-level message `ts`, `open`, the last posted
-commit and failed jobs) is a small JSON file kept in the Actions cache:
+The state of an incident (`channel`, the card's `ts`, `open`, the last posted commit and failed
+jobs, and for the card `opened_sha`, `opened_at`, `again` and `resolved_at`) is a small JSON file
+kept in the Actions cache. A state saved before the cards lacks the card fields, and its card
+shows the last commit instead and no times:
 
 - the key is `ccf-notify-incident-<hash of the incident key>-<run id>-<run attempt>`, so
   every save is a new entry;
@@ -70,7 +76,8 @@ read. A PR's key never matches `main`'s, so PRs don't pick up `main`'s incident.
 
 Replies go to the incident's own channel; the `channel` input only picks where new incidents
 start. No GitHub permission beyond `contents: read` and no Slack scope beyond `chat:write`
-(replies are `chat.postMessage` with `thread_ts`).
+(replies are `chat.postMessage` with `thread_ts`; the bot edits its own cards with
+`chat.update`).
 
 Limits:
 
@@ -92,13 +99,14 @@ For a `pull_request` run tracked by rule (a) (`notify.Route`):
 
 | The PR | Posts to `SLACK_CHANNEL_NEEDS_HUMAN` | Incident |
 | --- | --- | --- |
-| carries the `needs-human` label (in the event payload) | `needs a human: <reason>`: `major update` (`renovate/*`), `OPA update in the api (never auto-merged)` (`renovate/opa`), `auto-merge off (...)` (`ccf-bump/*`), or `labelled needs-human` | as usual |
-| a release-please PR (`release-please--*`) whose `release-checks` job failed | `release PR blocked by release-checks (e.g. needs release:major-approved, or an internal dep isn't final)` | none when `release-checks` is the only failed job (the incident sees the run as cancelled and stays as it is); as usual when other jobs failed too |
+| carries the `needs-human` label (in the event payload) | Why: `Major update` (`renovate/*`), `OPA update in the api (never auto-merged)` (`renovate/opa`), `Auto-merge off (...)` (`ccf-bump/*`), or `Labelled needs-human` | as usual |
+| a release-please PR (`release-please--*`) whose `release-checks` job failed | Why: `Release PR blocked by release-checks (e.g. needs release:major-approved, or an internal dep isn't final)` | none when `release-checks` is the only failed job (the incident sees the run as cancelled and stays as it is); as usual when other jobs failed too |
 | anything else, or a human's PR | nothing | as usual |
 
-```text
-:raising_hand: mock-ui#13 chore(deps): update typescript to v7 — needs a human: major update
-```
+The post is a card (`slackkit.NeedsHumanCard`, amber bar): the PR (`owner/repo#N`, linked) and
+its title, fields Why, CI (the run's result: passing, or the failed jobs), Opened by and Waiting
+(since the PR was opened), and a Review PR button. The record saved for it keeps the card's
+channel, `ts`, reason and CI, to edit the card later.
 
 Once per PR: the job looks up the cache key `ccf-notify-needs-human-<hash of repo + PR>`
 (`lookup-only`), posts only on a miss, and then saves a small record under that key. Re-runs,

@@ -3,11 +3,15 @@ package notify
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 func TestParseNeeds(t *testing.T) {
@@ -64,73 +68,80 @@ func TestLoadAndSaveIncident(t *testing.T) {
 	}
 }
 
-type post struct{ channel, text, threadTS string }
+var t0 = time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)
 
-type fakePoster struct {
-	posts []post
-	err   error
-}
+// call is a Fake call without the message, which the card tests check.
+type call struct{ method, channel, ts, text string }
 
-func (f *fakePoster) Post(_ context.Context, channel, text, threadTS string) (string, string, error) {
-	if f.err != nil {
-		return "", "", f.err
+func calls(f *slackkit.Fake) []call {
+	var got []call
+	for _, c := range f.Calls {
+		got = append(got, call{c.Method, c.Channel, c.TS, c.Message.Text})
 	}
-	f.posts = append(f.posts, post{channel, text, threadTS})
-	return "C0RESOLVED", "1700000000.000100", nil
+	return got
 }
 
 func TestHandle(t *testing.T) {
-	r := Run{Repo: "o/r", Workflow: "ci", ServerURL: "https://github.com", SHA: "2222222222", RunID: "42", PRNumber: 5}
-	open := Incident{Key: "k-", Channel: "C0OLD", TS: "1600000000.000100", Open: true, SHA: "1111111111", FailedJobs: []string{"ci"}}
+	r := Run{Repo: "o/r", Workflow: "ci", ServerURL: "https://github.com", SHA: "2222222222", RunID: "42", PRNumber: 5, PRTitle: "fix: x"}
+	open := Incident{Key: "k-", Channel: "C0OLD", TS: "1600000000.000100", Open: true, SHA: "1111111111", FailedJobs: []string{"ci"},
+		OpenedSHA: "1111111111", OpenedAt: t0.Add(-time.Hour)}
 	closed := open
-	closed.Open, closed.FailedJobs = false, nil
+	closed.Open, closed.ResolvedAt = false, t0.Add(-time.Minute)
 	sameCommit := open
 	sameCommit.SHA = r.SHA
 	failCI := Result{Outcome: OutcomeFailure, FailedJobs: []string{"ci"}}
+	opened := Incident{Key: "k-", Channel: "C0CIFAIL", TS: "1.000001", Open: true, SHA: r.SHA, FailedJobs: []string{"ci"}, OpenedSHA: r.SHA, OpenedAt: t0}
+	failingAgain := func(prev Incident, jobs ...string) Incident {
+		prev.SHA, prev.FailedJobs, prev.Again = r.SHA, jobs, true
+		return prev
+	}
+	resolved := open
+	resolved.Open, resolved.SHA, resolved.ResolvedAt = false, r.SHA, t0
 
 	tests := []struct {
 		name       string
 		prev       Incident
 		res        Result
 		wantAction Action
-		wantPost   *post
+		wantCalls  []call
 		wantNext   Incident
+		wantStatus slackkit.IncidentStatus // of the card posted or updated
 	}{
 		{"failure, no incident: opens one", Incident{}, failCI, ActionOpen,
-			&post{"C0CIFAIL", OpenMessage(r, failCI.FailedJobs), ""},
-			Incident{Key: "k-", Channel: "C0RESOLVED", TS: "1700000000.000100", Open: true, SHA: r.SHA, FailedJobs: []string{"ci"}}},
+			[]call{{"post", "C0CIFAIL", "", "CI failing: o/r#5 ci"}}, opened, slackkit.Failing},
 		{"failure after a closed incident: opens a new one", closed, failCI, ActionOpen,
-			&post{"C0CIFAIL", OpenMessage(r, failCI.FailedJobs), ""},
-			Incident{Key: "k-", Channel: "C0RESOLVED", TS: "1700000000.000100", Open: true, SHA: r.SHA, FailedJobs: []string{"ci"}}},
-		{"failure, same commit and jobs: dedupe", sameCommit, failCI, ActionDedupe, nil, sameCommit},
-		{"failure, same commit, other jobs: replies", sameCommit, Result{Outcome: OutcomeFailure, FailedJobs: []string{"ci", "release-checks"}}, ActionReply,
-			&post{"C0OLD", FailureReply(r, []string{"ci", "release-checks"}), open.TS},
-			Incident{Key: "k-", Channel: "C0OLD", TS: open.TS, Open: true, SHA: r.SHA, FailedJobs: []string{"ci", "release-checks"}}},
-		{"failure, new commit: replies", open, failCI, ActionReply,
-			&post{"C0OLD", FailureReply(r, failCI.FailedJobs), open.TS},
-			Incident{Key: "k-", Channel: "C0OLD", TS: open.TS, Open: true, SHA: r.SHA, FailedJobs: []string{"ci"}}},
-		{"success, open incident: recovers", open, Result{Outcome: OutcomeSuccess}, ActionRecover,
-			&post{"C0OLD", RecoveryReply(r), open.TS},
-			Incident{Key: "k-", Channel: "C0OLD", TS: open.TS, Open: false, SHA: r.SHA}},
-		{"success, no incident: nothing", Incident{}, Result{Outcome: OutcomeSuccess}, ActionNone, nil, Incident{}},
-		{"success, closed incident: nothing", closed, Result{Outcome: OutcomeSuccess}, ActionNone, nil, closed},
-		{"cancelled: nothing", open, Result{Outcome: OutcomeNone}, ActionNone, nil, open},
+			[]call{{"post", "C0CIFAIL", "", "CI failing: o/r#5 ci"}}, opened, slackkit.Failing},
+		{"failure, same commit and jobs: dedupe", sameCommit, failCI, ActionDedupe, nil, sameCommit, ""},
+		{"failure, same commit, other jobs: replies and edits", sameCommit, Result{Outcome: OutcomeFailure, FailedJobs: []string{"ci", "release-checks"}}, ActionReply,
+			[]call{{"reply", "C0OLD", open.TS, FailureReply(r, []string{"ci", "release-checks"})}, {"update", "C0OLD", open.TS, "CI failing again: o/r#5 ci"}},
+			failingAgain(sameCommit, "ci", "release-checks"), slackkit.FailingAgain},
+		{"failure, new commit: replies and edits", open, failCI, ActionReply,
+			[]call{{"reply", "C0OLD", open.TS, FailureReply(r, failCI.FailedJobs)}, {"update", "C0OLD", open.TS, "CI failing again: o/r#5 ci"}},
+			failingAgain(open, "ci"), slackkit.FailingAgain},
+		{"success, open incident: recovers and edits", open, Result{Outcome: OutcomeSuccess}, ActionRecover,
+			[]call{{"reply", "C0OLD", open.TS, RecoveryReply(r)}, {"update", "C0OLD", open.TS, "CI resolved: o/r#5 ci"}}, resolved, slackkit.Resolved},
+		{"success, no incident: nothing", Incident{}, Result{Outcome: OutcomeSuccess}, ActionNone, nil, Incident{}, ""},
+		{"success, closed incident: nothing", closed, Result{Outcome: OutcomeSuccess}, ActionNone, nil, closed, ""},
+		{"cancelled: nothing", open, Result{Outcome: OutcomeNone}, ActionNone, nil, open, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &fakePoster{}
-			next, action, err := Handle(context.Background(), p, "k-", tt.prev, r, tt.res, "C0CIFAIL")
+			f := &slackkit.Fake{}
+			next, action, err := Handle(context.Background(), f, "k-", tt.prev, r, tt.res, "C0CIFAIL", t0)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if action != tt.wantAction || !reflect.DeepEqual(next, tt.wantNext) {
 				t.Errorf("Handle = %+v, %s; want %+v, %s", next, action, tt.wantNext, tt.wantAction)
 			}
-			switch {
-			case tt.wantPost == nil && len(p.posts) != 0:
-				t.Errorf("posted %+v, want nothing", p.posts)
-			case tt.wantPost != nil && (len(p.posts) != 1 || p.posts[0] != *tt.wantPost):
-				t.Errorf("posted %+v, want %+v", p.posts, *tt.wantPost)
+			if got := calls(f); !reflect.DeepEqual(got, tt.wantCalls) {
+				t.Errorf("calls = %+v, want %+v", got, tt.wantCalls)
+			}
+			if tt.wantStatus != "" {
+				card := f.Calls[len(f.Calls)-1].Message
+				if want := IncidentCard(r, tt.wantNext, t0); !reflect.DeepEqual(card, want) || !strings.Contains(card.Text, strings.ToLower(string(tt.wantStatus))) {
+					t.Errorf("card = %+v, want %+v (%s)", card, want, tt.wantStatus)
+				}
 			}
 		})
 	}
@@ -139,7 +150,7 @@ func TestHandle(t *testing.T) {
 func TestHandleErrors(t *testing.T) {
 	r := Run{Repo: "o/r", SHA: "abc", RunID: "1"}
 	fail := Result{Outcome: OutcomeFailure}
-	if _, _, err := Handle(context.Background(), &fakePoster{}, "k-", Incident{}, r, fail, ""); err == nil || !strings.Contains(err.Error(), "channel") {
+	if _, _, err := Handle(context.Background(), &slackkit.Fake{}, "k-", Incident{}, r, fail, "", t0); err == nil || !strings.Contains(err.Error(), "channel") {
 		t.Errorf("no channel: err = %v", err)
 	}
 	open := Incident{Key: "k-", Channel: "C1", TS: "1.1", Open: true, SHA: "old"}
@@ -147,30 +158,52 @@ func TestHandleErrors(t *testing.T) {
 		prev Incident
 		res  Result
 	}{{Incident{}, fail}, {open, fail}, {open, Result{Outcome: OutcomeSuccess}}} {
-		next, action, err := Handle(context.Background(), &fakePoster{err: errors.New("boom")}, "k-", tt.prev, r, tt.res, "C1")
+		next, action, err := Handle(context.Background(), &slackkit.Fake{Err: errors.New("boom")}, "k-", tt.prev, r, tt.res, "C1", t0)
 		if err == nil || action != ActionNone || !reflect.DeepEqual(next, tt.prev) {
 			t.Errorf("Post error from %+v: %+v, %s, %v; want the state unchanged and the error", tt.prev, next, action, err)
 		}
 	}
+	// The reply is posted but the card isn't edited: the next state comes with a *CardError.
+	next, action, err := Handle(context.Background(), &updateFails{}, "k-", open, r, Result{Outcome: OutcomeSuccess}, "C1", t0)
+	var cardErr *CardError
+	if !errors.As(err, &cardErr) || action != ActionRecover || next.Open || !strings.Contains(err.Error(), "message_not_found") {
+		t.Errorf("update error: %+v, %s, %v; want the recovered state and a *CardError", next, action, err)
+	}
 }
 
-func TestMessages(t *testing.T) {
-	pr := Run{Repo: "o/r", Workflow: "ci <go>", ServerURL: "https://github.com", SHA: "2222222222", Branch: "renovate/x",
-		RunID: "42", PRNumber: 12, PRTitle: "fix(deps): a & b"}
-	want := "❌ o/r PR #12 failed: ci, release-checks at <https://github.com/o/r/commit/2222222222|2222222> · <https://github.com/o/r/actions/runs/42|run>\n" +
-		"Pull request <https://github.com/o/r/pull/12|#12 fix(deps): a &amp; b> · workflow *ci &lt;go&gt;*"
-	if got := OpenMessage(pr, []string{"ci", "release-checks"}); got != want {
-		t.Errorf("OpenMessage =\n%s\nwant\n%s", got, want)
-	}
+// updateFails is a Slack whose chat.update fails.
+type updateFails struct{ slackkit.Fake }
 
+func (u *updateFails) Update(context.Context, string, string, slackkit.Message) error {
+	return errors.New("message_not_found")
+}
+
+func TestIncidentCard(t *testing.T) {
+	pr := Run{Repo: "o/r", Workflow: "ci", ServerURL: "https://github.com", Branch: "renovate/x", RunID: "42", PRNumber: 12, PRTitle: "fix(deps): a & b"}
+	inc := Incident{Open: true, SHA: "3333333333", OpenedSHA: "2222222222", OpenedAt: t0, FailedJobs: []string{"ci"}}
+	got := slackkit.IncidentCard(slackkit.Incident{
+		Repo: "o/r", Ref: "o/r#12", RefURL: "https://github.com/o/r/pull/12", Title: "fix(deps): a & b", Workflow: "ci",
+		Status: slackkit.Failing, SHA: "2222222222", SHAURL: "https://github.com/o/r/commit/2222222222", FailedJobs: []string{"ci"},
+		OpenedAt: t0, PRURL: "https://github.com/o/r/pull/12", RunURL: "https://github.com/o/r/actions/runs/42", UpdatedAt: t0,
+	})
+	if card := IncidentCard(pr, inc, t0); !reflect.DeepEqual(card, got) {
+		t.Errorf("PR card = %+v\nwant %+v", card, got)
+	}
+	// A push, and a state saved before cards (no opened_sha): the last commit stands in.
+	push := Run{Repo: "o/r", Workflow: "ci", ServerURL: "https://github.com", Branch: "main", RunID: "43"}
+	card := IncidentCard(push, Incident{Open: true, SHA: "abc"}, t0)
+	if card.Text != "CI failing: o/r@main ci" || !strings.Contains(card.Blocks[0].Text.Text, "<https://github.com/o/r/tree/main|o/r@main>") ||
+		!strings.Contains(card.Blocks[1].Fields[2].Text, "commit/abc|abc>") {
+		t.Errorf("push card = %+v", card)
+	}
+	if strings.Contains(fmt.Sprint(card.Blocks), "View PR") {
+		t.Errorf("a push card has a View PR button: %+v", card.Blocks)
+	}
+}
+
+func TestReplies(t *testing.T) {
 	push := Run{Repo: "o/r", Workflow: "ci", ServerURL: "https://github.com", SHA: "abc", Branch: "main", RunID: "43"}
-	want = "❌ o/r main failed at <https://github.com/o/r/commit/abc|abc> · <https://github.com/o/r/actions/runs/43|run>\n" +
-		"workflow *ci*"
-	if got := OpenMessage(push, nil); got != want {
-		t.Errorf("OpenMessage =\n%s\nwant\n%s", got, want)
-	}
-
-	want = "❌ failed: a&lt;b&gt; at <https://github.com/o/r/commit/abc|abc> · <https://github.com/o/r/actions/runs/43|run>"
+	want := "❌ failed: a&lt;b&gt; at <https://github.com/o/r/commit/abc|abc> · <https://github.com/o/r/actions/runs/43|run>"
 	if got := FailureReply(push, []string{"a<b>"}); got != want {
 		t.Errorf("FailureReply = %s, want %s", got, want)
 	}
