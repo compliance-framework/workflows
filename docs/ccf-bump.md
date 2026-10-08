@@ -127,16 +127,19 @@ required check still gates it.
 `ccf-bump:automerge`, from a `ccf-bump/*` branch of the repo itself (not a fork), opened by
 `--author` (default `ccf-release-bot[bot]`; the workflows pass the token's app), and not labelled
 `needs-human` (a person can hold a PR by adding it). Renovate, release-please and people's PRs never
-qualify. For each, at its head commit:
+qualify. For each, at its head commit it reads every run of `ci / required` (`--required-check`):
+a commit can have several, e.g. when adding the label re-triggers the callers' `ci.yml` on
+`labeled`. While any run is queued or in progress the PR is pending; otherwise the newest run (by
+start time, then ID) decides.
 
 | State | What merge does |
 | --- | --- |
-| `ci / required` (`--required-check`) concluded `success`, and GitHub reports the PR mergeable | squash-merges it as the token's identity, with the PR title plus ` (#N)` as the commit title, if its head is still that commit. Behind its base is fine (`ccf-required` is not strict). |
-| the check concluded otherwise | leaves it, with a warning: `notify-failure.yml` already posted the failure and the attention digest lists the PR |
+| the newest run concluded `success`, and GitHub reports the PR mergeable | squash-merges it as the token's identity, with the PR title plus ` (#N)` as the commit title, if its head is still that commit. Behind its base is fine (`ccf-required` is not strict). |
+| the newest run concluded otherwise | leaves it, with a warning: `notify-failure.yml` already posted the failure and the attention digest lists the PR |
 | conflicting with its base | leaves it, with a warning |
-| the check queued, running or not there yet, or mergeability not computed | pending: with `--wait D` it looks again every 30s for up to `D`, then reports what is still pending (a later pass merges it) |
+| a run queued or running, no run yet, mergeability not computed, or GitHub refusing the merge with 405 "Required status check … is expected" (a run started after the runs were read) | pending: with `--wait D` it looks again every 30s for up to `D`, then reports what is still pending (a later pass merges it) |
 
-A merge GitHub refuses is a warning; failing to list a repo's PRs, or to read a PR or its check,
+Any other merge GitHub refuses is a warning; failing to list a repo's PRs, or to read a PR or its check,
 fails the run (the other repos still run). It removes no label. `--dry-run` prints what it would
 merge and doesn't wait. The train merges its own train-mode bump PRs; one merge pass merging
 them first is harmless.

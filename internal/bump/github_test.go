@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGitHub(t *testing.T) {
@@ -173,7 +174,15 @@ func TestGitHubMerge(t *testing.T) {
 			fmt.Fprint(w, `{"number":3,"title":"t","mergeable":false,"mergeable_state":"dirty","auto_merge":{"merge_method":"squash"},
 				"head":{"ref":"ccf-bump/sync-x","sha":"abc"},"labels":[{"name":"ccf-bump:automerge"}]}`)
 		case "GET /repos/o/ui/commits/abc/check-runs":
-			fmt.Fprint(w, `{"check_runs":[{"id":1,"status":"completed","conclusion":"failure"},{"id":2,"status":"in_progress","html_url":"u"}]}`)
+			if r.URL.Query().Get("page") == "2" {
+				fmt.Fprint(w, `{"check_runs":[{"id":2,"name":"ci / required","status":"in_progress","html_url":"u","started_at":"2026-10-08T05:02:00Z"}]}`)
+				return
+			}
+			runs := []string{`{"id":1,"name":"ci / required","status":"completed","conclusion":"failure"}`, `{"id":3,"name":"ci / required-ish"}`}
+			for len(runs) < 100 {
+				runs = append(runs, `{"id":4,"name":"other"}`)
+			}
+			fmt.Fprintf(w, `{"check_runs":[%s]}`, strings.Join(runs, ","))
 		case "GET /repos/o/ui/commits/none/check-runs":
 			fmt.Fprint(w, `{"check_runs":[]}`)
 		case "PUT /repos/o/ui/pulls/3/merge":
@@ -196,11 +205,13 @@ func TestGitHubMerge(t *testing.T) {
 		pr.Head.SHA != "abc" || pr.Title != "t" || !pr.HasLabel(AutomergeLabel) || pr.HasLabel(NeedsHumanLabel) {
 		t.Errorf("PullRequest = %+v, %v", pr, err)
 	}
-	if c, err := g.LatestCheck(ctx, "ui", "abc", "ci / required"); err != nil || c == nil || c.ID != 2 || c.Status != "in_progress" {
-		t.Errorf("LatestCheck = %+v, %v", c, err)
+	runs, err := g.CheckRuns(ctx, "ui", "abc", "ci / required")
+	if err != nil || len(runs) != 2 || runs[0].ID != 1 || runs[1].ID != 2 || runs[1].Status != "in_progress" ||
+		!runs[1].StartedAt.Equal(time.Date(2026, 10, 8, 5, 2, 0, 0, time.UTC)) {
+		t.Errorf("CheckRuns = %+v, %v; want runs 1 and 2 of both pages, only ci / required", runs, err)
 	}
-	if c, err := g.LatestCheck(ctx, "ui", "none", "ci / required"); err != nil || c != nil {
-		t.Errorf("LatestCheck(none) = %+v, %v", c, err)
+	if runs, err := g.CheckRuns(ctx, "ui", "none", "ci / required"); err != nil || len(runs) != 0 {
+		t.Errorf("CheckRuns(none) = %+v, %v", runs, err)
 	}
 	if err := g.Merge(ctx, "ui", 3, "abc", "t (#3)"); err != nil {
 		t.Error(err)
@@ -209,11 +220,60 @@ func TestGitHubMerge(t *testing.T) {
 		"DELETE /repos/o/ui/issues/3/labels/ccf-bump:automerge ",
 		"DELETE /repos/o/ui/issues/4/labels/ccf-bump:automerge ",
 		"GET /repos/o/ui/pulls/3 ",
-		"GET /repos/o/ui/commits/abc/check-runs?check_name=ci+%2F+required&filter=latest&per_page=100 ",
-		"GET /repos/o/ui/commits/none/check-runs?check_name=ci+%2F+required&filter=latest&per_page=100 ",
+		"GET /repos/o/ui/commits/abc/check-runs?check_name=ci+%2F+required&filter=all&page=1&per_page=100 ",
+		"GET /repos/o/ui/commits/abc/check-runs?check_name=ci+%2F+required&filter=all&page=2&per_page=100 ",
+		"GET /repos/o/ui/commits/none/check-runs?check_name=ci+%2F+required&filter=all&page=1&per_page=100 ",
 		`PUT /repos/o/ui/pulls/3/merge {"commit_title":"t (#3)","merge_method":"squash","sha":"abc"}`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestRequiredCheck(t *testing.T) {
+	at := func(id int64, minute int, status, conclusion string) CheckRun {
+		return CheckRun{ID: id, Status: status, Conclusion: conclusion, StartedAt: time.Date(2026, 10, 8, 5, minute, 0, 0, time.UTC)}
+	}
+	for name, tc := range map[string]struct {
+		runs            []CheckRun
+		running, newest int64 // IDs, 0: nil
+	}{
+		"none":                         {},
+		"one":                          {runs: []CheckRun{at(1, 1, "completed", "success")}, newest: 1},
+		"old success, new in progress": {runs: []CheckRun{at(1, 1, "completed", "success"), at(2, 2, "in_progress", "")}, running: 2},
+		"old failure, new success":     {runs: []CheckRun{at(2, 2, "completed", "success"), at(1, 1, "completed", "failure")}, newest: 2},
+		"old success, new failure":     {runs: []CheckRun{at(1, 1, "completed", "success"), at(2, 2, "completed", "failure")}, newest: 2},
+		"by start time, not ID":        {runs: []CheckRun{at(9, 1, "completed", "failure"), at(2, 3, "completed", "success")}, newest: 2},
+		"same start: higher ID":        {runs: []CheckRun{at(2, 1, "completed", "success"), at(1, 1, "completed", "failure")}, newest: 2},
+	} {
+		running, newest := RequiredCheck(tc.runs)
+		id := func(c *CheckRun) int64 {
+			if c == nil {
+				return 0
+			}
+			return c.ID
+		}
+		if id(running) != tc.running || id(newest) != tc.newest {
+			t.Errorf("%s: running %d, newest %d; want %d, %d", name, id(running), id(newest), tc.running, tc.newest)
+		}
+	}
+}
+
+func TestExpectsCheck(t *testing.T) {
+	expected := []byte(`{"message":"Required status check \"ci / required\" is expected."}`)
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"405 check expected": {&StatusError{Code: http.StatusMethodNotAllowed, Body: expected}, true},
+		"wrapped":            {fmt.Errorf("merge: %w", &StatusError{Code: http.StatusMethodNotAllowed, Body: expected}), true},
+		"405 other":          {&StatusError{Code: http.StatusMethodNotAllowed, Body: []byte(`{"message":"Pull Request is not mergeable"}`)}, false},
+		"409 head moved":     {&StatusError{Code: http.StatusConflict, Body: expected}, false},
+		"not a StatusError":  {errors.New("Required status check is expected"), false},
+		"nil":                {nil, false},
+	} {
+		if got := ExpectsCheck(tc.err); got != tc.want {
+			t.Errorf("%s: ExpectsCheck = %v, want %v", name, got, tc.want)
+		}
 	}
 }
