@@ -2,3 +2,6 @@ lisa-design:
 - Self-contained in internal/train (#61 not merged): EvaluateChecks per name — any run not completed → pending (even after an older success or failure), else newest by StartedAt then ID decides; commit statuses (combined /status, already latest per context) keep zero StartedAt and fall back to ID. ExpectsCheck mirrors bump.ExpectsCheck on train's StatusError.
 - 405 "status check ... is expected" in mergeGreen → r.wait (NoHold, same phase), never Blocked/NeedsHuman; the next reconcile retries. Other merge errors stay Blocked.
 - Failing still wins over pending across different check names (unchanged); within one name a running re-run makes it pending.
+
+lisa-selfreview:
+pass 1: approve; no findings (re-read api.go/github.go/phases.go, tests, docs/train.md; gate green: go test -race ./..., vet, gofmt, actionlint, manifests).
