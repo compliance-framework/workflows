@@ -766,6 +766,12 @@ See [docs/ccf-bump.md](docs/ccf-bump.md).
 internal dependencies with `ccf-bump`, merges the release PRs, waits for the releases, and tracks it
 all in a `Release train YYYY-MM` issue and a Slack thread. See [docs/train.md](docs/train.md).
 
+## Plugin probe
+
+`cmd/plugin-probe` and the reusable `plugin-probe.yml` load plugins through the agent's runner
+library, report each one's protocol (v1 or v2) and agent library version, and check policy
+bundles with the agent's OPA version. See [docs/plugin-probe.md](docs/plugin-probe.md).
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,
