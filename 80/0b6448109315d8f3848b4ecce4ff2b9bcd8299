@@ -1,0 +1,3 @@
+lisa-addressed:
+- CORE-TEST-001: added TestSupersededPRsWarnings (close failure -> warning, no branch delete, run succeeds; unknown author -> warning, nothing closed).
+- CORE-STYLE-001: clarified superseded() doc comment.
