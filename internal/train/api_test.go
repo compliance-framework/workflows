@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,24 @@ func TestEvaluateChecks(t *testing.T) {
 	}
 	if state, _ := EvaluateChecks([]Check{{ID: 1, Name: "x", Status: "completed", Conclusion: "failure"}}, nil); state != ChecksGreen {
 		t.Errorf("no required checks: %s", state)
+	}
+}
+
+func TestRequiredChecks(t *testing.T) {
+	for _, tc := range []struct {
+		configured string
+		releasePR  bool
+		want       []string
+	}{
+		{"", false, []string{CICheck}}, // unset never means "no required check"
+		{"", true, []string{CICheck, ReleaseCheck}},
+		{"ci / all", false, []string{"ci / all"}},
+		{"ci / all", true, []string{"ci / all", ReleaseCheck}},
+	} {
+		e := &Engine{RequiredCheck: tc.configured}
+		if got := e.requiredChecks(tc.releasePR); !slices.Equal(got, tc.want) {
+			t.Errorf("requiredChecks(%v) with %q = %q, want %q", tc.releasePR, tc.configured, got, tc.want)
+		}
 	}
 }
 
