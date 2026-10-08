@@ -152,8 +152,9 @@ func (g *GitHub) SetSecurityUpdates(ctx context.Context, repo string, enabled bo
 	return g.do(ctx, onOff(enabled), repoPath(repo, "/automated-security-fixes"), nil, nil)
 }
 
-// Rulesets returns the repo's own rulesets, each read in full.
-func (g *GitHub) Rulesets(ctx context.Context, repo string) (map[int64]Ruleset, error) {
+// Rulesets returns the repo's own rulesets, each read in full; with Administration read, GitHub
+// leaves out the bypass actors and they stay nil (unknown).
+func (g *GitHub) Rulesets(ctx context.Context, repo string) (map[int64]CurrentRuleset, error) {
 	var list []struct {
 		ID         int64  `json:"id"`
 		SourceType string `json:"source_type"`
@@ -164,12 +165,12 @@ func (g *GitHub) Rulesets(ctx context.Context, repo string) (map[int64]Ruleset, 
 	if len(list) >= perPage {
 		return nil, fmt.Errorf("%s has %d or more rulesets, more than one page", repo, perPage)
 	}
-	out := map[int64]Ruleset{}
+	out := map[int64]CurrentRuleset{}
 	for _, item := range list {
 		if item.SourceType != "" && item.SourceType != "Repository" {
 			continue
 		}
-		var r Ruleset
+		var r CurrentRuleset
 		if err := g.do(ctx, http.MethodGet, repoPath(repo, fmt.Sprintf("/rulesets/%d", item.ID)), nil, &r); err != nil {
 			return nil, err
 		}

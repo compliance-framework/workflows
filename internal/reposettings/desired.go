@@ -58,6 +58,25 @@ type Ruleset struct {
 	Rules        []Rule        `json:"rules"`
 }
 
+// CurrentRuleset is a Ruleset as GET /repos/{owner}/{repo}/rulesets/{id} returns it. GitHub leaves
+// bypass_actors out for a token that can't edit the ruleset (Administration read), so a nil
+// BypassActors (absent or null) means unknown, while a pointer to an empty slice means none. This
+// field shadows the embedded Ruleset.BypassActors, which stays nil.
+type CurrentRuleset struct {
+	Ruleset
+	BypassActors *[]BypassActor `json:"bypass_actors"`
+}
+
+// known returns the ruleset with its bypass actors, and whether they were readable.
+func (c CurrentRuleset) known() (Ruleset, bool) {
+	r := c.Ruleset
+	if c.BypassActors == nil {
+		return r, false
+	}
+	r.BypassActors = *c.BypassActors
+	return r, true
+}
+
 // Conditions select the refs a ruleset applies to.
 type Conditions struct {
 	RefName RefName `json:"ref_name"`

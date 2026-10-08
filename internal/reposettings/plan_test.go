@@ -19,6 +19,8 @@ type fakeRepo struct {
 	alerts, updates bool
 	// hideUpdates reads Dependabot security updates as unknown.
 	hideUpdates bool
+	// hideBypass reads rulesets as a token with Administration read does: without bypass_actors.
+	hideBypass bool
 	// config is the attached org code security configuration (nil: none).
 	config   *SecurityConfiguration
 	rulesets map[int64]Ruleset
@@ -89,16 +91,28 @@ func (f *fakeGitHub) SecurityConfiguration(_ context.Context, repo string) (*Sec
 	return r.config, nil
 }
 
-func (f *fakeGitHub) Rulesets(_ context.Context, repo string) (map[int64]Ruleset, error) {
+func (f *fakeGitHub) Rulesets(_ context.Context, repo string) (map[int64]CurrentRuleset, error) {
 	r, err := f.repo("rulesets", repo, false)
 	if err != nil {
 		return nil, err
 	}
-	out := map[int64]Ruleset{}
+	out := map[int64]CurrentRuleset{}
 	for id, rs := range r.rulesets {
-		out[id] = rs
+		out[id] = asRead(rs, r.hideBypass)
 	}
 	return out, nil
+}
+
+// asRead decodes rs as GET returns it, without bypass_actors if hideBypass.
+func asRead(rs Ruleset, hideBypass bool) CurrentRuleset {
+	m := toMap(rs)
+	if hideBypass {
+		delete(m, "bypass_actors")
+	}
+	var out CurrentRuleset
+	b, _ := json.Marshal(m)
+	_ = json.Unmarshal(b, &out)
+	return out
 }
 
 func (f *fakeGitHub) UpdateMergeSettings(_ context.Context, repo string, s MergeSettings) error {
@@ -165,8 +179,8 @@ func githubDefaults() *fakeRepo {
 		},
 		updates: true,
 		rulesets: map[int64]Ruleset{
-			7: asReturned(defaultBranchRuleset(ReviewRuleset, nil, Rule{Type: "pull_request", Parameters: pullRequestParams(0)})),
-			8: asReturned(defaultBranchRuleset("other", nil, Rule{Type: "deletion"})),
+			7: asReturned(defaultBranchRuleset(ReviewRuleset, []BypassActor{}, Rule{Type: "pull_request", Parameters: pullRequestParams(0)})),
+			8: asReturned(defaultBranchRuleset("other", []BypassActor{}, Rule{Type: "deletion"})),
 		},
 	}
 }
@@ -554,5 +568,116 @@ func TestRunApplyContinuesAfterFailedStep(t *testing.T) {
 	}
 	if _, ok := f.repos["o/a"].rulesets[101]; !ok {
 		t.Error("ccf-required was not created on o/a")
+	}
+}
+
+// inSync is a fake repo "o/a" already in the desired state, rulesets 7 (ccf-review) and 101
+// (ccf-required) included.
+func inSync(t *testing.T) *fakeGitHub {
+	t.Helper()
+	f := newFake("a")
+	if err := Run(context.Background(), f, Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	f.writes = nil
+	return f
+}
+
+func TestPlanRepoRulesetBypass(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// edit changes the in-sync fake before the plan.
+		edit              func(r *fakeRepo)
+		changes, unknowns []string
+		rulesetWrites     []int64
+	}{{
+		name: "hidden",
+		edit: func(r *fakeRepo) { r.hideBypass = true },
+		unknowns: []string{
+			`ruleset[ccf-required].bypass: unknown (not readable with Administration read) -> "none"`,
+			`ruleset[ccf-review].bypass: unknown (not readable with Administration read) -> {"Integration:42":"always"}`,
+		},
+		rulesetWrites: []int64{101, 7},
+	}, {
+		name: "empty",
+		edit: func(r *fakeRepo) {
+			rs := r.rulesets[7]
+			rs.BypassActors = []BypassActor{}
+			r.rulesets[7] = rs
+		},
+		changes: []string{
+			`ruleset[ccf-review].bypass: "none" -> (unset)`,
+			`ruleset[ccf-review].bypass.Integration:42: (unset) -> "always"`,
+		},
+		rulesetWrites: []int64{7},
+	}, {
+		name: "correct",
+		edit: func(*fakeRepo) {},
+	}, {
+		name: "hidden with another difference",
+		edit: func(r *fakeRepo) {
+			r.hideBypass = true
+			rs := r.rulesets[7]
+			rs.Enforcement = "disabled"
+			r.rulesets[7] = rs
+		},
+		changes: []string{`ruleset[ccf-review].enforcement: "disabled" -> "active"`},
+		unknowns: []string{
+			`ruleset[ccf-required].bypass: unknown (not readable with Administration read) -> "none"`,
+			`ruleset[ccf-review].bypass: unknown (not readable with Administration read) -> {"Integration:42":"always"}`,
+		},
+		rulesetWrites: []int64{101, 7},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := inSync(t)
+			tc.edit(f.repos["o/a"])
+			p, err := PlanRepo(context.Background(), f, "o/a", desired(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := changeStrings(p.Changes); !slices.Equal(got, tc.changes) {
+				t.Errorf("changes = %v, want %v", got, tc.changes)
+			}
+			if got := changeStrings(p.Unknown); !slices.Equal(got, tc.unknowns) {
+				t.Errorf("unknown = %v, want %v", got, tc.unknowns)
+			}
+			var ids []int64
+			for _, rw := range p.rulesets {
+				ids = append(ids, rw.id)
+			}
+			if !slices.Equal(ids, tc.rulesetWrites) {
+				t.Errorf("ruleset writes = %v, want %v", ids, tc.rulesetWrites)
+			}
+		})
+	}
+}
+
+func TestRunApplyWritesUnknownBypass(t *testing.T) {
+	f := inSync(t)
+	r := f.repos["o/a"]
+	r.hideBypass = true // already right, but the token can't see it
+
+	var out bytes.Buffer
+	opts := Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}
+	if err := Run(context.Background(), f, opts, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"update 101 ccf-required o/a", "update 7 ccf-review o/a"}; !slices.Equal(f.writes, want) {
+		t.Errorf("writes = %v, want each ruleset written once: %v", f.writes, want)
+	}
+	for _, want := range []string{"o/a: 0 change(s), 2 unknown", "o/a: applied 2 step(s)", unknownHint} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+
+	// Readable (a token with Administration write): the written bypass actors are right.
+	r.hideBypass = false
+	f.writes, out = nil, bytes.Buffer{}
+	if err := Run(context.Background(), f, opts, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writes) > 0 || !strings.Contains(out.String(), "o/a: up to date") {
+		t.Errorf("writes = %v, output:\n%s", f.writes, out.String())
 	}
 }

@@ -698,7 +698,9 @@ Administration **read**, so a dry run can't see them. They print as
 `repo.allow_merge_commit: unknown (not readable with Administration read) -> false`, count as
 `N unknown` next to the changes (`<repo>: <n> change(s), 7 unknown`), and a line under the
 totals says apply writes them. Apply PATCHes the full desired merge settings whenever any of them
-is unknown or differs; the PATCH is idempotent.
+is unknown or differs; the PATCH is idempotent. Rulesets' `bypass_actors` are hidden the same way:
+each such ruleset prints one `ruleset[<name>].bypass: unknown (not readable with Administration read) -> <desired>`
+line instead of a bypass diff, and apply PUTs that ruleset's full desired body (also idempotent).
 
 Dependabot security updates are read from `GET /repos/{owner}/{repo}/automated-security-fixes`
 (`enabled`); if the token can't read it, it prints as `unknown (not readable)`, never as enabled.
@@ -728,7 +730,7 @@ How to run it:
    the workflow from `main` with the same inputs and `apply` on. Run it again with `apply` on:
    every repo should be `up to date` and nothing is written (the sync is idempotent). A dry run
    can't show this, since its token is always read-only: a repo that is otherwise in sync shows
-   `0 change(s), 7 unknown`. Then set Administration back to **read**.
+   `0 change(s), 9 unknown` (7 merge settings, 2 ruleset bypass lists). Then set Administration back to **read**.
    Do the mocks first.
 
 The workflow calls `go run ./cmd/repo-settings sync`. Flags it doesn't expose: `--owner`

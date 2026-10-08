@@ -275,3 +275,27 @@ func TestGitHubRefusedStepKeepsApplying(t *testing.T) {
 		t.Errorf("output:\n%s", out.String())
 	}
 }
+
+func TestGitHubRulesetBypassAbsentVsEmpty(t *testing.T) {
+	// A token with Administration read gets no bypass_actors; one with write gets [] for none.
+	hidden := `{"id":7,"name":"ccf-review","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"rules":[]}`
+	for _, tc := range []struct {
+		name     string
+		override map[string]reply
+		want     *[]BypassActor
+	}{
+		{"absent", map[string]reply{"GET /repos/o/a/rulesets/7": {http.StatusOK, hidden}}, nil},
+		{"empty", nil, &[]BypassActor{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gh, _, _ := apiServerWith(t, defaultRepoJSON, tc.override)
+			got, err := gh.Rulesets(context.Background(), "o/a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rs := got[7]; rs.Name != ReviewRuleset || !reflect.DeepEqual(rs.BypassActors, tc.want) || rs.Ruleset.BypassActors != nil {
+				t.Errorf("ruleset 7 = %+v, want bypass actors %v", rs, tc.want)
+			}
+		})
+	}
+}
