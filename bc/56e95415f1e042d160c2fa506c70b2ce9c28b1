@@ -4,3 +4,6 @@ lisa-design:
 - Empty Engine.RequiredCheck falls back to CICheck (cmp.Or): with required-only gating an empty list would merge unchecked.
 - cancelled/stale newest run -> pending (a newer run is expected; if none comes the repo keeps waiting, it is not held). skipped/neutral -> pass. failure/timed_out/action_required/startup_failure -> failing.
 - release-checks / release-checks is required on release PRs only; all 10 mock callers report it from ci.yml (verified read-only).
+
+lisa-selfreview:
+pass 1: CORE-TEST-001 (must-fix) internal/train/phases.go requiredChecks: the fallback to CICheck when Engine.RequiredCheck is empty, and the --required-check override, have no direct test.
