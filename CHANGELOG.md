@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.1](https://github.com/compliance-framework/workflows/compare/v1.1.0...v1.1.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **ccf-bump:** leave a PR merged or closed during the merge pass's wait ([9469d9b](https://github.com/compliance-framework/workflows/commit/9469d9bfe19a28da6a5bf2403fd00c1209f5b53e))
+* **ccf-bump:** merge its own PRs as the release bot instead of GitHub auto-merge ([3c1d925](https://github.com/compliance-framework/workflows/commit/3c1d925a49f2e221f47221ac97669814b5d6b1b7))
+* **ccf-bump:** merge its own PRs as the release bot instead of GitHub auto-merge ([880fbaa](https://github.com/compliance-framework/workflows/commit/880fbaa76063f52d531dc5b3f2a32044696dbeb2))
+* **ccf-bump:** merge only when the newest ci / required run passed ([20aa48d](https://github.com/compliance-framework/workflows/commit/20aa48d2ca86e93288da852a2d24acfa31ae701e))
+* **ccf-bump:** merge only when the newest ci / required run passed ([a88abf9](https://github.com/compliance-framework/workflows/commit/a88abf9215ac4469e44e717e64cf6a338286ea70))
+* **ccf-bump:** scheduled sync reads repos.mock.yaml until go-live ([fc0d779](https://github.com/compliance-framework/workflows/commit/fc0d779257482818f17b1150be95cffb0ee14f80))
+* **ccf-bump:** scheduled sync reads repos.mock.yaml until go-live ([ab165c0](https://github.com/compliance-framework/workflows/commit/ab165c02a552b7f22abd2a929d4a6f8980bbabd4))
+* **train:** judge checks by their newest run, treat a pending required check as waiting ([86f2812](https://github.com/compliance-framework/workflows/commit/86f2812adacd457a89657a7248308117bb17fa57))
+* **train:** judge checks by their newest run, treat a pending required check as waiting ([f437fef](https://github.com/compliance-framework/workflows/commit/f437fef0d2343c99dc356c60fd17bbf739734973))
+
 ## [1.1.0](https://github.com/compliance-framework/workflows/compare/v1.0.0...v1.1.0) (2026-10-08)
 
 
