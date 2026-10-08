@@ -12,3 +12,7 @@ pass 1 (strict, run on the combined change before the stack split), verdict requ
 - CORE-TEST-001 (must-fix): first-release config and notify's tool ref had no test -> fixed (internal/ciworkflows/self_release_test.go).
 - CORE-NAME-001 (should-fix, PR above): bumper.finals doubled as a commit cache -> fixed (commits map).
 - CORE-STYLE-001 (nit): over-long lines in files.go doc and docs/ccf-bump.md -> fixed.
+
+lisa-selfreview:
+pass 2 (strict), verdict request_changes:
+- CORE-DOC-001 (should-fix) .github/workflows/renovate.yml input `repos` says "default every repo in the manifest"; the default now leaves out the workflows repo. Fix: say so.
