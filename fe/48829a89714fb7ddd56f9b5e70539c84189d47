@@ -2,3 +2,6 @@ lisa-addressed:
 pass 1 fixes:
 - 5373d411ce4b TestClosedPRGuard: PR-only guard accepted only exactly or followed by " && ".
 - d7d5fb4e8d92 PR links: Engine.ReposURL (GITHUB_SERVER_URL + "/" + --owner) replaces Engine.Owner and the hardcoded https://github.com; Render takes reposURL; cmd/train computes the server URL once for ReposURL and RunURL; the Slack link regex accepts http(s).
+
+lisa-design:
+- Supersedes the Owner decision: the engine config is ReposURL (web URL of the repos' owner, from GITHUB_SERVER_URL + --owner) and Render takes reposURL; still not persisted in State. Without reposURL, PRLink falls back to the plain "repo#n" label.
