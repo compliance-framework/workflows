@@ -65,6 +65,8 @@ func TestDecide(t *testing.T) {
 		{"push to another branch", Run{EventName: "push", Branch: "feature", DefaultBranch: "main"}, ReasonNone},
 		{"tag push", Run{EventName: "push", DefaultBranch: "main"}, ReasonNone},
 		{"schedule on main", Run{EventName: "schedule", Branch: "main", DefaultBranch: "main"}, ReasonNone},
+		{"merged release PR relabelled", Run{EventName: "pull_request", PRAuthor: ReleaseBotLogin, Branch: "release-please--branches--main", PRClosed: true}, ReasonNone},
+		{"closed renovate PR", Run{EventName: "pull_request_target", PRAuthor: "renovate[bot]", Branch: "renovate/test", PRClosed: true}, ReasonNone},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

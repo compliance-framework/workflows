@@ -85,6 +85,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		Tracker:               tracker,
 		Bumper:                execBumper{path: *bumpPath, log: stdout},
 		Load:                  load,
+		Owner:                 *owner,
 		Channel:               getenv("SLACK_CHANNEL"),
 		RequiredCheck:         *required,
 		ReleasePleaseWorkflow: *rpWorkflow,

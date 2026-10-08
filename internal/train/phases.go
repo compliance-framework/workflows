@@ -40,9 +40,9 @@ func (e *Engine) bump(ctx context.Context, st *State, r *RepoState) error {
 	case pr.Merged:
 		r.next(ReleasePR)
 	case !pr.Open:
-		r.hold(NeedsHuman, false, "bump PR #%d was closed without merging; `/retry %s` bumps again, `/skip %s` skips the repo", pr.Number, r.Name, r.Name)
+		r.hold(NeedsHuman, false, "bump PR %s was closed without merging; `/retry %s` bumps again, `/skip %s` skips the repo", e.prLink(r.Name, pr.Number), r.Name, r.Name)
 	case !slices.Contains(pr.Labels, bump.AutomergeLabel) && !pr.AutoMerge: // AutoMerge: a PR from an older ccf-bump
-		r.hold(NeedsHuman, false, "ccf-bump left #%d to a person (no %s label: a major update, or a pin that was not a version); review and merge it by hand", pr.Number, bump.AutomergeLabel)
+		r.hold(NeedsHuman, false, "ccf-bump left %s to a person (no %s label: a major update, or a pin that was not a version); review and merge it by hand", e.prLink(r.Name, pr.Number), bump.AutomergeLabel)
 	default:
 		merged, err := e.mergeGreen(ctx, r, pr)
 		if merged {
@@ -61,18 +61,18 @@ func (e *Engine) mergeGreen(ctx context.Context, r *RepoState, pr *PR) (bool, er
 	}
 	switch state, detail := EvaluateChecks(checks, e.RequiredCheck); state {
 	case ChecksPending:
-		r.wait("waiting for checks on #%d: %s", pr.Number, detail)
+		r.wait("waiting for checks on %s: %s", e.prLink(r.Name, pr.Number), detail)
 		return false, nil
 	case ChecksFailing:
-		r.hold(Blocked, false, "checks failing on #%d at %s: %s", pr.Number, short(pr.HeadSHA), detail)
+		r.hold(Blocked, false, "checks failing on %s at %s: %s", e.prLink(r.Name, pr.Number), short(pr.HeadSHA), detail)
 		return false, nil
 	}
 	if err := e.Repos.Merge(ctx, r.Name, pr.Number, pr.HeadSHA); ExpectsCheck(err) {
 		// A run of a required check started after the checks were read: the next reconcile retries.
-		r.wait("waiting for checks on #%d: GitHub still expects a required check", pr.Number)
+		r.wait("waiting for checks on %s: GitHub still expects a required check", e.prLink(r.Name, pr.Number))
 		return false, nil
 	} else if err != nil {
-		r.hold(Blocked, false, "merging #%d failed: %v", pr.Number, err)
+		r.hold(Blocked, false, "merging %s failed: %v", e.prLink(r.Name, pr.Number), err)
 		return false, nil
 	}
 	e.logf("%s: merged #%d", r.Name, pr.Number)
@@ -135,7 +135,7 @@ func (e *Engine) merge(ctx context.Context, r *RepoState) error {
 	if !pr.Merged && !pr.Open {
 		r.ReleasePR = 0
 		r.next(ReleasePR)
-		r.Detail = fmt.Sprintf("release PR #%d was closed", pr.Number)
+		r.Detail = fmt.Sprintf("release PR %s was closed", e.prLink(r.Name, pr.Number))
 		return nil
 	}
 	if !pr.Merged {
@@ -144,8 +144,8 @@ func (e *Engine) merge(ctx context.Context, r *RepoState) error {
 			return err
 		}
 		if len(majors) > 0 && !slices.Contains(pr.Labels, release.MajorApprovedLabel) {
-			r.hold(NeedsHuman, false, "#%d raises a major version (%s): add the `%s` label to release it, or `/skip %s`",
-				pr.Number, strings.Join(majors, "; "), release.MajorApprovedLabel, r.Name)
+			r.hold(NeedsHuman, false, "%s raises a major version (%s): add the `%s` label to release it, or `/skip %s`",
+				e.prLink(r.Name, pr.Number), strings.Join(majors, "; "), release.MajorApprovedLabel, r.Name)
 			return nil
 		}
 		if merged, err := e.mergeGreen(ctx, r, pr); !merged {
@@ -209,7 +209,7 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 		case err != nil:
 			return err
 		case run != nil && run.Status == "completed" && run.Conclusion != "success":
-			r.hold(Blocked, false, "release-please failed after merging #%d: %s", r.ReleasePR, run.URL)
+			r.hold(Blocked, false, "release-please failed after merging %s: %s", e.prLink(r.Name, r.ReleasePR), run.URL)
 		default:
 			r.wait("waiting for release-please to tag %s", short(r.MergeSHA))
 		}

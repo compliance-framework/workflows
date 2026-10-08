@@ -1,5 +1,6 @@
 # Checks every CCF repo runs; the kind-specific CI workflows call it. Callers must grant
 # actions: read, contents: read, pull-requests: read and security-events: write (see README).
+# Nothing runs for a closed PR (e.g. release-please relabelling its merged release PR).
 name: ci-common
 
 on:
@@ -10,7 +11,7 @@ permissions: {}
 jobs:
   pr-title:
     name: pr-title
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.state != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -23,7 +24,7 @@ jobs:
   vulns:
     name: vulns
     # Scans the base branch and the PR head, and fails only on vulnerabilities the PR adds.
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.state != 'closed'
     permissions:
       # Required by the called workflow's job, so callers must grant them too.
       actions: read
@@ -41,6 +42,7 @@ jobs:
 
   actionlint:
     name: actionlint
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

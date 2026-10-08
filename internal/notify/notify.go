@@ -7,6 +7,9 @@
 //     one of AutomationBranchPrefixes (a pull request, or a push to that branch);
 //   - (b) it is for a push to the default branch.
 //
+// A run for a closed pull request (merged or not) is never tracked: release-please relabels its
+// release PR after the merge, and a labeled event re-runs CI on a PR no one can act on any more.
+//
 // A failed tracked run opens an incident (a top-level Slack message) or, while one is open,
 // replies in its thread; a passing run closes it with a reply. See Handle.
 package notify
@@ -54,6 +57,7 @@ type Run struct {
 	PRTitle       string
 	PRAuthor      string
 	PRNeedsHuman  bool // the PR carries NeedsHumanLabel (from the event payload)
+	PRClosed      bool // the PR is closed, merged or not (from the event payload)
 }
 
 // RunFromEnv builds a Run from a workflow step's GITHUB_* variables and the event payload
@@ -84,6 +88,7 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 		PullRequest *struct {
 			Number int    `json:"number"`
 			Title  string `json:"title"`
+			State  string `json:"state"`
 			User   struct {
 				Login string `json:"login"`
 			} `json:"user"`
@@ -114,6 +119,7 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 	}
 	if pr := ev.PullRequest; pr != nil {
 		r.PRNumber, r.PRTitle, r.PRAuthor, r.Branch = pr.Number, pr.Title, pr.User.Login, pr.Head.Ref
+		r.PRClosed = pr.State == "closed"
 		for _, l := range pr.Labels {
 			r.PRNeedsHuman = r.PRNeedsHuman || l.Name == NeedsHumanLabel
 		}
@@ -128,13 +134,16 @@ func RunFromEnv(getenv func(string) string) (Run, error) {
 	return r, nil
 }
 
-// Decide returns why the run r is tracked, or ReasonNone.
+// Decide returns why the run r is tracked, or ReasonNone. A run for a closed pull request is
+// not tracked, so it opens no incident, posts no reply and is never posted as needing a human.
 func Decide(r Run) Reason {
 	automation := false
 	for _, p := range AutomationBranchPrefixes {
 		automation = automation || strings.HasPrefix(r.Branch, p)
 	}
 	switch {
+	case (r.EventName == "pull_request" || r.EventName == "pull_request_target") && r.PRClosed:
+		return ReasonNone
 	case r.EventName == "pull_request" || r.EventName == "pull_request_target":
 		if r.PRAuthor == ReleaseBotLogin {
 			return ReasonReleaseBotPR

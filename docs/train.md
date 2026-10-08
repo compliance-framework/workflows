@@ -37,7 +37,8 @@ Each train has an issue in this repo titled `Release train YYYY-MM` (a second ma
 month gets ` (2)`, a dry run ` (dry run)`), labelled `train` and `train:open` while it runs, then
 `train:done`, `train:aborted` or `train:dry-run` when closed. The body has a table of every repo's
 stage, status, versions and PRs, and the train's state as JSON in a hidden comment at the end.
-Don't edit that comment.
+Don't edit that comment. Every PR reference, in the issue, its comments and the Slack thread, is a
+link labelled `<repo>#<n>` (e.g. `mock-agent#14`): a bare `#14` would link to this repo's own #14.
 
 When every repo is done the train:
 

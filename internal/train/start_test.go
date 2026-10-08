@@ -113,7 +113,8 @@ func TestDryRunPlansTheW1Stages(t *testing.T) {
 	}
 	plan := w.comments[1][0].Body
 	for _, want := range []string{
-		"1. api (would release v0.22.0 from #", "gooci (would release v0.0.8 from #",
+		"1. api (would release v0.22.0 from [api#", "](https://github.com/compliance-framework/api/pull/",
+		"gooci (would release v0.0.8 from [gooci#", "](https://github.com/compliance-framework/gooci/pull/",
 		"2. agent (ccf-bump would open a PR; the bump would make release-please propose v0.1.1); ui (",
 		"3. agent-action (", "4. helm-charts (",
 		"Would open the chart issue helm-charts: \"Release train 2026-12: minor releases to roll into the charts\" (1 repos).",
@@ -131,7 +132,8 @@ func TestDryRunPlansTheW1Stages(t *testing.T) {
 	if !slices.Contains(w.bumps, "agent api=v0.22.0,gooci=v0.0.8 dry=true") {
 		t.Errorf("bumps = %v", w.bumps)
 	}
-	if len(w.external) != 0 || len(w.slack) != 2 || !strings.Contains(w.slack[1], "Dry-run plan") {
+	if len(w.external) != 0 || len(w.slack) != 2 || !strings.Contains(w.slack[1], "Dry-run plan") ||
+		!strings.Contains(w.slack[1], "from <https://github.com/compliance-framework/api/pull/") || strings.Contains(w.slack[1], "](") {
 		t.Errorf("external %v, slack %q", w.external, w.slack)
 	}
 	// A later scheduled day doesn't plan again, and a reconcile finds no train.

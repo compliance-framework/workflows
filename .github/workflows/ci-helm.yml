@@ -21,6 +21,7 @@ jobs:
   common:
     name: common
     # A local reference in a called workflow resolves to this repo at the same commit (README).
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed') }}
     uses: ./.github/workflows/ci-common.yml
     permissions:
       actions: read
@@ -30,6 +31,7 @@ jobs:
 
   helm:
     name: helm
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -93,6 +95,7 @@ jobs:
 
   ct:
     name: ct
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -123,13 +126,15 @@ jobs:
   required:
     name: required
     needs: [common, helm, ct]
-    if: always()
+    # Skipped, not failed, on a closed PR, like the jobs above.
+    if: ${{ always() && !(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
     steps:
-      # No job above is conditional, so anything but success fails (jobs ci-common skips
-      # on push events are inside `common`, whose result is still success).
+      # The jobs above skip only on a closed PR, where this job skips too, so anything but
+      # success fails (jobs ci-common skips on push events are inside `common`, whose result
+      # is still success).
       - name: Check the results
         env:
           NEEDS: ${{ toJSON(needs) }}

@@ -82,7 +82,7 @@ func TestMergeGreenRuns(t *testing.T) {
 	}{
 		"old success, new run in progress": {
 			checks: []Check{at(1, 1, "ci / required", "completed", "success"), at(2, 2, "ci / required", "in_progress", "")},
-			detail: "waiting for checks on #7: ci / required",
+			detail: "waiting for checks on [mock-api#7](https://github.com/compliance-framework/mock-api/pull/7): ci / required",
 		},
 		"old failure, new success": {
 			checks: []Check{at(1, 1, "ci / required", "completed", "failure"), at(2, 2, "ci / required", "completed", "success")},
@@ -90,7 +90,7 @@ func TestMergeGreenRuns(t *testing.T) {
 		},
 		"old success, new failure": {
 			checks: []Check{at(1, 1, "ci / required", "completed", "success"), at(2, 2, "ci / required", "completed", "failure")},
-			hold:   Blocked, detail: "checks failing on #7",
+			hold:   Blocked, detail: "checks failing on [mock-api#7](https://github.com/compliance-framework/mock-api/pull/7) at head7",
 		},
 		"GitHub still expects the check": {
 			checks: []Check{at(1, 1, "ci / required", "completed", "success")}, mergeErrs: []error{expected},
@@ -98,7 +98,7 @@ func TestMergeGreenRuns(t *testing.T) {
 		},
 		"another merge refusal": {
 			checks: []Check{at(1, 1, "ci / required", "completed", "success")}, mergeErrs: []error{&StatusError{Status: http.StatusMethodNotAllowed, Body: "not mergeable"}},
-			hold: Blocked, detail: "merging #7 failed",
+			hold: Blocked, detail: "merging [mock-api#7](https://github.com/compliance-framework/mock-api/pull/7) failed",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -147,9 +147,11 @@ caller snippet, state and migration: [docs/notify.md](docs/notify.md).
 
 Each calls `ci-common.yml` and ends in a job named `required`, the one status check a repo
 needs to require (branch protection shows it as `<caller job> / required`). `required` runs
-with `if: always()`, needs every other job, and fails unless all of them succeeded. None of
-those jobs is conditional, so a skipped job also fails it; the `pull_request`-only jobs inside
-`ci-common.yml` don't count, because `common` still succeeds when they skip. Within a job,
+with `if: always()`, needs every other job, and fails unless all of them succeeded. On an open
+PR or a push none of those jobs is conditional, so a skipped job also fails it; the `pull_request`-only jobs inside
+`ci-common.yml` don't count, because `common` still succeeds when they skip. On a closed PR
+(release-please relabels its release PR after the merge, and callers run CI on `labeled`) every
+job is skipped, `required` too, so a merged PR gets no CI run and no red check. Within a job,
 every check runs even if an earlier one failed, so one run reports every problem. Callers
 grant the permissions `ci-common.yml` needs (see the example above); none takes secrets.
 Tool versions are pinned in the workflows.

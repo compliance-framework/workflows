@@ -158,8 +158,40 @@ func TestRequiredNeedsEveryJob(t *testing.T) {
 		}
 		req := wf.Jobs["required"]
 		slices.Sort(others)
-		if got := slices.Sorted(slices.Values(req.Needs)); !slices.Equal(got, others) || req.If != "always()" {
-			t.Errorf("%s: required needs %v if %q, want %v if always()", file, got, req.If, others)
+		if got := slices.Sorted(slices.Values(req.Needs)); !slices.Equal(got, others) || req.If != requiredIf {
+			t.Errorf("%s: required needs %v if %q, want %v if %q", file, got, req.If, others, requiredIf)
+		}
+	}
+}
+
+// notClosed is the guard every CI job carries: nothing runs for a closed PR, which a labeled
+// event (release-please relabelling its merged release PR) would otherwise re-run CI on.
+const (
+	notClosed = "!(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed')"
+	// requiredIf runs `required` whatever the jobs it needs did, except on a closed PR, where
+	// it is skipped with them instead of failing on their skips.
+	requiredIf = "${{ always() && " + notClosed + " }}"
+	// prOnly is the guard of the jobs that only run for a pull request.
+	prOnly = "github.event_name == 'pull_request' && github.event.pull_request.state != 'closed'"
+)
+
+// TestClosedPRGuard: every job of the CI workflows callers run on pull_request events skips on
+// a closed PR, and `required` is skipped (not failed) with them.
+func TestClosedPRGuard(t *testing.T) {
+	for _, file := range append(slices.Clone(kinds), "ci-common.yml", "release-checks.yml") {
+		var wf workflow
+		read(t, file, &wf)
+		if len(wf.Jobs) == 0 {
+			t.Fatalf("%s: no jobs", file)
+		}
+		for name, job := range wf.Jobs {
+			ok := job.If == "${{ "+notClosed+" }}" || strings.HasPrefix(job.If, prOnly)
+			if name == "required" {
+				ok = job.If == requiredIf
+			}
+			if !ok {
+				t.Errorf("%s: job %s has if %q, want it to skip on a closed PR", file, name, job.If)
+			}
 		}
 	}
 }
