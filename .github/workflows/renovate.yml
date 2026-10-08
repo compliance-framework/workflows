@@ -2,7 +2,8 @@ name: renovate
 
 # Self-hosted Renovate for the manifest's repos, with the shared preset (renovate/default.json).
 # Runs daily: the preset limits normal updates to the 8th and 22nd and lets vulnerability fixes
-# through any day. A scheduled run uses the dispatch defaults below. See docs/renovate.md.
+# through any day. A scheduled run uses the dispatch defaults below, except that it runs live when the
+# repo variable RENOVATE_LIVE is "true". See docs/renovate.md.
 
 on:
   schedule:
@@ -45,7 +46,8 @@ jobs:
       # A scheduled run has no inputs: keep these fallbacks equal to the dispatch defaults.
       MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
       REPOS: ${{ inputs.repos }}
-      DRY_RUN: ${{ inputs.dry_run || 'full' }}
+      # Scheduled runs are full dry runs until RENOVATE_LIVE is "true"; manual ones follow the input.
+      DRY_RUN: ${{ github.event_name == 'schedule' && vars.RENOVATE_LIVE == 'true' && 'off' || inputs.dry_run || 'full' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,8 +80,8 @@ jobs:
           owner: compliance-framework
           repositories: ${{ steps.select.outputs.repos }}
           # A dry run writes nothing, so its token can't either.
-          permission-contents: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # branches and commits
-          permission-pull-requests: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # PRs and auto-merge
+          permission-contents: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # branches, commits and merges
+          permission-pull-requests: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # PRs and merges
           permission-issues: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # Dependency Dashboard, labels
           permission-workflows: ${{ env.DRY_RUN == 'off' && 'write' || '' }} # action updates in .github/workflows
           permission-checks: read # branch status

@@ -133,7 +133,8 @@ func TestSharedPreset(t *testing.T) {
 		MinimumReleaseAge      string   `json:"minimumReleaseAge"`
 		InternalChecksFilter   string   `json:"internalChecksFilter"`
 		OSVVulnerabilityAlerts bool     `json:"osvVulnerabilityAlerts"`
-		PlatformAutomerge      bool     `json:"platformAutomerge"`
+		PlatformAutomerge      *bool    `json:"platformAutomerge"`
+		AutomergeStrategy      string   `json:"automergeStrategy"`
 		PrHourlyLimit          int      `json:"prHourlyLimit"`
 		PrConcurrentLimit      int      `json:"prConcurrentLimit"`
 		PostUpdateOptions      []string `json:"postUpdateOptions"`
@@ -148,6 +149,7 @@ func TestSharedPreset(t *testing.T) {
 			MatchUpdateTypes  []string `json:"matchUpdateTypes"`
 			GroupName         string   `json:"groupName"`
 			Automerge         *bool    `json:"automerge"`
+			AutomergeType     string   `json:"automergeType"`
 			Enabled           *bool    `json:"enabled"`
 		} `json:"packageRules"`
 	}
@@ -163,8 +165,13 @@ func TestSharedPreset(t *testing.T) {
 	if p.MinimumReleaseAge != "7 days" || p.InternalChecksFilter != "strict" {
 		t.Errorf("minimumReleaseAge %q, internalChecksFilter %q", p.MinimumReleaseAge, p.InternalChecksFilter)
 	}
-	if !p.OSVVulnerabilityAlerts || !p.PlatformAutomerge || p.PrHourlyLimit <= 0 || p.PrConcurrentLimit <= 0 {
-		t.Errorf("osv %v, platformAutomerge %v, prHourlyLimit %d, prConcurrentLimit %d", p.OSVVulnerabilityAlerts, p.PlatformAutomerge, p.PrHourlyLimit, p.PrConcurrentLimit)
+	if !p.OSVVulnerabilityAlerts || p.PrHourlyLimit <= 0 || p.PrConcurrentLimit <= 0 {
+		t.Errorf("osv %v, prHourlyLimit %d, prConcurrentLimit %d", p.OSVVulnerabilityAlerts, p.PrHourlyLimit, p.PrConcurrentLimit)
+	}
+	// GitHub's native auto-merge never applies the ccf-review bypass, so Renovate merges the PRs
+	// itself, through the API as ccf-release-bot, with the repos' only merge method.
+	if p.PlatformAutomerge == nil || *p.PlatformAutomerge || p.AutomergeStrategy != "squash" {
+		t.Errorf("platformAutomerge %v, automergeStrategy %q, want false and squash", p.PlatformAutomerge, p.AutomergeStrategy)
 	}
 	if !slices.Contains(p.PostUpdateOptions, "gomodTidy") {
 		t.Errorf("postUpdateOptions = %v, want gomodTidy", p.PostUpdateOptions)
@@ -182,7 +189,7 @@ func TestSharedPreset(t *testing.T) {
 		case off && slices.Contains(r.MatchPackageNames, "github.com/compliance-framework/**") && slices.Contains(r.MatchPackageNames, "ghcr.io/compliance-framework/**"):
 			internalOff = len(r.MatchRepositories) == 0
 		case r.GroupName != "" && slices.Contains(r.MatchPackageNames, "*"):
-			grouped = r.Automerge != nil && *r.Automerge && !slices.Contains(r.MatchUpdateTypes, "major") &&
+			grouped = r.Automerge != nil && *r.Automerge && r.AutomergeType == "pr" && !slices.Contains(r.MatchUpdateTypes, "major") &&
 				slices.Equal(r.MatchUpdateTypes, []string{"minor", "patch", "digest", "pin", "pinDigest"})
 		case slices.Contains(r.MatchPackageNames, "github.com/open-policy-agent/opa"):
 			if off {
