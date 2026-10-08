@@ -131,7 +131,7 @@ func TestGitHubNeedsHuman(t *testing.T) {
 			labels[repo] = true
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{}`)
-		case r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/issues/3/labels") || strings.HasSuffix(r.URL.Path, "/requested_reviewers")):
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues/3/labels"):
 			fmt.Fprint(w, `[]`)
 		default:
 			http.Error(w, `{"message":"Validation Failed"}`, http.StatusUnprocessableEntity)
@@ -145,16 +145,12 @@ func TestGitHubNeedsHuman(t *testing.T) {
 			t.Fatalf("%s: %v", repo, err)
 		}
 	}
-	if err := g.RequestTeamReview(ctx, "ui", 3, "admins"); err != nil {
-		t.Fatal(err)
-	}
 	want := []string{
 		"GET /repos/o/ui/labels/needs-human ",
 		`POST /repos/o/ui/labels {"color":"d93f0b","description":"A bot PR waiting for a person","name":"needs-human"}`,
 		`POST /repos/o/ui/issues/3/labels {"labels":["needs-human"]}`,
 		"GET /repos/o/api/labels/needs-human ",
 		`POST /repos/o/api/issues/3/labels {"labels":["needs-human"]}`,
-		`POST /repos/o/ui/pulls/3/requested_reviewers {"team_reviewers":["admins"]}`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

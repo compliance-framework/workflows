@@ -21,7 +21,7 @@ public repos.
 | Go | `postUpdateOptions: ["gomodTidy"]`. Indirect modules are left to `go mod tidy` (Renovate's default). |
 | Actions | Pinned by digest (`helpers:pinGitHubActionDigests`). Dockerfile base images and images in helm values are tracked by Renovate's own managers. |
 | OPA | Off in every repo except `api` (and `mock-api`), so in agent, the policy repos and the plugins it follows the api through `ccf-bump`. In `api` it gets its own PR, `renovate/opa`, which never auto-merges, because a bump forces agent and the policies to follow. |
-| Needs a human | Majors and the api's `renovate/opa` PR get the `needs-human` label (`addLabels`) and a review request from team `admins` (`reviewers: ["team:admins"]`). See [attention.md](attention.md). |
+| Needs a human | Majors and the api's `renovate/opa` PR get the `needs-human` label (`addLabels`). See [attention.md](attention.md). |
 | Internal packages | Off: `github.com/compliance-framework/**` (Go modules), `ghcr.io/compliance-framework/**` (images) and `compliance-framework/**` (actions and reusable workflows, such as this repo's). The mocks use the same prefixes. |
 
 ### Why Renovate merges, not GitHub

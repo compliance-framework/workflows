@@ -120,8 +120,6 @@ jobs:
           permission-statuses: read
           # Bumps edit .github/workflows files; the permission has no read level, so only when live.
           permission-workflows: ${{ steps.plan.outputs.write == 'true' && 'write' || '' }}
-          # ccf-bump asks team admins to review a bump PR with auto-merge off (docs/attention.md).
-          permission-members: ${{ steps.plan.outputs.write == 'true' && 'read' || '' }}
       # Comment commands need the commenter's org role. The app may lack Members read: then the
       # step fails, the token is empty and the train refuses commands instead of failing.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0

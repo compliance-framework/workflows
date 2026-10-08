@@ -277,7 +277,7 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	if b.o.dryRun {
 		fmt.Fprintf(out, "  dry run: would push %s and open %q\n%s", branch, title, indent(body))
 		if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
-			fmt.Fprintf(out, "  dry run: auto-merge off; would ask a human: label %s%s\n", bump.NeedsHumanLabel, b.teamText())
+			fmt.Fprintf(out, "  dry run: auto-merge off; would add label %s\n", bump.NeedsHumanLabel)
 		}
 		// Nothing was opened to tell who ccf-bump runs as, so any bot's ccf-bump PR is listed.
 		old, err := b.superseded(ctx, name, branch, func(p bump.PR) bool { return p.User.Type == "Bot" })
@@ -335,26 +335,14 @@ func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, p
 	return nil
 }
 
-// needsHuman gets a person's attention for a PR with auto-merge off: the needs-human label and a
-// review request from the review team (GitHub notifies each member). Failures are warnings.
+// needsHuman labels a PR with auto-merge off needs-human, which notify-failure.yml posts to Slack
+// (docs/attention.md). A failure is a warning: the PR is open either way.
 func (b *bumper) needsHuman(ctx context.Context, repo string, pr *bump.PR) {
-	fmt.Fprintf(b.e.stdout, "  asking a human: label %s%s\n", bump.NeedsHumanLabel, b.teamText())
 	if err := b.e.gh.LabelNeedsHuman(ctx, repo, pr.Number); err != nil {
 		b.warn("%s#%d: label %s: %v", repo, pr.Number, bump.NeedsHumanLabel, err)
+		return
 	}
-	if b.o.reviewTeam != "" {
-		if err := b.e.gh.RequestTeamReview(ctx, repo, pr.Number, b.o.reviewTeam); err != nil {
-			b.warn("%s#%d: request review from team %s: %v", repo, pr.Number, b.o.reviewTeam, err)
-		}
-	}
-}
-
-// teamText says which team is asked to review, if any.
-func (b *bumper) teamText() string {
-	if b.o.reviewTeam == "" {
-		return ""
-	}
-	return ", review from team " + b.o.reviewTeam
+	fmt.Fprintf(b.e.stdout, "  label: %s\n", bump.NeedsHumanLabel)
 }
 
 // superseded returns repo's other open PRs that ccf-bump opened in this mode: head branch

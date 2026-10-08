@@ -70,9 +70,8 @@ Files are edited in place, so comments and layout stay. Chart versions are left 
 - **Auto-merge** (squash) is enabled when every change stays within its major version. A move from
   a pin that is not a version, or whose current version is unknown (the ui conformance file),
   needs a human.
-- **A PR that needs a human** (auto-merge off, or refused by GitHub) gets the `needs-human` label
-  and a review request from `--review-team` (env `CCF_BUMP_REVIEW_TEAM`, default `admins`); failures
-  are warnings. See [attention.md](attention.md).
+- **A PR that needs a human** (auto-merge off, or refused by GitHub) gets the `needs-human` label,
+  created in the repo when missing; a failure is a warning. See [attention.md](attention.md).
 - Shared-workflow pins follow their own rules, below.
 
 ## Shared-workflow pins
@@ -112,8 +111,7 @@ and its version comment is dropped.
 (default `true`). Scheduled runs use `repos.yaml` and are dry runs until the repo variable
 `CCF_BUMP_SYNC_LIVE` is `true`. It lists the repos, then mints a `ccf-release-bot` token scoped to
 exactly those (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`): read-only for dry runs; contents,
-pull requests and workflows write, and members read (team review requests), otherwise (bumps
-edit workflow files). Commits are authored by
+pull requests and workflows write otherwise (bumps edit workflow files). Commits are authored by
 the bot.
 
 ```sh

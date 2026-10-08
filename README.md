@@ -792,8 +792,7 @@ severity, to Slack every Monday (and on `workflow_dispatch`). See
 ## Bot PRs that need a human
 
 Bot PRs that wait for a person (Renovate majors and api OPA bumps, ccf-bump PRs with auto-merge
-off) get the `needs-human` label and a review request from team `admins`. See
-[docs/attention.md](docs/attention.md).
+off) get the `needs-human` label. See [docs/attention.md](docs/attention.md).
 
 ## ccf-bump
 

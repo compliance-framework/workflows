@@ -213,12 +213,6 @@ func (g *GitHub) LabelNeedsHuman(ctx context.Context, repo string, number int) e
 	return g.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/labels", g.Owner, repo, number), in, nil)
 }
 
-// RequestTeamReview requests a review of the PR from the org team with slug team.
-func (g *GitHub) RequestTeamReview(ctx context.Context, repo string, number int, team string) error {
-	in := map[string][]string{"team_reviewers": {team}}
-	return g.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", g.Owner, repo, number), in, nil)
-}
-
 // StatusError is a non-2xx API response.
 type StatusError struct {
 	Method, Path string
