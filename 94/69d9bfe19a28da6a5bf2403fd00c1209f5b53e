@@ -1,3 +1,6 @@
 lisa-addressed:
 - pass 1 closed-pr-polled-as-pending: tryMerge reads the PR's state and leaves one no longer open (merged by the train, or closed) instead of polling it as "computing mergeability"; TestMergeChangedMeanwhile covers it (fails without the fix).
 - pass 1 nit: relabel message now "labels changed (... removed or ... added); left open".
+
+lisa-selfreview:
+pass 2: approve; no new findings (workflows, docs and the closed-PR fix re-read; gate green: go test -race, vet, gofmt, actionlint, manifests).
