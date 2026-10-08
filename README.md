@@ -816,7 +816,8 @@ all in a `Release train YYYY-MM` issue and a Slack thread. See [docs/train.md](d
 
 `internal/slackkit` builds the Slack messages as Block Kit cards (header, fields, link buttons,
 context line, a colored status bar) and posts, replies to and edits them in place; the tools move
-to it one by one. See [docs/slack.md](docs/slack.md).
+to it one by one. `slack-preview.yml` (`workflow_dispatch`) posts a sample of each card, marked
+":eyes: Preview", to the real channels. See [docs/slack.md](docs/slack.md).
 
 ## Stack smoke test
 

@@ -1,8 +1,9 @@
-# Slack messages: `internal/slackkit`
+# Slack messages: `internal/slackkit` and `slack-preview.yml`
 
 The CCF Slack channels get [Block Kit](https://docs.slack.dev/reference/block-kit/blocks)
 cards built by one package, `internal/slackkit`; the tools move to it one by one from their
-plain-text messages.
+plain-text messages. `slack-preview.yml` posts samples of each card to the real channels, so a
+design change can be seen in Slack before the tools use it.
 
 ## The message shape
 
@@ -81,3 +82,22 @@ and `attachments`, as `chat.update` keeps whatever it isn't sent. Errors include
 Link buttons only open their URL. If the Slack app has no interactivity request URL, Slack may
 show a small warning icon after a click; that needs no scope, and setting any request URL in
 the app's "Interactivity & Shortcuts" settings removes it.
+
+## `slack-preview.yml`
+
+`workflow_dispatch` only, with input `which` (`all`, `ci-failures`, `needs-human`, `releases`,
+`digests`; default `all`). It runs `go run ./cmd/slack-preview --which <which>`, which posts to
+the channels in the `SLACK_CHANNEL_CI_FAILURES`, `SLACK_CHANNEL_NEEDS_HUMAN`,
+`SLACK_CHANNEL_RELEASES` and `SLACK_CHANNEL_DIGESTS` variables with `SLACK_BOT_TOKEN`. Every
+message says ":eyes: Preview" in its context line and fallback.
+
+| Sample | What it shows |
+| --- | --- |
+| `ci-failures` | an incident card (Failing) and a failure reply in its thread; ~10s later a "passing again" reply, and the card edited to Resolved |
+| `needs-human` | a Renovate major's card (Why / CI / Opened by / Waiting, Review PR); ~10s later edited to Handled |
+| `releases` | a train board at stage 1, edited three times (stage 2, stage 3, finished) ~10s apart with a reply per event |
+| `digests` | a draft release digest (from → to versions, highlights, changelog buttons) |
+
+With `which: all`, a sample whose channel variable is unset is skipped with a warning; naming
+that sample fails. Locally, `go run ./cmd/slack-preview --dry-run` lists the calls without
+posting (no token needed); `--pause` changes the wait before each edit.
