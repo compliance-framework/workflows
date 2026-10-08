@@ -23,8 +23,9 @@ type Reader interface {
 	// SecurityConfiguration returns the org code security configuration attached to the repo, or
 	// nil if there is none or the token can't read it.
 	SecurityConfiguration(ctx context.Context, repo string) (*SecurityConfiguration, error)
-	// Rulesets returns the repo's own rulesets (not inherited ones) by ID.
-	Rulesets(ctx context.Context, repo string) (map[int64]Ruleset, error)
+	// Rulesets returns the repo's own rulesets (not inherited ones) by ID; nil bypass actors are
+	// ones the token can't read.
+	Rulesets(ctx context.Context, repo string) (map[int64]CurrentRuleset, error)
 }
 
 // SecurityConfiguration is the part of an org code security configuration this tool checks. Each
@@ -62,14 +63,14 @@ func (c Change) String() string { return fmt.Sprintf("%s: %s -> %s", c.Key, c.Cu
 // unset stands for a value the repo doesn't have.
 const unset = "(unset)"
 
-// unknown stands for a merge setting the token can't read.
+// unknown stands for a merge setting or ruleset bypass list the token can't read.
 const unknown = "unknown (not readable with Administration read)"
 
 // unknownSecurity stands for a security setting the token can't read.
 const unknownSecurity = "unknown (not readable)"
 
 // unknownHint explains unknown settings once, under the totals.
-const unknownHint = "unknown: GitHub hides merge settings from a token with Administration read; apply writes the full desired merge settings (and any unknown security setting)"
+const unknownHint = "unknown: GitHub hides merge settings and ruleset bypass actors from a token with Administration read; apply writes the full desired merge settings, each ruleset whose bypass actors are unknown (and any unknown security setting)"
 
 // warningHint explains warnings once, under the totals.
 const warningHint = "warning: an enforced org code security configuration sets a different value; change it in the org configuration (this tool can't)"
@@ -78,8 +79,8 @@ const warningHint = "warning: an enforced org code security configuration sets a
 type Plan struct {
 	Repo    string
 	Changes []Change
-	// Unknown are settings the token can't read (merge settings, Dependabot security updates), so
-	// whether they differ isn't known. They are not counted as changes, but Apply writes them.
+	// Unknown are settings the token can't read (merge settings, ruleset bypass actors, Dependabot
+	// security updates), so whether they differ isn't known. They are not counted as changes, but Apply writes them.
 	Unknown []Change
 	// Managed are security settings an enforced org code security configuration already sets to
 	// the desired value. They are skipped.
@@ -172,8 +173,17 @@ func PlanRepo(ctx context.Context, r Reader, repo string, d Desired) (*Plan, err
 			p.rulesets = append(p.rulesets, rulesetWrite{ruleset: want})
 			continue
 		}
-		if c := diff(prefix, rulesetView(current[id]), rulesetView(want)); len(c) > 0 {
-			p.Changes = append(p.Changes, c...)
+		cur, bypassKnown := current[id].known()
+		curView, wantView := rulesetView(cur), rulesetView(want)
+		if !bypassKnown {
+			// Compare the rest; the PUT sends the full desired ruleset, so writing it is harmless.
+			p.Unknown = append(p.Unknown, Change{Key: prefix + ".bypass", Current: unknown, Desired: jsonString(wantView["bypass"])})
+			delete(curView, "bypass")
+			delete(wantView, "bypass")
+		}
+		c := diff(prefix, curView, wantView)
+		p.Changes = append(p.Changes, c...)
+		if len(c) > 0 || !bypassKnown {
 			p.rulesets = append(p.rulesets, rulesetWrite{id: id, ruleset: want})
 		}
 	}
@@ -410,11 +420,16 @@ func flatten(prefix string, v any, out map[string]string) {
 		}
 		return
 	}
+	out[prefix] = jsonString(v)
+}
+
+// jsonString is v as JSON, or as %v if it doesn't marshal.
+func jsonString(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
-		b = []byte(fmt.Sprintf("%v", v))
+		return fmt.Sprintf("%v", v)
 	}
-	out[prefix] = string(b)
+	return string(b)
 }
 
 // rulesetView is r as a map that diffs well: rules keyed by type with only managed parameters,
