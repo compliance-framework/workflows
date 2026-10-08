@@ -18,3 +18,28 @@ Every bot PR that needs a human carries one label, **`needs-human`** (the same n
 
 Both run as `ccf-release-bot`; adding and creating a label needs **Pull requests: write** (or
 Issues: write), which their live tokens already have.
+
+## Immediate post
+
+[`notify-failure.yml`](notify.md#needs-a-human), which runs after every CI run of every repo,
+posts a tracked bot PR to the `SLACK_CHANNEL_NEEDS_HUMAN` channel, once per PR, when:
+
+- it carries `needs-human` (the run for the `labeled` event is the first to see it), with the
+  reason from its branch: a major update, the api's OPA update, ccf-bump's auto-merge off;
+- it is a release-please PR whose `release-checks` job failed: it needs `release:major-approved`
+  from a maintainer, or an internal dependency isn't final yet. This goes to the needs-human
+  channel instead of a CI incident in `SLACK_CHANNEL_CI_FAILURES` (an incident still opens when
+  other jobs failed too). `release-checks` itself stays read-only: it never labels or comments.
+
+```text
+:raising_hand: mock-ui#13 chore(deps): update typescript to v7 — needs a human: major update
+```
+
+Human PRs are never posted.
+
+## Setting it up
+
+1. Create the Slack channel `#ccf-pr-needs-human` and invite the Slack bot (the app behind
+   `SLACK_BOT_TOKEN`) to it.
+2. Set the org variable `SLACK_CHANNEL_NEEDS_HUMAN` to the channel's ID, visible to the public
+   repos like the other channel variables. Until it is set, nothing is posted and nothing fails.
