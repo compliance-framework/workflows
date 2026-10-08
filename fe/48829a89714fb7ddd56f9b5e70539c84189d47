@@ -5,3 +5,6 @@ pass 1 fixes:
 
 lisa-design:
 - Supersedes the Owner decision: the engine config is ReposURL (web URL of the repos' owner, from GITHUB_SERVER_URL + --owner) and Render takes reposURL; still not persisted in State. Without reposURL, PRLink falls back to the plain "repo#n" label.
+
+lisa-selfreview:
+pass 2 (strict): approve, no findings (gate re-run: go vet, gofmt, go test -race on macOS and in golang:1.26 with bash 5/jq/yq, actionlint, both manifests).
