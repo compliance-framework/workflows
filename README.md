@@ -434,7 +434,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: preview-${{ github.ref }}
+  # PR number, not github.ref: a merged PR's events carry the base branch as github.ref.
+  group: preview-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   preview:
