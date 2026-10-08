@@ -1,5 +1,6 @@
-// Package reposettings compares a repo's merge settings, security settings and rulesets with the
-// state every CCF repo should have, prints the difference and, when asked, writes the desired state.
+// Package reposettings compares a repo's merge settings, security settings, Actions settings and
+// rulesets with the state every CCF repo should have, prints the difference and, when asked, writes
+// the desired state.
 // cmd/repo-settings and the repo-settings workflow drive it.
 package reposettings
 
@@ -11,9 +12,19 @@ import (
 
 // Ruleset names this tool owns. Rulesets with other names are left alone.
 const (
-	RequiredRuleset = "ccf-required"
-	ReviewRuleset   = "ccf-review"
+	RequiredRuleset    = "ccf-required"
+	ReviewRuleset      = "ccf-review"
+	ReleaseTagsRuleset = "ccf-release-tags"
 )
+
+// ReleaseTagPatterns match the release tags release-please creates as ccf-release-bot: vX.Y.Z and
+// <component>-vX.Y.Z, with or without a prerelease suffix (fnmatch: * also matches "1-rc1"). A
+// floating major tag (v1), which release-action.yml moves with GITHUB_TOKEN, doesn't match.
+var ReleaseTagPatterns = []string{"v*.*.*", "*-v*.*.*"}
+
+// ForkPRApprovalAll requires a maintainer's approval before the workflows of any outside
+// contributor's fork PR run, not only a first-time contributor's.
+const ForkPRApprovalAll = "all_external_contributors"
 
 // DefaultRequiredCheck is the check context the `required` job of a caller's `ci` job reports.
 const DefaultRequiredCheck = "ci / required"
@@ -111,11 +122,30 @@ type Config struct {
 	BypassAppID int64
 }
 
+// WorkflowPermissions are a repo's GITHUB_TOKEN defaults (GET/PUT
+// /repos/{owner}/{repo}/actions/permissions/workflow).
+type WorkflowPermissions struct {
+	// DefaultWorkflowPermissions ("read" or "write") is not managed: workflows that don't declare
+	// their permissions rely on it. A write sends the current value back.
+	DefaultWorkflowPermissions string `json:"default_workflow_permissions,omitempty"`
+	// CanApprovePullRequestReviews lets GITHUB_TOKEN approve PRs, which would let one person get a
+	// PR of theirs approved by a workflow of theirs and satisfy ccf-review.
+	CanApprovePullRequestReviews bool `json:"can_approve_pull_request_reviews"`
+}
+
+// ActionsSettings are the Actions settings this tool manages.
+type ActionsSettings struct {
+	CanApprovePullRequestReviews bool
+	// ForkPRApproval is the fork PR contributor approval policy (ForkPRApprovalAll).
+	ForkPRApproval string
+}
+
 // Desired is the state every repo should have.
 type Desired struct {
 	Merge               MergeSettings
 	VulnerabilityAlerts bool
 	SecurityUpdates     bool
+	Actions             ActionsSettings
 	Rulesets            []Ruleset
 }
 
@@ -134,6 +164,11 @@ func DesiredState(c Config) (Desired, error) {
 	if c.RequiredCheckAppID > 0 {
 		statusCheck["integration_id"] = c.RequiredCheckAppID
 	}
+	bot := []BypassActor{{ActorID: c.BypassAppID, ActorType: "Integration", BypassMode: "always"}}
+	tags := make([]string, len(ReleaseTagPatterns))
+	for i, p := range ReleaseTagPatterns {
+		tags[i] = "refs/tags/" + p
+	}
 	return Desired{
 		Merge: MergeSettings{
 			AllowSquashMerge:         true,
@@ -144,11 +179,12 @@ func DesiredState(c Config) (Desired, error) {
 		},
 		VulnerabilityAlerts: true,
 		SecurityUpdates:     false,
+		Actions:             ActionsSettings{CanApprovePullRequestReviews: false, ForkPRApproval: ForkPRApprovalAll},
 		Rulesets: []Ruleset{
 			defaultBranchRuleset(RequiredRuleset, []BypassActor{},
 				Rule{Type: "deletion"},
 				Rule{Type: "non_fast_forward"},
-				Rule{Type: "pull_request", Parameters: pullRequestParams(0)},
+				Rule{Type: "pull_request", Parameters: pullRequestParams(0, false)},
 				Rule{Type: "required_status_checks", Parameters: map[string]any{
 					"strict_required_status_checks_policy": false,
 					"do_not_enforce_on_create":             false,
@@ -156,11 +192,20 @@ func DesiredState(c Config) (Desired, error) {
 				}},
 			),
 			// "always" and "pull_request" bypass modes act the same here: ccf-required (no bypass)
-			// already forbids pushing to the default branch without a PR.
-			defaultBranchRuleset(ReviewRuleset,
-				[]BypassActor{{ActorID: c.BypassAppID, ActorType: "Integration", BypassMode: "always"}},
-				Rule{Type: "pull_request", Parameters: pullRequestParams(1)},
-			),
+			// already forbids pushing to the default branch without a PR. The approval must come
+			// after the last push, from someone other than its pusher, so a reviewed PR can't be
+			// changed before it merges.
+			defaultBranchRuleset(ReviewRuleset, bot, Rule{Type: "pull_request", Parameters: pullRequestParams(1, true)}),
+			// Only the release bot (release-please, cut-prerelease) creates, moves or deletes release
+			// tags: the release workflows run from the tag with the release environment's secrets.
+			{
+				Name:         ReleaseTagsRuleset,
+				Target:       "tag",
+				Enforcement:  "active",
+				Conditions:   Conditions{RefName: RefName{Include: tags, Exclude: []string{}}},
+				BypassActors: bot,
+				Rules:        []Rule{{Type: "creation"}, {Type: "update"}, {Type: "deletion"}},
+			},
 		},
 	}, nil
 }
@@ -176,12 +221,15 @@ func defaultBranchRuleset(name string, bypass []BypassActor, rules ...Rule) Rule
 	}
 }
 
-func pullRequestParams(approvals int) map[string]any {
+// pullRequestParams are a pull_request rule's parameters. strict dismisses approvals on a new push
+// and requires the last push to be approved by someone else. ccf-required, which nothing bypasses,
+// isn't strict: the release bot merges its own PRs (it pushed last) under it.
+func pullRequestParams(approvals int, strict bool) map[string]any {
 	return map[string]any{
 		"required_approving_review_count":   approvals,
-		"dismiss_stale_reviews_on_push":     false,
+		"dismiss_stale_reviews_on_push":     strict,
 		"require_code_owner_review":         false,
-		"require_last_push_approval":        false,
+		"require_last_push_approval":        strict,
 		"required_review_thread_resolution": false,
 		"allowed_merge_methods":             []any{"squash"},
 	}
@@ -197,6 +245,8 @@ var managedParams = map[string][]string{
 	"required_status_checks": {
 		"strict_required_status_checks_policy", "do_not_enforce_on_create", "required_status_checks",
 	},
+	// GitHub may return update_allows_fetch_and_merge on an update rule; this tool sets none.
+	"update": {},
 }
 
 func isManaged(ruleType, param string) bool {

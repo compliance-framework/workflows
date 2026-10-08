@@ -43,7 +43,8 @@ repos:
 
   # This repo: the source of the shared-workflow pins ccf-bump moves
   # (`uses: compliance-framework/workflows/.github/workflows/<f>@<sha> # vX.Y.Z`).
-  # It releases itself (self-release.yml), outside the train.
+  # It releases itself (self-release.yml), outside the train. repo-settings gives it the same
+  # settings as every other repo: every caller's CI and releases run its code.
   - name: workflows
     kind: workflows
     release: false

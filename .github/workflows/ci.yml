@@ -66,3 +66,26 @@ jobs:
       module-path: false
     permissions:
       contents: read
+
+  # The ccf-required ruleset (repo-settings) requires the check `ci / required`, which a caller's
+  # `ci` job gets from the kind workflows' `required` job. This repo calls no kind workflow, so the
+  # job carries that name itself. The same check as the kind workflows: anything but success fails.
+  required:
+    name: ci / required
+    needs: [go, actionlint, release-checks]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check the results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::required jobs did not succeed:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All required jobs succeeded."

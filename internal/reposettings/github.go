@@ -187,6 +187,34 @@ func (g *GitHub) UpdateRuleset(ctx context.Context, repo string, id int64, r Rul
 	return g.do(ctx, http.MethodPut, repoPath(repo, fmt.Sprintf("/rulesets/%d", id)), r, nil)
 }
 
+// WorkflowPermissions reads the repo's GITHUB_TOKEN defaults.
+func (g *GitHub) WorkflowPermissions(ctx context.Context, repo string) (WorkflowPermissions, error) {
+	var p WorkflowPermissions
+	err := g.do(ctx, http.MethodGet, repoPath(repo, "/actions/permissions/workflow"), nil, &p)
+	return p, err
+}
+
+func (g *GitHub) SetWorkflowPermissions(ctx context.Context, repo string, p WorkflowPermissions) error {
+	return g.do(ctx, http.MethodPut, repoPath(repo, "/actions/permissions/workflow"), p, nil)
+}
+
+// ForkPRApproval reads the fork PR contributor approval policy; a 404 (a private repo has no such
+// setting) is "".
+func (g *GitHub) ForkPRApproval(ctx context.Context, repo string) (string, error) {
+	var s struct {
+		ApprovalPolicy string `json:"approval_policy"`
+	}
+	err := g.do(ctx, http.MethodGet, repoPath(repo, "/actions/permissions/fork-pr-contributor-approval"), nil, &s)
+	if isNotFound(err) {
+		return "", nil
+	}
+	return s.ApprovalPolicy, err
+}
+
+func (g *GitHub) SetForkPRApproval(ctx context.Context, repo, policy string) error {
+	return g.do(ctx, http.MethodPut, repoPath(repo, "/actions/permissions/fork-pr-contributor-approval"), map[string]string{"approval_policy": policy}, nil)
+}
+
 func onOff(enabled bool) string {
 	if enabled {
 		return http.MethodPut

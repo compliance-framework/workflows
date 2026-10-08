@@ -475,3 +475,30 @@ func TestGoreleaserCheck(t *testing.T) {
 		})
 	}
 }
+
+// TestSelfRequired: this repo's own ci.yml reports `ci / required` (what ccf-required requires)
+// with the kind workflows' check, after every other job.
+func TestSelfRequired(t *testing.T) {
+	var wf struct {
+		Jobs map[string]struct {
+			Name  string   `yaml:"name"`
+			Needs []string `yaml:"needs"`
+			If    string   `yaml:"if"`
+		} `yaml:"jobs"`
+	}
+	read(t, "ci.yml", &wf)
+	req := wf.Jobs["required"]
+	var others []string
+	for name := range wf.Jobs {
+		if name != "required" {
+			others = append(others, name)
+		}
+	}
+	slices.Sort(others)
+	if got := slices.Sorted(slices.Values(req.Needs)); req.Name != "ci / required" || !slices.Equal(got, others) || req.If != "${{ always() }}" {
+		t.Errorf("ci.yml required = %+v, want name ci / required, needs %v, if always()", req, others)
+	}
+	if script(t, "ci.yml", "required", "Check the results") != script(t, goPlugin, "required", "Check the results") {
+		t.Error("ci.yml's required check differs from the kind workflows'")
+	}
+}

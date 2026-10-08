@@ -1,7 +1,7 @@
 name: repo-settings
 
-# Brings the manifest repos' merge settings, security settings and rulesets to the desired state
-# (internal/reposettings). Prints a per-repo diff; writes only with apply: true, which a human runs
+# Brings the manifest repos' merge settings, security settings, Actions settings and rulesets to the
+# desired state (internal/reposettings). Prints a per-repo diff; writes only with apply: true, which a human runs
 # after granting ccf-repo-admin Administration write (README: "Repo settings").
 
 on:
@@ -13,7 +13,7 @@ on:
         options: [repos.yaml, repos.mock.yaml]
         default: repos.yaml
       repos:
-        description: Comma-separated subset of repos (default every repo with release true)
+        description: Comma-separated subset of repos (default every repo in the manifest)
         type: string
         default: ""
       apply:

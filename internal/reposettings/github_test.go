@@ -37,25 +37,28 @@ func apiServerWith(t *testing.T, repoJSON string, override map[string]reply) (*G
 	var mu sync.Mutex
 	var calls, patches []string
 	get := map[string]string{
-		"/installation/repositories":          `{"total_count":1,"repositories":[{"full_name":"o/a"}]}`,
-		"/repos/o/a":                          repoJSON,
-		"/repos/o/a/automated-security-fixes": `{"enabled":true,"paused":false}`,
-		"/repos/o/a/rulesets":                 `[{"id":7,"name":"ccf-review","source_type":"Repository"},{"id":3,"name":"org","source_type":"Organization"}]`,
-		"/repos/o/a/rulesets/7":               `{"id":7,"name":"ccf-review","target":"branch","source":"o/a","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[],"rules":[{"type":"pull_request","parameters":{"required_approving_review_count":0}}]}`,
+		"/installation/repositories":                                  `{"total_count":1,"repositories":[{"full_name":"o/a"}]}`,
+		"/repos/o/a":                                                  repoJSON,
+		"/repos/o/a/automated-security-fixes":                         `{"enabled":true,"paused":false}`,
+		"/repos/o/a/rulesets":                                         `[{"id":7,"name":"ccf-review","source_type":"Repository"},{"id":3,"name":"org","source_type":"Organization"}]`,
+		"/repos/o/a/rulesets/7":                                       `{"id":7,"name":"ccf-review","target":"branch","source":"o/a","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[],"rules":[{"type":"pull_request","parameters":{"required_approving_review_count":0}}]}`,
+		"/repos/o/a/actions/permissions/workflow":                     `{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}`,
+		"/repos/o/a/actions/permissions/fork-pr-contributor-approval": `{"approval_policy":"first_time_contributors"}`,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok" {
 			t.Errorf("%s %s: missing token", r.Method, r.URL.Path)
 		}
 		body, _ := io.ReadAll(r.Body)
-		needsBody := r.Method == http.MethodPatch || r.Method == http.MethodPost || (r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/rulesets/"))
+		needsBody := r.Method == http.MethodPatch || r.Method == http.MethodPost ||
+			(r.Method == http.MethodPut && (strings.Contains(r.URL.Path, "/rulesets/") || strings.Contains(r.URL.Path, "/actions/permissions/")))
 		if needsBody && len(body) == 0 {
 			t.Errorf("%s %s: empty body", r.Method, r.URL.Path)
 		}
 		mu.Lock()
 		calls = append(calls, r.Method+" "+r.URL.Path)
-		if r.Method == http.MethodPatch {
-			patches = append(patches, string(body))
+		if r.Method == http.MethodPatch || (r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/actions/permissions/")) {
+			patches = append(patches, r.URL.Path+" "+string(body))
 		}
 		mu.Unlock()
 		if o, ok := override[r.Method+" "+r.URL.Path]; ok {
@@ -93,7 +96,8 @@ func TestGitHubDryRunOnlyReads(t *testing.T) {
 	}
 	want := []string{
 		"GET /installation/repositories", "GET /repos/o/a", "GET /repos/o/a/code-security-configuration", "GET /repos/o/a/vulnerability-alerts",
-		"GET /repos/o/a/automated-security-fixes", "GET /repos/o/a/rulesets", "GET /repos/o/a/rulesets/7",
+		"GET /repos/o/a/automated-security-fixes", "GET /repos/o/a/actions/permissions/workflow",
+		"GET /repos/o/a/actions/permissions/fork-pr-contributor-approval", "GET /repos/o/a/rulesets", "GET /repos/o/a/rulesets/7",
 	}
 	if got := calls(); !slices.Equal(got, want) {
 		t.Errorf("calls = %v, want %v", got, want)
@@ -101,7 +105,7 @@ func TestGitHubDryRunOnlyReads(t *testing.T) {
 }
 
 func TestGitHubApplyWrites(t *testing.T) {
-	gh, calls := apiServer(t)
+	gh, calls, bodies := apiServerWith(t, defaultRepoJSON, nil)
 	if err := Run(context.Background(), gh, Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
@@ -112,11 +116,29 @@ func TestGitHubApplyWrites(t *testing.T) {
 		}
 	}
 	want := []string{
-		"PATCH /repos/o/a", "POST /repos/o/a/rulesets", "PUT /repos/o/a/rulesets/7",
+		"PATCH /repos/o/a", "POST /repos/o/a/rulesets", "PUT /repos/o/a/rulesets/7", "POST /repos/o/a/rulesets",
+		"PUT /repos/o/a/actions/permissions/workflow", "PUT /repos/o/a/actions/permissions/fork-pr-contributor-approval",
 		"PUT /repos/o/a/vulnerability-alerts", "DELETE /repos/o/a/automated-security-fixes",
 	}
 	if !slices.Equal(writes, want) {
 		t.Errorf("writes = %v, want %v", writes, want)
+	}
+	// The workflow permissions keep their default (write); only PR approval changes.
+	for _, want := range []string{
+		`/repos/o/a/actions/permissions/workflow {"default_workflow_permissions":"write","can_approve_pull_request_reviews":false}`,
+		`/repos/o/a/actions/permissions/fork-pr-contributor-approval {"approval_policy":"all_external_contributors"}`,
+	} {
+		if !slices.Contains(bodies(), want) {
+			t.Errorf("bodies %q lack %q", bodies(), want)
+		}
+	}
+}
+
+func TestGitHubForkPRApprovalPrivateRepo(t *testing.T) {
+	gh, _, _ := apiServerWith(t, defaultRepoJSON, map[string]reply{
+		"GET /repos/o/a/actions/permissions/fork-pr-contributor-approval": {404, `{"message":"Not Found"}`}})
+	if policy, err := gh.ForkPRApproval(context.Background(), "o/a"); err != nil || policy != "" {
+		t.Errorf("ForkPRApproval = %q, %v; want none", policy, err)
 	}
 }
 
@@ -151,7 +173,12 @@ func TestGitHubMergeSettingsAbsentVsFalse(t *testing.T) {
 	}
 
 	// The PATCH carries every managed field, not just the differing or unknown ones.
-	p := patches()
+	var p []string
+	for _, b := range patches() {
+		if body, ok := strings.CutPrefix(b, "/repos/o/a "); ok {
+			p = append(p, body)
+		}
+	}
 	if len(p) != 1 {
 		t.Fatalf("PATCH bodies = %v, want one", p)
 	}
@@ -271,7 +298,7 @@ func TestGitHubRefusedStepKeepsApplying(t *testing.T) {
 			t.Errorf("missing %s: %v", want, got)
 		}
 	}
-	if !strings.Contains(out.String(), "o/a: partly applied: 1 of 5 step(s) failed") {
+	if !strings.Contains(out.String(), "o/a: partly applied: 1 of 8 step(s) failed") {
 		t.Errorf("output:\n%s", out.String())
 	}
 }
