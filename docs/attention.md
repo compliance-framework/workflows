@@ -37,9 +37,53 @@ posts a tracked bot PR to the `SLACK_CHANNEL_NEEDS_HUMAN` channel, once per PR, 
 
 Human PRs are never posted.
 
+## Weekly digest
+
+`attention-digest.yml` (run in this repo; logic in `cmd/attention-digest`, rules in
+`internal/attention`) posts one message to `SLACK_CHANNEL_NEEDS_HUMAN` every Monday at 08:30 UTC,
+listing every open PR of the manifest's repos (this `workflows` repo included) that:
+
+- carries `needs-human` (anyone's PR);
+- is a bot PR (opened by `ccf-release-bot[bot]`, or from a `renovate/`, `ccf-bump/` or
+  `release-please--` branch) open longer than 7 days (`--stale-days`);
+- is a bot PR whose required check (`ci / required`, `--required-checks`) failed;
+- is a release-please PR whose `release-checks / release-checks` check failed: `needs
+  release:major-approved (<package>: vA -> vB)` when the release-please manifest goes up a major
+  at the head against the base and the PR lacks the label (what version-guard checks), else
+  `release-checks / release-checks failed`.
+
+```text
+:raising_hand: 2 PRs need a human
+*mock-ui*
+• mock-ui#13 chore(deps): update typescript to v7 · labelled needs-human, open over 7d · 9d
+*workflows*
+• workflows#52 chore(main): release 2.0.0 · needs release:major-approved (.: v1.4.0 -> v2.0.0) · 3d
+run
+```
+
+Each line is `<url|repo#n> title · reasons · age`, grouped by repo in manifest order. With no PR to
+list it posts nothing (the run log says so). A repo or PR it could not read is listed under
+"Could not read" and fails the run, after posting.
+
+| Input (`workflow_dispatch`) | Default | What |
+| --- | --- | --- |
+| `manifest` | `repos.mock.yaml` | The repos to read. A scheduled run has no inputs and uses the `MANIFEST` fallback in the workflow, which equals this default: change both to move to `repos.yaml`. |
+| `dry_run` | `true` | Print the digest instead of posting it. Scheduled runs are dry runs until the repo variable `ATTENTION_DIGEST_LIVE` is `true` (the `RENOVATE_LIVE` pattern). |
+
+The job lists the manifest's repos, then mints a `ccf-release-bot` token scoped to exactly those
+(`repositories:`) with **read-only** permissions: Pull requests (open PRs), Checks (check runs) and
+Contents (release-please manifests). It refuses an empty selection, since an unscoped token would
+reach every org repo. Every GitHub call is a `GET`.
+
+```sh
+GH_TOKEN=$(gh auth token) go run ./cmd/attention-digest post --manifest repos.mock.yaml --dry-run
+```
+
 ## Setting it up
 
 1. Create the Slack channel `#ccf-pr-needs-human` and invite the Slack bot (the app behind
    `SLACK_BOT_TOKEN`) to it.
 2. Set the org variable `SLACK_CHANNEL_NEEDS_HUMAN` to the channel's ID, visible to the public
    repos like the other channel variables. Until it is set, nothing is posted and nothing fails.
+3. When a manual digest run looks right, set the repo variable `ATTENTION_DIGEST_LIVE` to `true`
+   in this repo, so the Monday run posts.

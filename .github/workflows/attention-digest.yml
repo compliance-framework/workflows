@@ -1,0 +1,78 @@
+name: attention-digest
+
+# Weekly digest of the manifest's open PRs that wait for a person (the needs-human label, bot PRs
+# open over 7 days or failing a required check, release PRs blocked by release-checks), posted to
+# Slack (docs/attention.md). The logic is cmd/attention-digest. A scheduled run uses the dispatch
+# defaults below, except that it posts when the repo variable ATTENTION_DIGEST_LIVE is "true".
+
+on:
+  schedule:
+    - cron: "30 8 * * 1" # Mondays 08:30 UTC
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Manifest to read the repos from
+        type: choice
+        options: [repos.mock.yaml, repos.yaml]
+        default: repos.mock.yaml
+      dry_run:
+        description: Print the digest instead of posting it
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attention-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    name: digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # A scheduled run has no inputs: keep this fallback equal to the input's default.
+      MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+      # Scheduled runs are dry runs until ATTENTION_DIGEST_LIVE is "true"; manual ones follow the input.
+      DRY_RUN: ${{ github.event_name == 'schedule' && vars.ATTENTION_DIGEST_LIVE != 'true' || github.event_name != 'schedule' && inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Select repos
+        id: select
+        run: |
+          repos="$(go run ./cmd/attention-digest list --manifest "$MANIFEST")"
+          # An empty list would mint a token for every repo the app is installed on (all of them).
+          if [ -z "$repos" ]; then
+            echo "::error::no repos selected"
+            exit 1
+          fi
+          {
+            echo "repos=$repos"
+            echo "dry_run=$([ "$DRY_RUN" = true ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: token
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ steps.select.outputs.repos }}
+          # Read-only: open PRs, their check runs, release-please manifests.
+          permission-pull-requests: read
+          permission-checks: read
+          permission-contents: read
+      - name: Post the digest
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPOS: ${{ steps.select.outputs.repos }}
+          DRY_RUN: ${{ steps.select.outputs.dry_run }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ vars.SLACK_CHANNEL_NEEDS_HUMAN }}
+        run: go run ./cmd/attention-digest post --manifest "$MANIFEST" --repos "$REPOS" --dry-run="$DRY_RUN"

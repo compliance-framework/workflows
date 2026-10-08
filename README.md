@@ -793,8 +793,8 @@ severity, to Slack every Monday (and on `workflow_dispatch`). See
 
 Bot PRs that wait for a person (Renovate majors and api OPA bumps, ccf-bump PRs with auto-merge
 off) get the `needs-human` label, and `notify-failure.yml` posts each one, and each release PR
-blocked by `release-checks`, once to `SLACK_CHANNEL_NEEDS_HUMAN`. See
-[docs/attention.md](docs/attention.md).
+blocked by `release-checks`, once to `SLACK_CHANNEL_NEEDS_HUMAN`; `attention-digest.yml` lists
+every PR still waiting there each Monday. See [docs/attention.md](docs/attention.md).
 
 ## ccf-bump
 
