@@ -1,0 +1,13 @@
+lisa-design:
+- No GitHub native auto-merge: it never applies the ccf-review bypass (same as Renovate, docs/renovate.md). ccf-bump labels eligible PRs ccf-bump:automerge and `ccf-bump merge` merges them through the API as the token's identity; ccf-required (no bypass) still gates.
+- Train: bump eligibility is now the ccf-bump:automerge label (or native auto-merge still on, for a PR recorded by an older run). Without this the train would hold every bump PR NeedsHuman once ccf-bump stops enabling auto-merge.
+- merge candidates: label + ccf-bump/* head in the repo itself + author == --author (default ccf-release-bot[bot]; workflows pass "${SLUG}[bot]" since an app token can't call GET /user) + NOT labelled needs-human (a person can hold a PR; an eligible rerun after a major one keeps needs-human).
+- Labels and head SHA are re-read from the single-PR GET right before merging; a new head goes back to pending; merge passes sha so GitHub refuses a moved head.
+- Mergeability: only `mergeable == false` / mergeable_state "dirty" is conflicting; "blocked" (review required) and "behind" are expected for the bot and fine. mergeable null = pending.
+- Required check must conclude exactly "success" (strict; neutral/skipped count as failing). Missing check = pending (CI not started).
+- Warnings vs failures (#41 pattern): failing check, conflict, merge refusal, label errors, DisableAutoMerge errors are warnings; listing PRs or reading a PR/check fails the run (other repos still run).
+- Failing to add ccf-bump:automerge falls back to needs-human (nothing else would merge the PR).
+- Commit title: "<PR title> (#N)" (GitHub's squash convention).
+- --dry-run doesn't wait.
+- Token: added permission-checks: read to the sync token (merge reads check runs; train/renovate/attention all do the same). Merge-only workflow also gets workflows: write when live (merging a PR that edits .github/workflows needs it).
+- ccf-bump-merge.yml manifest: input default and schedule fallback repos.mock.yaml (the attention/vuln/train/renovate convention: fallback equals the input default), unlike ccf-bump-sync's repos.yaml; move both to repos.yaml when going live on product repos.
