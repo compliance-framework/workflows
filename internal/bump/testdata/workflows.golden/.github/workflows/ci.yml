@@ -10,6 +10,8 @@ jobs:
     secrets: inherit
   release-checks:
     uses: compliance-framework/workflows/.github/workflows/release-checks.yml@89abcdef0123456789abcdef0123456789abcdef # v1.1.0
+  checks-newer: # the same SHA, but its comment says a newer version
+    uses: compliance-framework/workflows/.github/workflows/release-checks.yml@0123456789abcdef0123456789abcdef01234567 # v1.2.0
   notify:
     needs: [ci, release-checks]
     if: always()

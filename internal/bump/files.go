@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -108,10 +109,12 @@ func (w workflowRef) apply(dir, file string, changes []Change) error {
 	}
 	drop := map[int]bool{} // line numbers to delete
 	for _, c := range calls {
-		ch, ok := find(changes, c.ref.Key, c.ref.Current)
-		if !ok {
+		// Two jobs may pin the same SHA with different version comments, and only one move.
+		i := slices.IndexFunc(changes, func(ch Change) bool { return ch.Ref == c.ref })
+		if i < 0 {
 			continue
 		}
+		ch := changes[i]
 		n := c.uses.Line - 1
 		head, tail, ok := splitPinLine(lines[n], c.uses.Value)
 		if !ok {

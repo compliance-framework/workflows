@@ -135,8 +135,10 @@ func TestUpdaters(t *testing.T) {
 				"workflow ref .github/workflows/release.yml " + wf + "cut-prerelease.yml: " + sha11 + " -> " + sha11 + " # v1.1.0",
 				"workflow ref .github/workflows/release.yml " + wf + "notify-failure.yml: v1 -> " + sha11 + " # v1.1.0",
 			},
-			conflicts: []string{".github/workflows/release.yml " + wf + "release-checks.yml: " +
-				"pinned to ra/try-something, not main, a commit SHA or a release: a human decides"},
+			conflicts: []string{
+				".github/workflows/ci.yml " + wf + "release-checks.yml: pinned " + sha10 + " # v1.2.0 is newer than v1.1.0; ccf-bump never downgrades",
+				".github/workflows/release.yml " + wf + "release-checks.yml: pinned to ra/try-something, not main, a commit SHA or a release: a human decides",
+			},
 			upToDate:      []string{".github/workflows/release.yml " + wf + "preview.yml: " + sha11},
 			golden:        true,
 			reapplyStable: true,
@@ -152,6 +154,7 @@ func TestUpdaters(t *testing.T) {
 			},
 			conflicts: []string{
 				".github/workflows/ci.yml " + wf + "release-checks.yml: pinned " + sha10 + " # v1.0.0 is major v1, the latest release is v2.0.0: moving to another major is a human's call",
+				".github/workflows/ci.yml " + wf + "release-checks.yml: pinned " + sha10 + " # v1.2.0 is major v1, the latest release is v2.0.0: moving to another major is a human's call",
 				".github/workflows/release.yml " + wf + "release-go-image.yml: pinned v1.0.0 is major v1, the latest release is v2.0.0: moving to another major is a human's call",
 				".github/workflows/release.yml " + wf + "preview.yml: pinned " + sha11 + " # v1.1.0 is major v1, the latest release is v2.0.0: moving to another major is a human's call",
 				".github/workflows/release.yml " + wf + "release-checks.yml: pinned to ra/try-something, not main, a commit SHA or a release: a human decides",
@@ -168,6 +171,7 @@ func TestUpdaters(t *testing.T) {
 				"workflow ref .github/workflows/release.yml " + wf + "release-go-image.yml: v1.0.0 -> " + sha10 + " # v1.0.0",
 				"workflow ref .github/workflows/release.yml " + wf + "cut-prerelease.yml: " + sha11 + " -> " + sha10 + " # v1.0.0",
 				"workflow ref .github/workflows/release.yml " + wf + "notify-failure.yml: v1 -> " + sha10 + " # v1.0.0",
+				"workflow ref .github/workflows/ci.yml " + wf + "release-checks.yml: " + sha10 + " -> " + sha10 + " # v1.0.0", // a wrong comment
 			},
 			conflicts: []string{
 				".github/workflows/release.yml " + wf + "preview.yml: pinned " + sha11 + " # v1.1.0 is newer than v1.0.0; ccf-bump never downgrades",
