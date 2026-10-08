@@ -1,0 +1,6 @@
+lisa-design:
+- rebaseWhen "conflicted" at top level (not per package rule): the one-merge-per-run problem hits every auto-merged PR (group, security PRs), so it applies repo-wide.
+- Rejected keeping "auto"/behind-base-branch: with automerge, Renovate rebases every PR left behind by a merge, so it merges at most one PR per repo per daily run and each rebase costs a CI run.
+- Safe because ccf-required has strict_required_status_checks_policy: false and squash merges conflict-check at merge time; go.mod/go.sum conflicts are textual so they still trigger a rebase.
+- Accepted trade-off: a PR's CI may have run on an older main; the post-merge push to main re-runs CI and notify-failure rule (b) opens an incident if it breaks.
+- The rationale lives in the preset's top-level description (JSON has no comments) and in docs/renovate.md "One run merges every green PR".
