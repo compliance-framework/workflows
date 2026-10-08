@@ -13,11 +13,11 @@ on:
         default: v
     secrets:
       RELEASE_BOT_APP_ID:
-        description: "ccf-release-bot App ID"
-        required: true
+        description: "ccf-release-bot App ID (the caller\'s `release` environment secret is used first)"
+        required: false
       RELEASE_BOT_PRIVATE_KEY:
-        description: "ccf-release-bot private key"
-        required: true
+        description: "ccf-release-bot private key (the caller\'s `release` environment secret is used first)"
+        required: false
 
 permissions: {}
 

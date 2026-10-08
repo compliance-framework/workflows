@@ -102,7 +102,7 @@ repo variable `RENOVATE_LIVE` is `"true"`, and `full` otherwise. So by default a
 daily `full` dry run on the mocks, and setting `RENOVATE_LIVE` makes it live on the mocks, the same
 switch as `CCF_BUMP_SYNC_LIVE` and `TRAIN_LIVE`. A dispatch always follows its `dry_run` input.
 A live scheduled run is also what merges Renovate's green PRs (see above), so leave it on once
-Renovate is live. Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`. Variable:
+Renovate is live. Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, from this repo's `release` environment (main only). Variable:
 `RENOVATE_LIVE`.
 
 ### Commit statuses

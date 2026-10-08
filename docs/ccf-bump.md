@@ -157,7 +157,7 @@ them first is harmless.
 (default `true`). Scheduled runs read `repos.mock.yaml` until go-live (W1-S4-T03), like renovate,
 train and attention-digest (the fallback equals the input's default), and are dry runs until the repo variable
 `CCF_BUMP_SYNC_LIVE` is `true`. It lists the repos, then mints a `ccf-release-bot` token scoped to
-exactly those (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`): read-only for dry runs; contents,
+exactly those (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`, this repo's `release` environment secrets; main only): read-only for dry runs; contents,
 pull requests and workflows write otherwise (bumps edit workflow files), and checks read. Commits
 are authored by the bot. A live run then runs `ccf-bump merge --wait 20m` over the same repos.
 

@@ -3,12 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/nacl/box"
 
 	"github.com/compliance-framework/workflows/internal/manifest"
 	"github.com/compliance-framework/workflows/internal/reposettings"
@@ -80,8 +84,12 @@ func TestRunSyncErrors(t *testing.T) {
 }
 
 // TestRunSyncFailedStepFailsRun: a refused write fails the run (main exits 1) after the other
-// steps ran.
+// steps ran. The release environment's secrets come from the variables of the same names.
 func TestRunSyncFailedStepFailsRun(t *testing.T) {
+	pub, _, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var writes []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		const repo = "/repos/compliance-framework/mock-api"
@@ -96,7 +104,11 @@ func TestRunSyncFailedStepFailsRun(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case repo:
-			_, _ = io.WriteString(w, `{"allow_merge_commit":true}`)
+			_, _ = io.WriteString(w, `{"allow_merge_commit":true,"default_branch":"main"}`)
+		case repo + "/environments/release":
+			http.NotFound(w, r)
+		case repo + "/environments/release/secrets/public-key":
+			_, _ = io.WriteString(w, `{"key_id":"k","key":"`+base64.StdEncoding.EncodeToString(pub[:])+`"}`)
 		case repo + "/automated-security-fixes":
 			_, _ = io.WriteString(w, `{"enabled":false,"paused":false}`)
 		case repo + "/rulesets":
@@ -115,16 +127,20 @@ func TestRunSyncFailedStepFailsRun(t *testing.T) {
 	}
 	args := []string{"sync", "--manifest", "../../repos.mock.yaml", "--repos", "mock-api", "--bypass-app-id", "42", "--check-token-scope=false", "--apply"}
 	var out bytes.Buffer
-	err := run(context.Background(), args, func(string) string { return "t" }, &out, client)
+	err = run(context.Background(), args, func(string) string { return "t" }, &out, client)
 	if err == nil || !strings.Contains(err.Error(), "repo merge settings") {
 		t.Fatalf("err = %v, want the failed merge settings step", err)
 	}
-	if want := []string{"PATCH /repos/compliance-framework/mock-api", "POST /repos/compliance-framework/mock-api/rulesets", "POST /repos/compliance-framework/mock-api/rulesets",
-		"POST /repos/compliance-framework/mock-api/rulesets", "PUT /repos/compliance-framework/mock-api/actions/permissions/workflow",
-		"PUT /repos/compliance-framework/mock-api/actions/permissions/fork-pr-contributor-approval"}; !slices.Equal(writes, want) {
+	const repo = "/repos/compliance-framework/mock-api"
+	if want := []string{"PATCH " + repo, "POST " + repo + "/rulesets", "POST " + repo + "/rulesets", "POST " + repo + "/rulesets",
+		"PUT " + repo + "/actions/permissions/workflow", "PUT " + repo + "/actions/permissions/fork-pr-contributor-approval",
+		"PUT " + repo + "/environments/release", "POST " + repo + "/environments/release/deployment-branch-policies",
+		"POST " + repo + "/environments/release/deployment-branch-policies", "POST " + repo + "/environments/release/deployment-branch-policies",
+		"PUT " + repo + "/environments/release/secrets/RELEASE_BOT_APP_ID", "PUT " + repo + "/environments/release/secrets/RELEASE_BOT_PRIVATE_KEY",
+	}; !slices.Equal(writes, want) {
 		t.Errorf("writes = %v, want %v", writes, want)
 	}
-	if !strings.Contains(out.String(), "partly applied: 1 of 6 step(s) failed") {
+	if !strings.Contains(out.String(), "partly applied: 1 of 12 step(s) failed") {
 		t.Errorf("output:\n%s", out.String())
 	}
 }

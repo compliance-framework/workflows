@@ -17,11 +17,11 @@ on:
         default: v
     secrets:
       RELEASE_BOT_APP_ID:
-        description: "ccf-release-bot App ID"
-        required: true
+        description: "ccf-release-bot App ID (the caller\'s `release` environment secret is used first)"
+        required: false
       RELEASE_BOT_PRIVATE_KEY:
-        description: "ccf-release-bot private key"
-        required: true
+        description: "ccf-release-bot private key (the caller\'s `release` environment secret is used first)"
+        required: false
     outputs:
       tag:
         description: "The release-candidate tag created"
@@ -33,6 +33,9 @@ jobs:
   cut:
     name: cut
     runs-on: ubuntu-latest
+    # The caller's release environment holds the ccf-release-bot secrets; only the default branch
+    # and release tags may use it (repo-settings), so a workflow on another branch can't read them.
+    environment: release
     timeout-minutes: 10
     permissions:
       contents: read

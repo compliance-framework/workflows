@@ -48,6 +48,10 @@ jobs:
         startsWith(github.event.comment.body, '/') &&
         github.event.comment.user.type != 'Bot')
     runs-on: ubuntu-latest
+    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
+    # (repo-settings), so a workflow on another branch can't read them. Comments, schedules and
+    # repository_dispatch run on main.
+    environment: release
     timeout-minutes: 60
     # One run at a time, at the job level so that skipped runs (other comments) don't queue.
     # GitHub keeps one pending run and cancels older pending ones; every run reads the state and

@@ -136,7 +136,7 @@ A train started while another is open only moves the open one on: one train at a
 ### Tokens
 
 - `GITHUB_TOKEN` with `issues: write`: the tracking issue.
-- ccf-release-bot (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`), scoped to exactly the train's
+- ccf-release-bot (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`, this repo's `release` environment secrets; main only), scoped to exactly the train's
   repos (`train select` lists them; an open train's repos come from its state and must be in its
   manifest with `release: true`). Read-only for a dry run; otherwise contents, pull requests,
   issues (chart issues) and actions (`/retry`) write, workflows write (bumps edit workflow files),

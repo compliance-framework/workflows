@@ -1,6 +1,6 @@
-// Command repo-settings brings the merge settings, security settings, Actions settings and rulesets
-// of the manifest's repos to the desired state in internal/reposettings, for the repo-settings
-// workflow:
+// Command repo-settings brings the merge settings, security settings, Actions settings, rulesets and
+// environments of the manifest's repos to the desired state in internal/reposettings, for the
+// repo-settings workflow:
 //
 //	repo-settings list [--manifest repos.yaml] [--repos a,b]
 //	repo-settings sync [--manifest repos.yaml] [--repos a,b] --bypass-app-id ID [--apply] [flags]
@@ -8,7 +8,8 @@
 // list prints the selected repo names, comma-separated, to scope the token. sync prints each repo's
 // diff of current vs desired settings, and writes the changes only with --apply. Both select every
 // repo in the manifest (the workflows repo too, whatever its release flag) unless --repos names a
-// subset. sync reads the token from GH_TOKEN.
+// subset. sync reads the token from GH_TOKEN, and the values of the environment secrets it writes
+// (reposettings.ReleaseBotSecrets) from the variables of the same names.
 package main
 
 import (
@@ -56,6 +57,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	checkApp := fs.Int64("required-check-app-id", reposettings.GitHubActionsAppID, "app that must report the required check (0: any)")
 	bypass := fs.String("bypass-app-id", "", "ccf-release-bot app ID, the ccf-review bypass actor (sync)")
 	scope := fs.Bool("check-token-scope", true, "fail if the token reaches repos outside the selection (needs an installation token)")
+	rotate := fs.Bool("rotate-secrets", false, "rewrite every environment secret, not only missing ones (after a key rotation)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -79,15 +81,23 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	if err != nil {
 		return fmt.Errorf("--bypass-app-id %q: want the ccf-release-bot app's numeric ID", *bypass)
 	}
-	desired, err := reposettings.DesiredState(reposettings.Config{RequiredCheck: *check, RequiredCheckAppID: *checkApp, BypassAppID: bypassID})
+	desired, err := reposettings.DesiredState(reposettings.Config{RequiredCheck: *check, RequiredCheckAppID: *checkApp, BypassAppID: bypassID, RotateSecrets: *rotate})
 	if err != nil {
 		return err
 	}
 	if getenv("GH_TOKEN") == "" {
 		return errors.New("GH_TOKEN is not set")
 	}
+	secrets := map[string]string{}
+	for _, e := range desired.Environments {
+		for _, s := range e.Secrets {
+			if v := getenv(s); v != "" {
+				secrets[s] = v
+			}
+		}
+	}
 	return reposettings.Run(ctx, client(getenv), reposettings.Options{
-		Owner: *owner, Repos: selected, Desired: desired, Apply: *apply, CheckTokenScope: *scope,
+		Owner: *owner, Repos: selected, Desired: desired, Apply: *apply, CheckTokenScope: *scope, Secrets: secrets,
 	}, stdout)
 }
 
