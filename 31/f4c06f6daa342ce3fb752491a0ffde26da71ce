@@ -1,0 +1,4 @@
+lisa-design:
+- Digest = one compact section per repo (rows: <url|owner/repo#n> title · reasons · age), per the spec's PR3, rather than one full needs-human card per PR: a week can list dozens of PRs and full cards would hit the 50-block limit and flood the channel.
+- Limits handled in attention, not the kit: a repo's lines continue in a new section past 2800 bytes (no silent truncation), and past 40 sections the rest share the last one (which Section then truncates) — keeps the card under 50 blocks even with workstream-3's many plugin repos.
+- attention.Message stays as the text rendering for the run log and dry runs (same lines as the card, shared line()/byRepo()), now with fully qualified owner/repo refs; it takes the owner from Config.Owner.
