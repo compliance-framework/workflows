@@ -3,3 +3,7 @@ lisa-design:
 - Tags are additionally matched by VERSION against r.Versions (what the release PR proposed), not by component name: the train doesn't know release-please's component names (package-name/component config), and the root package may use include-component-in-tag. Empty Versions falls back to strict parsing only.
 - The filter is applied once, before r.Tags is stored, so finish() no longer asks for a GitHub release of a floating tag (which has none) either.
 - Change kept local to publish() + a new publish_test.go to avoid conflicts with parallel internal/train PRs (#64).
+
+lisa-selfreview:
+- pass 1 (CORE-STYLE-001 nit, internal/train/phases.go releaseTags): proposed versions were re-collected per tag inside the DeleteFunc closure and the predicate mixed && / ||; hoist and split. Fixed.
+- pass 1: no other findings. Checked: TagsAt slice mutated in place by DeleteFunc (fresh slice from both GitHub and fake, safe); finish() now only fetches releases for real release tags; tests fail without the fix (verified by disabling the call).
