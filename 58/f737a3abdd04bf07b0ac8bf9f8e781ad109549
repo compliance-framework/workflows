@@ -5,3 +5,7 @@ lisa-design:
 - Scheduled manifest stays repos.mock.yaml (inputs.manifest || 'repos.mock.yaml'), as train.yml does; no manifest var introduced. Product rollout (W1-S4-T03) changes that fallback and sets RENOVATE_LIVE.
 - Regression guard lives in the existing internal/renovate TestSharedPreset (platformAutomerge false, squash, non-major rule automergeType pr) rather than a new test.
 - repo-settings' "allow auto-merge" is left untouched (PR #40 owns internal/reposettings); docs note Renovate no longer uses it.
+
+lisa-selfreview:
+pass 1 (strict): 1 finding.
+- docs/renovate.md "Why Renovate merges": the merge-lag claim ("next daily run") relies on Renovate processing existing PRs outside the 8th/22nd schedule (updateNotScheduled defaults to true; automergeSchedule defaults to "at any time"). Not stated, so a reader could think merges wait for the next 8th/22nd. Fix: say so in the doc.
