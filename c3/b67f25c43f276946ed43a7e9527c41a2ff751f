@@ -4,3 +4,8 @@ lisa-design:
 - Hold dedupe keys include Detail, so the first run of this version re-posts each currently held repo once (detail text changed). Accepted: one-time, and the mock train is the only open one.
 - Closed-PR handling in notify lives in Decide (ReasonNone when pull_request.state == closed), so plan, post and the needs-human rule (Route calls Decide) all drop the run with one rule. A recovery reply for an incident open on a now-closed PR is intentionally not posted (spec: no reply).
 - Workflows: every job of the kind CI workflows gets a job-level if with the same guard; required becomes ${{ always() && !(closed) }} so it is skipped (non-failure) on a closed PR and unchanged on open PRs/pushes. ci-common jobs and release-checks are guarded too (release-checks re-runs on the relabelled merged release PR as well). Guards are pinned by TestClosedPRGuard in internal/ciworkflows.
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- [should-fix] 5373d411ce4b internal/ciworkflows/steps_test.go TestClosedPRGuard: prefix match on the PR-only guard also accepts "<guard> || ..." -> accept it exactly or followed by " && ".
+- [nit] d7d5fb4e8d92 internal/train/links.go PRURL: hardcodes https://github.com while RunURL uses GITHUB_SERVER_URL -> pass the repos' web URL (server + owner) instead of the owner.
