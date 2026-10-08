@@ -33,6 +33,8 @@ type GitHub interface {
 	LatestFinal(ctx context.Context, repo string) (string, error)
 	TagTime(ctx context.Context, repo, tag string) (time.Time, error)
 	TagCommit(ctx context.Context, repo, tag string) (string, error)
+	ReleaseAuthor(ctx context.Context, repo, tag string) (string, error)
+	OnBranch(ctx context.Context, repo, sha, branch string) (bool, error)
 	File(ctx context.Context, repo, ref, path string) ([]byte, error)
 	DefaultBranch(ctx context.Context, repo string) (string, error)
 	OpenPR(ctx context.Context, repo, branch string) (*bump.PR, error)
@@ -117,7 +119,7 @@ func run(ctx context.Context, args []string, e env) error {
 	fs.BoolVar(&o.dryRun, "dry-run", false, "with --pr: print the PR instead of pushing; merge: print what it would merge")
 	fs.IntVar(&o.batch, "batch", 0, "sync: open at most this many PRs per hour (0: no limit)")
 	fs.DurationVar(&o.wait, "wait", 0, "merge: poll PRs whose required check is pending for up to this long")
-	fs.StringVar(&o.author, "author", "ccf-release-bot[bot]", "merge: the account whose PRs it merges (the token's identity)")
+	fs.StringVar(&o.author, "author", "ccf-release-bot[bot]", "the release bot's login: merge merges only its PRs (the token's identity); workflows pins move only to its releases")
 	fs.StringVar(&o.required, "required-check", "ci / required", "merge: the check that must pass on a PR's head")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -169,7 +171,7 @@ func run(ctx context.Context, args []string, e env) error {
 	if cmd == "sync" && o.mode != "sync" {
 		return errors.New("sync runs in sync mode; use --repo with --mode train")
 	}
-	b := &bumper{e: e, o: o, m: m, finals: map[string]string{}, commits: map[string]string{}}
+	b := &bumper{e: e, o: o, m: m, finals: map[string]string{}, commits: map[string]string{}, trust: map[string]error{}}
 	inWindow, windowStart := 0, e.now() // PRs opened in the current hour (--batch)
 	var failed []error
 	for _, r := range selected {

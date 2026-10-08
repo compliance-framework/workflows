@@ -28,6 +28,15 @@ func TestGitHub(t *testing.T) {
 			fmt.Fprint(w, `[]`)
 		case "/repos/o/workflows/commits/v1.1.0": // GitHub peels an annotated tag to its commit
 			fmt.Fprint(w, `{"sha":"89abcdef0123456789abcdef0123456789abcdef"}`)
+		case "/repos/o/workflows/releases/tags/v1.1.0":
+			fmt.Fprint(w, `{"tag_name":"v1.1.0","author":{"login":"ccf-release-bot[bot]"}}`)
+		case "/repos/o/workflows/compare/89abcdef0123456789abcdef0123456789abcdef...main":
+			if r.URL.Query().Get("per_page") != "1" {
+				t.Errorf("compare per_page = %q", r.URL.Query().Get("per_page"))
+			}
+			fmt.Fprint(w, `{"status":"ahead"}`)
+		case "/repos/o/workflows/compare/0123456789abcdef0123456789abcdef01234567...main":
+			fmt.Fprint(w, `{"status":"diverged"}`)
 		case "/repos/o/none/releases":
 			fmt.Fprint(w, `[]`)
 		case "/repos/o/agent/contents/go.mod":
@@ -57,6 +66,18 @@ func TestGitHub(t *testing.T) {
 	}
 	if _, err := g.TagCommit(ctx, "workflows", "v9.9.9"); err == nil {
 		t.Error("TagCommit(missing tag): no error")
+	}
+	if a, err := g.ReleaseAuthor(ctx, "workflows", "v1.1.0"); err != nil || a != "ccf-release-bot[bot]" {
+		t.Errorf("ReleaseAuthor = %q, %v", a, err)
+	}
+	if _, err := g.ReleaseAuthor(ctx, "workflows", "v9.9.9"); err == nil {
+		t.Error("ReleaseAuthor(missing release): no error")
+	}
+	if on, err := g.OnBranch(ctx, "workflows", "89abcdef0123456789abcdef0123456789abcdef", "main"); err != nil || !on {
+		t.Errorf("OnBranch(ahead) = %v, %v", on, err)
+	}
+	if on, err := g.OnBranch(ctx, "workflows", "0123456789abcdef0123456789abcdef01234567", "main"); err != nil || on {
+		t.Errorf("OnBranch(diverged) = %v, %v", on, err)
 	}
 	if b, err := g.File(ctx, "agent", "v0.10.1", "go.mod"); err != nil || string(b) != "require go 1.26\n" {
 		t.Errorf("File = %q, %v", b, err)
