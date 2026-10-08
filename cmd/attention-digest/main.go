@@ -52,7 +52,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	bot := fs.String("bot", notify.ReleaseBotLogin, "login of the release bot, which opens Renovate, ccf-bump and release PRs")
 	required := fs.String("required-checks", "ci / required", "comma-separated checks every PR must pass")
 	releaseCheck := fs.String("release-check", "release-checks / release-checks", "the release-checks check of release-please PRs")
-	staleDays := fs.Int("stale-days", 7, "a bot PR open longer than this many days needs a human")
+	staleDays := fs.Int("stale-days", 7, "a bot PR (but a release-please PR) open longer than this many days needs a human")
 	dryRun := fs.Bool("dry-run", false, "print the digest without posting it")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err

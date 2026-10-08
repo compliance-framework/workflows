@@ -45,7 +45,9 @@ listing every open PR of the manifest's repos (this `workflows` repo included) t
 
 - carries `needs-human` (anyone's PR);
 - is a bot PR (opened by `ccf-release-bot[bot]`, or from a `renovate/`, `ccf-bump/` or
-  `release-please--` branch) open longer than 7 days (`--stale-days`);
+  `release-please--` branch) open longer than 7 days (`--stale-days`), except a release-please PR:
+  it waits for the monthly train by design, so its age never lists it, only the rules below or
+  the label;
 - is a bot PR whose required check (`ci / required`, `--required-checks`) failed;
 - is a release-please PR whose `release-checks / release-checks` check failed: `needs
   release:major-approved (<package>: vA -> vB)` when the release-please manifest goes up a major
