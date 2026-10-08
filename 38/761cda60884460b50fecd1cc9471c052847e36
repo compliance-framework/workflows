@@ -1,0 +1,9 @@
+lisa-design:
+- Needs-human is a separate rule (notify.Route) on top of Decide's rule (a); incidents keep their state, keys and messages unchanged.
+- Route takes a release PR's release-checks failure away from incidents only when release-checks is the ONLY failed job (incident sees OutcomeNone: left as is, never "recovered"); with other failures too, the incident opens as before and the needs-human post also happens.
+- Without SLACK_CHANNEL_NEEDS_HUMAN the rule is fully off (Route returns the result unchanged, plan outputs needs-human=false), so a blocked release PR still opens an incident: nothing is lost before the user sets the var.
+- Once-per-PR state: exact cache key ccf-notify-needs-human-<sha256(repo,pr)[:16]> checked with actions/cache/restore lookup-only; post only on a miss, save after posting. Key is per repo+PR (not per workflow/reason) per the spec ("same per-PR state"). Accepted limits: eviction after 7 idle days may repost; concurrent runs may double-post (same limits as incidents, documented).
+- Run.PRNeedsHuman is a bool (not a labels slice) to keep Run comparable (existing tests compare Run with ==).
+- Reason text from branch: renovate/opa -> OPA in the api; renovate/* -> major update; ccf-bump/* -> auto-merge off; else "labelled needs-human".
+- needs-human steps use !cancelled() so an incident post failure doesn't skip them.
+- The release-checks job is identified by its caller job id `release-checks` in NEEDS (every mock uses it; documented as a requirement).
