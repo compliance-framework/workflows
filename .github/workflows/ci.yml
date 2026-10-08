@@ -69,7 +69,8 @@ jobs:
 
   # The ccf-required ruleset (repo-settings) requires the check `ci / required`, which a caller's
   # `ci` job gets from the kind workflows' `required` job. This repo calls no kind workflow, so the
-  # job carries that name itself. The same check as the kind workflows: anything but success fails.
+  # job carries that name itself. Anything but success fails, except release-checks being skipped:
+  # it only runs on release-please PRs, and a called workflow whose jobs all skip reports skipped.
   required:
     name: ci / required
     needs: [go, actionlint, release-checks]
@@ -82,7 +83,8 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
-          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$NEEDS")"
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success")
+            | select(.key != "release-checks" or .value.result != "skipped") | "\(.key): \(.value.result)"' <<< "$NEEDS")"
           if [ -n "$failed" ]; then
             echo "::error::required jobs did not succeed:"
             echo "$failed"

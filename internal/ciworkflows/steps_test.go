@@ -477,7 +477,8 @@ func TestGoreleaserCheck(t *testing.T) {
 }
 
 // TestSelfRequired: this repo's own ci.yml reports `ci / required` (what ccf-required requires)
-// with the kind workflows' check, after every other job.
+// after every other job: anything but success fails, except release-checks skipped (every PR but
+// a release-please one, and every push).
 func TestSelfRequired(t *testing.T) {
 	var wf struct {
 		Jobs map[string]struct {
@@ -498,7 +499,23 @@ func TestSelfRequired(t *testing.T) {
 	if got := slices.Sorted(slices.Values(req.Needs)); req.Name != "ci / required" || !slices.Equal(got, others) || req.If != "${{ always() }}" {
 		t.Errorf("ci.yml required = %+v, want name ci / required, needs %v, if always()", req, others)
 	}
-	if script(t, "ci.yml", "required", "Check the results") != script(t, goPlugin, "required", "Check the results") {
-		t.Error("ci.yml's required check differs from the kind workflows'")
+	need(t, "jq")
+	src := script(t, "ci.yml", "required", "Check the results")
+	for _, tc := range []struct {
+		name, needs, want string
+		failed            bool
+	}{
+		{"release PR", `{"go":{"result":"success"},"actionlint":{"result":"success"},"release-checks":{"result":"success"}}`, "All required jobs succeeded.", false},
+		{"other PR", `{"go":{"result":"success"},"actionlint":{"result":"success"},"release-checks":{"result":"skipped"}}`, "All required jobs succeeded.", false},
+		{"release-checks failed", `{"go":{"result":"success"},"actionlint":{"result":"success"},"release-checks":{"result":"failure"}}`, "release-checks: failure", true},
+		{"go skipped", `{"go":{"result":"skipped"},"actionlint":{"result":"success"},"release-checks":{"result":"skipped"}}`, "go: skipped", true},
+		{"cancelled", `{"go":{"result":"success"},"actionlint":{"result":"cancelled"},"release-checks":{"result":"skipped"}}`, "actionlint: cancelled", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := run(t, t.TempDir(), src, "NEEDS="+tc.needs)
+			if r.failed != tc.failed || !strings.Contains(r.out, tc.want) {
+				t.Fatalf("failed=%v, want %v; output:\n%s", r.failed, tc.failed, r.out)
+			}
+		})
 	}
 }
