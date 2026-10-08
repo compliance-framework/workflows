@@ -1,0 +1,2 @@
+lisa-design:
+- ccf-bump title type: `ci(deps)` iff every planned change is a shared-workflow pin (Dep == DepWorkflows, the workflowRef updater); any other change (go.mod, go install, images, helm, action Dockerfile, OPA, ui sync) keeps `fix(deps)` even with workflow pins in the same PR. `ci` is hidden in release-please/defaults.json, so a workflows-only bump proposes no release. The commit message uses the same title (squash commit = PR title).
