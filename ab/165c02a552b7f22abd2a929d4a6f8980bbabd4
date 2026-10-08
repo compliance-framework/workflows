@@ -1,0 +1,2 @@
+lisa-design:
+- Overseer decision: ccf-bump-sync's scheduled fallback and dispatch default are repos.mock.yaml (options [repos.mock.yaml, repos.yaml]) until go-live W1-S4-T03, like every other scheduled workflow; move both together.
