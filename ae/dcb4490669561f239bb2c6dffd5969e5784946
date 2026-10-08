@@ -7,3 +7,7 @@ lisa-design:
 
 lisa-addressed:
 pass 1 fixes in this PR: bumper.commits cache split from finals; reflowed files.go doc and docs/ccf-bump.md.
+
+lisa-selfreview:
+pass 2 (strict), verdict request_changes:
+- CORE-ID-001 (must-fix) internal/bump/files.go workflowRef.apply: a job's change is found by key + ref only (find), so two jobs in one file pinning the same SHA with different version comments (one moving, one a conflict, e.g. `# v1.2.0` newer than the target) would both be rewritten. Fix: also match the pin's Version; fixture job covering it.
