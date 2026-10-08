@@ -1,0 +1,6 @@
+lisa-design:
+- EvaluateChecks(checks, required []string) judges only the named checks; non-required checks never wait or hold. Rejected: keeping a deny-list of ignorable checks (preview, CodeRabbit, osv) - new advisory checks would keep blocking trains.
+- Required set lives in two constants in internal/train/api.go (CICheck, ReleaseCheck) and Engine.requiredChecks(releasePR) in phases.go; Engine.RequiredCheck (--required-check) still overrides ci / required. No new Engine field / flag for ReleaseCheck, to avoid conflicts with PR #73 (engine.go, cmd/train/main.go).
+- Empty Engine.RequiredCheck falls back to CICheck (cmp.Or): with required-only gating an empty list would merge unchecked.
+- cancelled/stale newest run -> pending (a newer run is expected; if none comes the repo keeps waiting, it is not held). skipped/neutral -> pass. failure/timed_out/action_required/startup_failure -> failing.
+- release-checks / release-checks is required on release PRs only; all 10 mock callers report it from ci.yml (verified read-only).
