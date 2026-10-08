@@ -1,2 +1,5 @@
 lisa-addressed:
 pass 2: workflowRef.apply matches a change by the whole Ref (incl. Version), so a same-SHA job with another version comment keeps its own decision; fixture job checks-newer covers it (mutation-checked: old matching fails the golden).
+
+lisa-selfreview:
+pass 3 (strict): approve, no findings on either PR of the stack (checked: Ref comparable for the new match, callers of release-checks without inputs keep module-path true, mocks passing workflows-ref explicitly are unaffected by the new default, train untouched).
