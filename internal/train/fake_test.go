@@ -329,7 +329,7 @@ func (w *world) engine(now time.Time) *Engine {
 	return &Engine{
 		Repos: w, Tracker: w, Members: w, Slack: w, Bumper: w,
 		Load:                  func(p string) (*manifest.Manifest, error) { return manifest.Load("../../" + p) },
-		Owner:                 "compliance-framework",
+		ReposURL:              "https://github.com/compliance-framework",
 		Channel:               "C1",
 		RequiredCheck:         "ci / required",
 		ReleasePleaseWorkflow: "release-please.yml",

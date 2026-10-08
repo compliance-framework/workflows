@@ -21,7 +21,7 @@ func testState() *State {
 func TestRenderParseRoundTrip(t *testing.T) {
 	s := testState()
 	s.Repos[1].Detail += " --> <!-- injected"
-	body, err := Render(s, "o", "Comment /skip <repo>.")
+	body, err := Render(s, "https://github.com/o", "Comment /skip <repo>.")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,7 +32,7 @@ type Engine struct {
 	// Load reads a manifest; the train's own path is in its state.
 	Load func(path string) (*manifest.Manifest, error)
 
-	Owner                 string // the repos' owner, for PR links
+	ReposURL              string // web URL of the repos' owner (https://github.com/<owner>), for PR links
 	Channel               string // Slack channel for new trains
 	RequiredCheck         string // a check every merged PR must pass, e.g. "ci / required"
 	ReleasePleaseWorkflow string // file name of the repos' release-please workflow
@@ -226,7 +226,7 @@ func (e *Engine) notify(ctx context.Context, st *State, key, text string) {
 
 // save writes the state and the table to the issue, closing it once the train is over.
 func (e *Engine) save(ctx context.Context, is Issue, st *State) error {
-	body, err := Render(st, e.Owner, issueHelp)
+	body, err := Render(st, e.ReposURL, issueHelp)
 	if err != nil {
 		return err
 	}

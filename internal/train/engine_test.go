@@ -50,7 +50,7 @@ func open(t *testing.T, w *world, e *Engine, o StartOptions) {
 		t.Fatal(err)
 	}
 	st.ThreadTS = "ts-0"
-	body, err := Render(st, e.Owner, issueHelp)
+	body, err := Render(st, e.ReposURL, issueHelp)
 	if err != nil {
 		t.Fatal(err)
 	}

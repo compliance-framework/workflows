@@ -185,7 +185,7 @@ func TestClosedPRGuard(t *testing.T) {
 			t.Fatalf("%s: no jobs", file)
 		}
 		for name, job := range wf.Jobs {
-			ok := job.If == "${{ "+notClosed+" }}" || strings.HasPrefix(job.If, prOnly)
+			ok := job.If == "${{ "+notClosed+" }}" || job.If == prOnly || strings.HasPrefix(job.If, prOnly+" && ")
 			if name == "required" {
 				ok = job.If == requiredIf
 			}
