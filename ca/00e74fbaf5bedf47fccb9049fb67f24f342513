@@ -1,0 +1,7 @@
+lisa-design:
+- internal/attention is self-contained (own small read-only client) instead of reusing internal/train or internal/vulnsummary clients: those are unexported-heavy and would need refactors in shared packages, which the S3 preamble asks to avoid.
+- "Bot PR" = author is the release bot (default ccf-release-bot[bot]) OR head branch renovate/, ccf-bump/, release-please-- (spec list). Dependabot / other apps are not ours and are left out.
+- Release PRs: the release-checks check run (`release-checks / release-checks`, the caller-job / called-job name every mock uses) is read; only when it failed, the base/head .release-please-manifest.json are compared with internal/release.MajorIncreases (version-guard's logic) to refine the reason to "needs release:major-approved (...)"; otherwise "release-checks / release-checks failed". Missing base manifest = {} like release-checks.yml.
+- Failing conclusions: failure, timed_out, action_required, startup_failure; check_name + filter=latest so re-runs supersede earlier runs. cancelled/pending/success do not count.
+- Per-PR read errors keep the reasons found so far and are reported (the run fails after posting); per-repo list errors skip the repo.
+- Split from the command/workflow/docs PR to stay under 1000 lines.
