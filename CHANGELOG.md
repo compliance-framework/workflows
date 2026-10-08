@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.2.0](https://github.com/compliance-framework/workflows/compare/v1.1.1...v1.2.0) (2026-10-08)
+
+
+### Features
+
+* **attention:** needs-human digest as a card ([d7544af](https://github.com/compliance-framework/workflows/commit/d7544afb737bf58cd7fcce083c55b19d4626f4fe))
+* **notify:** mark a closed PR's cards handled and close its incident ([720ffe4](https://github.com/compliance-framework/workflows/commit/720ffe447126c968a22e7831665804e451926fb6))
+* **notify:** rich incident cards edited in place ([b7c50cd](https://github.com/compliance-framework/workflows/commit/b7c50cd8ccde256332913910ca4b28408286d9f8))
+* **slack:** Block Kit message kit with post, reply and edit in place ([47698b0](https://github.com/compliance-framework/workflows/commit/47698b041d2e37aa3aa78b87e3e98ec5cd48a1f3))
+* **slack:** incident, needs-human, train board and digest cards ([950e2d6](https://github.com/compliance-framework/workflows/commit/950e2d6afb20b484b6371cdf02734dc4d227369e))
+* **slack:** slack-preview workflow posting sample cards to the real channels ([7de3ceb](https://github.com/compliance-framework/workflows/commit/7de3cebc0b6c8616244bfc0ab29b1a507ac999d0))
+* **train:** live release board and digest draft to #ccf-release-digests ([3c57a18](https://github.com/compliance-framework/workflows/commit/3c57a1807cd3076acf46fbae01e2cac615430475))
+* **train:** live release board and digest draft to #ccf-release-digests ([af7237d](https://github.com/compliance-framework/workflows/commit/af7237d2ed5db0d665fc83d8577549f299507459))
+
+
+### Bug Fixes
+
+* **train:** build PR links from GITHUB_SERVER_URL; tighten the closed-PR guard test ([fe48829](https://github.com/compliance-framework/workflows/commit/fe48829a89714fb7ddd56f9b5e70539c84189d47))
+* **train:** gate merges on required checks only; cancelled is never a failure ([43b6325](https://github.com/compliance-framework/workflows/commit/43b63250a40555ca72df05cc8023f51eb61ff068))
+* **train:** gate merges on required checks only; cancelled is never a failure ([bc56e95](https://github.com/compliance-framework/workflows/commit/bc56e95415f1e042d160c2fa506c70b2ce9c28b1))
+* **train:** link PRs by repo in the train issue and Slack; skip CI and notify on closed PRs ([c3b67f2](https://github.com/compliance-framework/workflows/commit/c3b67f25c43f276946ed43a7e9527c41a2ff751f))
+* **train:** link PRs by repo; skip CI and notify on closed PRs ([3e04241](https://github.com/compliance-framework/workflows/commit/3e042412cb3f48a3373ac5cfcea16940292a24d3))
+* **train:** wait only for release-please release tags, not floating major tags ([31c2168](https://github.com/compliance-framework/workflows/commit/31c2168b0a679d791e672251e721b5261b113780))
+* **train:** wait only for release-please release tags, not floating major tags ([a08ae40](https://github.com/compliance-framework/workflows/commit/a08ae404856dc07f2e8df7b0105b025afcfd98f0))
+
 ## [1.1.1](https://github.com/compliance-framework/workflows/compare/v1.1.0...v1.1.1) (2026-10-08)
 
 
