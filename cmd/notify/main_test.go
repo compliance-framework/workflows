@@ -206,6 +206,9 @@ func TestPostWithoutTokenIsNoop(t *testing.T) {
 	if stdout, err := runCmd(t, env, "post"); err != nil || len(*posts) != 0 || !strings.Contains(stdout, "nothing to post") {
 		t.Errorf("stdout = %q, err = %v, posts = %v", stdout, err, *posts)
 	}
+	if stdout, err := runCmd(t, env, "closed"); err != nil || len(*posts) != 0 || !strings.Contains(stdout, "nothing to update") {
+		t.Errorf("closed: stdout = %q, err = %v, posts = %v", stdout, err, *posts)
+	}
 }
 
 func TestPostUntrackedRunIsNoop(t *testing.T) {
@@ -216,23 +219,30 @@ func TestPostUntrackedRunIsNoop(t *testing.T) {
 	if out := outputs(t, env); out != "save=false\n" {
 		t.Errorf("outputs = %q", out)
 	}
+	if stdout, err := runCmd(t, env, "closed"); err != nil || len(*posts) != 0 || !strings.Contains(stdout, "not a tracked closed PR") {
+		t.Errorf("closed: stdout = %q, err = %v, posts = %v", stdout, err, *posts)
+	}
+	if out := outputs(t, env); out != "save=false\n" {
+		t.Errorf("closed: outputs = %q", out)
+	}
 }
 
-// TestClosedPRIsIgnored: release-please relabels its PR after the merge, and the labeled event
-// re-runs CI on the closed PR. Whatever that run's result, notify posts nothing.
-func TestClosedPRIsIgnored(t *testing.T) {
-	closed := strings.Replace(releasePR(`[{"name":"needs-human"}]`), `"number":7,`, `"number":7,"state":"closed",`, 1)
+// TestClosedPRDoesNoFailureLogic: release-please relabels its PR after the merge, and the labeled
+// event re-runs CI on the closed PR. Whatever that run's result, post and needs-human post
+// nothing; plan restores the PR's state for closed, which has nothing open to update here.
+func TestClosedPRDoesNoFailureLogic(t *testing.T) {
+	closedPR := strings.Replace(releasePR(`[{"name":"needs-human"}]`), `"number":7,`, `"number":7,"state":"closed","merged":true,`, 1)
 	for _, needs := range []string{failed, releaseChecksFailed, passed} {
-		env, posts := setup(t, "pull_request", "refs/pull/7/merge", closed)
+		env, posts := setup(t, "pull_request", "refs/pull/7/merge", closedPR)
 		env["NEEDS"], env["NEEDS_HUMAN_CHANNEL"] = needs, "C0HUMAN"
 		env["NEEDS_HUMAN_STATE_FILE"] = filepath.Join(t.TempDir(), "needs-human.json")
 		if _, err := runCmd(t, env, "plan"); err != nil {
 			t.Fatal(err)
 		}
-		if out := outputs(t, env); !strings.HasPrefix(out, "notify=false\nreason=\n") || !strings.Contains(out, "needs-human=false\n") {
+		if out := outputs(t, env); !strings.HasPrefix(out, "notify=true\nreason=\n") || !strings.Contains(out, "needs-human=true\n") || !strings.HasSuffix(out, "closed=true\n") {
 			t.Errorf("needs %s: plan outputs = %q", needs, out)
 		}
-		for _, cmd := range []string{"post", "needs-human"} {
+		for _, cmd := range []string{"post", "needs-human", "closed"} {
 			if _, err := runCmd(t, env, cmd); err != nil {
 				t.Fatal(err)
 			}
@@ -243,6 +253,66 @@ func TestClosedPRIsIgnored(t *testing.T) {
 		if len(*posts) != 0 {
 			t.Errorf("needs %s: posts = %v", needs, *posts)
 		}
+	}
+}
+
+// TestClosedPRUpdatesItsCards: the closed run marks the needs-human card handled and closes the
+// open incident with a reply and its card edited.
+func TestClosedPRUpdatesItsCards(t *testing.T) {
+	closedPR := `{"pull_request":{"number":5,"state":"closed","merged":true,"merged_by":{"login":"octocat"},"title":"chore(deps): x",` +
+		`"user":{"login":"renovate[bot]"},"head":{"ref":"renovate/test","sha":"bbbbbbbbbb"}},"sender":{"login":"octocat"}}`
+	env, posts := setup(t, "pull_request", "refs/pull/5/merge", closedPR)
+	env["NEEDS"], env["NEEDS_HUMAN_CHANNEL"] = passed, "C0HUMAN"
+	env["NEEDS_HUMAN_STATE_FILE"] = filepath.Join(t.TempDir(), "needs-human.json")
+	key := incidentKey(t, env)
+	open := `{"key":"` + key + `","channel":"C0CIFAIL","ts":"1.1","open":true,"sha":"aaaaaaaaaa","failed_jobs":["ci"]}`
+	if err := os.WriteFile(env["STATE_FILE"], []byte(open), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCmd(t, env, "plan"); err != nil {
+		t.Fatal(err)
+	}
+	_, nhKey, _ := strings.Cut(outputs(t, env), "needs-human-key=")
+	nhKey, _, _ = strings.Cut(nhKey, "\n")
+	rec := `{"key":"` + nhKey + `","channel":"C0HUMAN","ts":"2.2","reason":"major update","ci":":white_check_mark: Passing"}`
+	if err := os.WriteFile(env["NEEDS_HUMAN_STATE_FILE"], []byte(rec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := runCmd(t, env, "closed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := outputs(t, env); out != "save=true\n" {
+		t.Errorf("outputs = %q, stdout:\n%s", out, stdout)
+	}
+	var got []string
+	for _, p := range *posts {
+		got = append(got, fmt.Sprint(p["method"], " ", p["channel"], " ", p["ts"], p["thread_ts"], " ", p["text"]))
+	}
+	want := []string{
+		"chat.update C0HUMAN 2.2<nil> Handled (merged): o/r#5 chore(deps): x",
+		"chat.postMessage C0CIFAIL <nil>1.1 ⚪ PR merged by octocat; incident closed",
+		"chat.update C0CIFAIL 1.1<nil> CI closed (PR merged): o/r#5 ci",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	data, err := os.ReadFile(env["STATE_FILE"])
+	if err != nil || !strings.Contains(string(data), `"open":false`) || !strings.Contains(string(data), `"closed_as":"merged"`) {
+		t.Errorf("state %s, %v", data, err)
+	}
+	// A broken needs-human record is a warning; the incident is still closed.
+	if err := os.WriteFile(env["NEEDS_HUMAN_STATE_FILE"], []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(env["STATE_FILE"], []byte(open), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if stdout, err := runCmd(t, env, "closed"); err != nil || !strings.Contains(stdout, "::warning::marking the needs-human card handled") {
+		t.Errorf("stdout %q, err %v", stdout, err)
+	}
+	if out := outputs(t, env); out != "save=true\n" {
+		t.Errorf("outputs = %q", out)
 	}
 }
 
@@ -272,6 +342,7 @@ func TestErrors(t *testing.T) {
 		{"post without STATE_FILE", []string{"post"}, "STATE_FILE", "", "STATE_FILE"},
 		{"post without channel", []string{"post"}, "SLACK_CHANNEL", "", "channel"},
 		{"post with no needs jobs", []string{"post"}, "", "{}", "no jobs"},
+		{"closed without STATE_FILE", []string{"closed"}, "STATE_FILE", "", "STATE_FILE"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

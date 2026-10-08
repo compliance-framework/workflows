@@ -1,7 +1,9 @@
 # Keeps one Slack thread per CI incident (rules: internal/notify): a failure opens a thread
 # or replies in the open one, a pass after a failure replies and closes it. With the
 # SLACK_CHANNEL_NEEDS_HUMAN variable set, it also posts a tracked bot PR that needs a human
-# (the needs-human label, or a release PR's failed release-checks) there, once per PR.
+# (the needs-human label, or a release PR's failed release-checks) there, once per PR. When the
+# caller also runs on `closed`, a closed PR's run does no failure logic: it marks the PR's
+# needs-human card handled and closes its open incident.
 # Call it from a job with `needs: <CI jobs>`, `if: always()`, `with: {needs: ${{ toJSON(needs) }}}`,
 # `secrets: inherit` and `permissions: {contents: read}`; see docs/notify.md.
 name: notify-failure
@@ -111,7 +113,8 @@ jobs:
           path: ${{ env.STATE_FILE }}
           key: ${{ steps.plan.outputs.key }}
 
-      # A PR is posted once: the record's key is per repo + PR, and only a miss posts.
+      # A PR is posted once: the record's key is per repo + PR, and only a miss posts. The
+      # record (the card's channel and ts) is restored for closed to edit the card.
       - name: Look up the needs-human post
         id: needs-human-state
         if: ${{ !cancelled() && steps.plan.outputs.needs-human == 'true' }}
@@ -119,7 +122,6 @@ jobs:
         with:
           path: ${{ env.NEEDS_HUMAN_STATE_FILE }}
           key: ${{ steps.plan.outputs.needs-human-key }}
-          lookup-only: true
 
       - name: Post the PR that needs a human
         id: needs-human
@@ -134,3 +136,18 @@ jobs:
         with:
           path: ${{ env.NEEDS_HUMAN_STATE_FILE }}
           key: ${{ steps.plan.outputs.needs-human-key }}
+
+      # A closed PR: mark its needs-human card handled and close its open incident.
+      - name: Update the closed PR's cards
+        id: close
+        if: ${{ !cancelled() && steps.plan.outputs.closed == 'true' }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: '"$RUNNER_TEMP/notify" closed'
+
+      - name: Save the closed incident state
+        if: ${{ !cancelled() && steps.close.outputs.save == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.STATE_FILE }}
+          key: ${{ steps.plan.outputs.key }}

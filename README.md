@@ -84,7 +84,8 @@ release of this repo with the version in a comment, as third-party actions are:
 name: ci
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    # closed: notify marks the PR's Slack cards handled; the CI jobs skip on a closed PR.
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled, closed]
   push:
     branches: [main]
 permissions:
@@ -139,7 +140,9 @@ grant `actions: read`, `contents: read`, `pull-requests: read` and `security-eve
 Keeps one Slack thread per CI incident (a pull request, or a branch for pushes) for release-bot
 PRs, `renovate/` and `ccf-bump/` branches and the default branch: the first failure posts a
 top-level card, later failures reply in its thread, and the first pass after them replies
-`✅ passing again` and closes the incident; each reply also edits the card's status in place. The calling job runs `if: always()` and passes
+`✅ passing again` and closes the incident; each reply also edits the card's status in place. On a
+closed PR (callers add `closed` to their `pull_request` types) it only closes the PR's open items:
+the needs-human card becomes Handled and an open incident is closed. The calling job runs `if: always()` and passes
 `needs: ${{ toJSON(needs) }}`. State lives in the Actions cache; without `SLACK_BOT_TOKEN` it
 does nothing. Callers still on `if: failure()` keep working but never get recoveries. Inputs,
 caller snippet, state and migration: [docs/notify.md](docs/notify.md).

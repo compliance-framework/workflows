@@ -171,6 +171,40 @@ func TestHandleErrors(t *testing.T) {
 	}
 }
 
+func TestHandleClosed(t *testing.T) {
+	r := Run{Repo: "o/r", Workflow: "ci", ServerURL: "https://github.com", SHA: "2222222222", RunID: "42", PRNumber: 5,
+		PRClosed: true, PRMerged: true, PRClosedBy: "octocat"}
+	open := Incident{Key: "k-", Channel: "C0OLD", TS: "1.1", Open: true, SHA: "1111111111", FailedJobs: []string{"ci"}, OpenedAt: t0.Add(-time.Hour)}
+	f := &slackkit.Fake{}
+	next, action, err := HandleClosed(context.Background(), f, open, r, t0)
+	want := open
+	want.Open, want.ClosedAs, want.ResolvedAt = false, "merged", t0
+	if err != nil || action != ActionClose || !reflect.DeepEqual(next, want) {
+		t.Fatalf("HandleClosed = %+v, %s, %v; want %+v", next, action, err, want)
+	}
+	wantCalls := []call{{"reply", "C0OLD", "1.1", "⚪ PR merged by octocat; incident closed"}, {"update", "C0OLD", "1.1", "CI closed (PR merged): o/r#5 ci"}}
+	if got := calls(f); !reflect.DeepEqual(got, wantCalls) {
+		t.Errorf("calls = %+v, want %+v", got, wantCalls)
+	}
+	if card := f.Calls[1].Message; card.Color != slackkit.ColorGrey || !strings.Contains(fmt.Sprint(card.Blocks), "~ci~") {
+		t.Errorf("closed card = %+v", card)
+	}
+
+	r.PRMerged, r.PRClosedBy = false, ""
+	if got := ClosedReply(r); got != "⚪ PR closed; incident closed" {
+		t.Errorf("ClosedReply = %q", got)
+	}
+	for _, prev := range []Incident{{}, want} { // no incident, or already closed: nothing
+		f := &slackkit.Fake{}
+		if next, action, err := HandleClosed(context.Background(), f, prev, r, t0); err != nil || action != ActionNone || !reflect.DeepEqual(next, prev) || len(f.Calls) != 0 {
+			t.Errorf("from %+v: %+v, %s, %v, calls %+v", prev, next, action, err, f.Calls)
+		}
+	}
+	if next, action, err := HandleClosed(context.Background(), &slackkit.Fake{Err: errors.New("boom")}, open, r, t0); err == nil || action != ActionNone || !reflect.DeepEqual(next, open) {
+		t.Errorf("reply error: %+v, %s, %v", next, action, err)
+	}
+}
+
 // updateFails is a Slack whose chat.update fails.
 type updateFails struct{ slackkit.Fake }
 

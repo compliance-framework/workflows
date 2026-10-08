@@ -77,6 +77,21 @@ func TestDecide(t *testing.T) {
 			}
 		})
 	}
+	// ClosedReason is the open-PR reason, for closed PRs only.
+	for _, tt := range []struct {
+		run  Run
+		want Reason
+	}{
+		{Run{EventName: "pull_request", PRAuthor: ReleaseBotLogin, PRClosed: true}, ReasonReleaseBotPR},
+		{Run{EventName: "pull_request_target", Branch: "renovate/test", PRClosed: true}, ReasonAutomationBranch},
+		{Run{EventName: "pull_request", PRAuthor: ReleaseBotLogin}, ReasonNone},                     // open
+		{Run{EventName: "pull_request", PRAuthor: "octocat", PRClosed: true}, ReasonNone},           // a human's
+		{Run{EventName: "push", Branch: "main", DefaultBranch: "main", PRClosed: true}, ReasonNone}, // not a PR
+	} {
+		if got := ClosedReason(tt.run); got != tt.want {
+			t.Errorf("ClosedReason(%+v) = %q, want %q", tt.run, got, tt.want)
+		}
+	}
 }
 
 func TestIncidentKey(t *testing.T) {

@@ -107,12 +107,62 @@ func TestPostNeedsHuman(t *testing.T) {
 	}
 }
 
+func TestMarkHandled(t *testing.T) {
+	r := Run{Repo: "o/mock-ui", ServerURL: "https://github.com", PRNumber: 13, PRTitle: "chore(deps): x", PRAuthor: "ccf-release-bot[bot]",
+		PRCreatedAt: t0.Add(-26 * time.Hour), PRClosed: true, PRMerged: true, PRClosedBy: "octocat"}
+	rec := Posted{Key: NeedsHumanKey(r), Channel: "C0HUMAN", TS: "1.5", Reason: "major update", CI: ":white_check_mark: Passing"}
+	f := &slackkit.Fake{}
+	if err := MarkHandled(context.Background(), f, rec, r, t0); err != nil {
+		t.Fatal(err)
+	}
+	want := slackkit.NeedsHumanCard(slackkit.NeedsHuman{
+		Repo: "o/mock-ui", Ref: "o/mock-ui#13", URL: "https://github.com/o/mock-ui/pull/13", Title: "chore(deps): x", Why: "Major update",
+		CI: ":white_check_mark: Passing", OpenedBy: "ccf-release-bot[bot]", OpenedAt: r.PRCreatedAt, Handled: "merged", HandledBy: "octocat", HandledAt: t0,
+	})
+	if len(f.Calls) != 1 || f.Calls[0].Method != "update" || f.Calls[0].Channel != "C0HUMAN" || f.Calls[0].TS != "1.5" || !reflect.DeepEqual(f.Calls[0].Message, want) {
+		t.Errorf("calls = %+v, want an update to %+v", f.Calls, want)
+	}
+	if err := MarkHandled(context.Background(), f, Posted{}, r, t0); err != nil || len(f.Calls) != 1 {
+		t.Errorf("no record: err %v, calls %+v", err, f.Calls)
+	}
+
+	path := filepath.Join(t.TempDir(), "rec.json")
+	if got, err := LoadPosted(path, rec.Key); err != nil || got != (Posted{}) {
+		t.Errorf("missing record: %+v, %v", got, err)
+	}
+	if err := rec.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := LoadPosted(path, rec.Key); err != nil || got != rec {
+		t.Errorf("LoadPosted = %+v, %v; want %+v", got, err, rec)
+	}
+	if _, err := LoadPosted(path, "other"); err == nil {
+		t.Error("a record for another key loads")
+	}
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPosted(path, rec.Key); err == nil {
+		t.Error("a broken record loads")
+	}
+}
+
 func TestRunFromEnvClosed(t *testing.T) {
 	for state, want := range map[string]bool{`"closed"`: true, `"open"`: false, `""`: false} {
 		r, err := RunFromEnv(getenv(t, "pull_request", "refs/pull/5/merge",
 			`{"pull_request":{"number":5,"state":`+state+`,"user":{"login":"renovate[bot]"},"head":{"ref":"renovate/x","sha":"2"}}}`))
 		if err != nil || r.PRClosed != want {
 			t.Errorf("state %s: PRClosed = %t, %v; want %t", state, r.PRClosed, err, want)
+		}
+	}
+	for event, want := range map[string]Run{
+		`"merged":true,"merged_by":{"login":"octocat"}},"sender":{"login":"ccf-release-bot[bot]"}`: {PRMerged: true, PRClosedBy: "octocat"},
+		`"merged":false,"merged_by":null},"sender":{"login":"hubot"}`:                              {PRClosedBy: "hubot"},
+	} {
+		r, err := RunFromEnv(getenv(t, "pull_request", "refs/pull/5/merge",
+			`{"pull_request":{"number":5,"state":"closed","user":{"login":"renovate[bot]"},"head":{"ref":"renovate/x","sha":"2"},`+event+`}`))
+		if err != nil || r.PRMerged != want.PRMerged || r.PRClosedBy != want.PRClosedBy {
+			t.Errorf("%s: merged %t by %q, %v; want %+v", event, r.PRMerged, r.PRClosedBy, err, want)
 		}
 	}
 }

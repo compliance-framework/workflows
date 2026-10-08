@@ -120,6 +120,39 @@ func PostNeedsHuman(ctx context.Context, api slackkit.API, r Run, res Result, re
 	return Posted{Key: NeedsHumanKey(r), Channel: cmp.Or(posted.Channel, channel), TS: posted.TS, Reason: reason, CI: ciStatus(res)}, nil
 }
 
+// MarkHandled edits the needs-human card of rec for the closed PR r: handled, merged or
+// closed by whom, and how long it waited. A record without a card does nothing.
+func MarkHandled(ctx context.Context, api slackkit.API, rec Posted, r Run, now time.Time) error {
+	if rec.TS == "" {
+		return nil
+	}
+	return api.Update(ctx, rec.Channel, rec.TS, slackkit.NeedsHumanCard(slackkit.NeedsHuman{
+		Repo: r.Repo, Ref: fmt.Sprintf("%s#%d", r.Repo, r.PRNumber), URL: r.PRURL(), Title: r.PRTitle,
+		Why: upperFirst(slackkit.Escape(rec.Reason)), CI: rec.CI, OpenedBy: r.PRAuthor, OpenedAt: r.PRCreatedAt,
+		Handled: closedAs(r), HandledBy: r.PRClosedBy, HandledAt: now,
+	}))
+}
+
+// LoadPosted reads the needs-human record at path; a missing file is no record. A record for
+// another key is an error.
+func LoadPosted(path, key string) (Posted, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return Posted{}, nil
+	}
+	if err != nil {
+		return Posted{}, err
+	}
+	var rec Posted
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return Posted{}, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	if rec.Key != key {
+		return Posted{}, fmt.Errorf("%s is for %q, not %q", path, rec.Key, key)
+	}
+	return rec, nil
+}
+
 func upperFirst(s string) string {
 	if s == "" {
 		return s

@@ -86,6 +86,7 @@ type Incident struct {
 	OpenedAt   time.Time `json:"opened_at,omitzero"`
 	Again      bool      `json:"again,omitempty"` // a later failure replied: "Failing again"
 	ResolvedAt time.Time `json:"resolved_at,omitzero"`
+	ClosedAs   string    `json:"closed_as,omitempty"` // "merged" or "closed": closed with its PR, unresolved
 }
 
 // LoadIncident reads the state at path. A missing file is no incident. Any other problem,
@@ -127,6 +128,7 @@ const (
 	ActionOpen    Action = "open"    // posted a new top-level message
 	ActionReply   Action = "reply"   // posted another failure in the thread
 	ActionRecover Action = "recover" // posted the recovery in the thread and closed the incident
+	ActionClose   Action = "close"   // the PR was merged or closed: replied and closed the incident
 )
 
 // CardError is a failure to edit an incident's card after its thread reply was posted. The
@@ -182,6 +184,29 @@ func Handle(ctx context.Context, api slackkit.API, key string, prev Incident, r 
 	return prev, ActionNone, nil
 }
 
+// HandleClosed closes the incident prev of the closed PR r, if it is open: a reply in the
+// thread and the card marked closed. It runs no failure logic. Like Handle, a state that comes
+// with a *CardError is still the next state.
+func HandleClosed(ctx context.Context, api slackkit.API, prev Incident, r Run, now time.Time) (Incident, Action, error) {
+	if !prev.Open {
+		return prev, ActionNone, nil
+	}
+	if _, err := api.Reply(ctx, prev.Channel, prev.TS, slackkit.Note(ClosedReply(r))); err != nil {
+		return prev, ActionNone, err
+	}
+	next := prev
+	next.Open, next.ClosedAs, next.ResolvedAt = false, closedAs(r), now
+	return next, ActionClose, updateCard(ctx, api, r, next, now)
+}
+
+// closedAs is "merged" or "closed".
+func closedAs(r Run) string {
+	if r.PRMerged {
+		return "merged"
+	}
+	return "closed"
+}
+
 // updateCard edits the incident's top-level card to inc; a failure is a *CardError.
 func updateCard(ctx context.Context, api slackkit.API, r Run, inc Incident, now time.Time) error {
 	if err := api.Update(ctx, inc.Channel, inc.TS, IncidentCard(r, inc, now)); err != nil {
@@ -194,8 +219,10 @@ func updateCard(ctx context.Context, api slackkit.API, r Run, inc Incident, now 
 // opened at, the failed jobs (struck through once resolved), and links to the PR and the run.
 func IncidentCard(r Run, inc Incident, now time.Time) slackkit.Message {
 	repoURL := r.ServerURL + "/" + r.Repo
-	status := slackkit.Failing
+	status, note := slackkit.Failing, ""
 	switch {
+	case !inc.Open && inc.ClosedAs != "":
+		status, note = slackkit.Closed, "PR "+inc.ClosedAs
 	case !inc.Open:
 		status = slackkit.Resolved
 	case inc.Again:
@@ -204,7 +231,7 @@ func IncidentCard(r Run, inc Incident, now time.Time) slackkit.Message {
 	sha := cmp.Or(inc.OpenedSHA, inc.SHA)
 	c := slackkit.Incident{
 		Repo: r.Repo, Ref: r.Repo + "@" + r.Branch, RefURL: repoURL + "/tree/" + r.Branch, Workflow: r.Workflow,
-		Status: status, SHA: sha, SHAURL: repoURL + "/commit/" + sha, FailedJobs: inc.FailedJobs,
+		Status: status, StatusNote: note, SHA: sha, SHAURL: repoURL + "/commit/" + sha, FailedJobs: inc.FailedJobs,
 		OpenedAt: inc.OpenedAt, ResolvedAt: inc.ResolvedAt, RunURL: repoURL + "/actions/runs/" + r.RunID, UpdatedAt: now,
 	}
 	if r.PRNumber != 0 {
@@ -222,6 +249,15 @@ func FailureReply(r Run, failedJobs []string) string {
 // RecoveryReply is the thread reply that closes an incident.
 func RecoveryReply(r Run) string {
 	return "✅ passing again at " + commitAndRun(r)
+}
+
+// ClosedReply is the thread reply that closes an incident with its PR.
+func ClosedReply(r Run) string {
+	by := ""
+	if r.PRClosedBy != "" {
+		by = " by " + escape(r.PRClosedBy)
+	}
+	return fmt.Sprintf("⚪ PR %s%s; incident closed", closedAs(r), by)
 }
 
 // jobList is ": a, b", or "" when the failed jobs are unknown.
