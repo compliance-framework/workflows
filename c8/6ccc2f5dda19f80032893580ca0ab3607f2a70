@@ -1,0 +1,6 @@
+lisa-design:
+- Cards are domain-neutral data structs in slackkit (Incident, NeedsHuman, Train, Digest) rather than builders inside notify/attention/train: the preview command and the tools render the exact same function, so the preview is the real design. Later PRs map their state onto these structs.
+- Golden files are one JSON value per line (args, each top-level block, the attachment, its blocks) instead of indented JSON, to keep each card's golden under ~10 lines and the diff reviewable.
+- Train board: Block Kit has no table block in our supported set, so each stage is a section titled "Stage n" with one field per repo (name link + pill emoji + status + version); stages over 10 repos split into extra sections.
+- Board color precedence: aborted (grey) > finished (green) > any repo held (red) > running (amber).
+- Failed jobs are struck through (~job~) once Resolved or Closed, kept otherwise.
