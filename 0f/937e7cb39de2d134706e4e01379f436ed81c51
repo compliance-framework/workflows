@@ -1,0 +1,2 @@
+lisa-addressed:
+pass 1 fixes: added internal/ciworkflows/self_release_test.go (TestSelfReleaseConfig: manifest 0.0.0, packages["."] simple + initial-version 1.0.0, drift check quiet on the repo's own config, self-release.yml has only release-please on push; TestNotifyToolsRef: default "" and `inputs.workflows-ref || job.workflow_sha` in check + checkout, empty ref fails); bumper.commits cache split from finals; reflowed files.go doc and docs/ccf-bump.md.
