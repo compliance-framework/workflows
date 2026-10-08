@@ -26,6 +26,7 @@ import (
 	"github.com/compliance-framework/workflows/internal/attention"
 	"github.com/compliance-framework/workflows/internal/manifest"
 	"github.com/compliance-framework/workflows/internal/notify"
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 // defaultManifest is the mocks until the digest is proven on them; the workflow passes the
@@ -94,9 +95,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	if len(d.Items) == 0 {
 		fmt.Fprintf(stdout, "no PR needs a human in %d repo(s) of %s; nothing posted\n", len(selected), *path)
 	} else {
-		msg := attention.Message(d, cfg.Now, runURL)
-		fmt.Fprintln(stdout, msg)
-		if err := post(ctx, getenv, stdout, msg, *dryRun); err != nil {
+		fmt.Fprintln(stdout, attention.Message(d, cfg.Owner, cfg.Now, runURL))
+		if err := post(ctx, getenv, stdout, attention.Card(d, cfg.Owner, cfg.Now, runURL), *dryRun); err != nil {
 			return err
 		}
 	}
@@ -110,8 +110,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	return nil
 }
 
-// post sends msg to SLACK_CHANNEL; a dry run, or no SLACK_BOT_TOKEN or channel, only says so.
-func post(ctx context.Context, getenv func(string) string, stdout io.Writer, msg string, dryRun bool) error {
+// post sends the card to SLACK_CHANNEL; a dry run, or no SLACK_BOT_TOKEN or channel, only says so.
+func post(ctx context.Context, getenv func(string) string, stdout io.Writer, card slackkit.Message, dryRun bool) error {
 	token, channel := getenv("SLACK_BOT_TOKEN"), getenv("SLACK_CHANNEL")
 	switch {
 	case dryRun:
@@ -121,8 +121,8 @@ func post(ctx context.Context, getenv func(string) string, stdout io.Writer, msg
 		fmt.Fprintln(stdout, "SLACK_BOT_TOKEN or SLACK_CHANNEL (the SLACK_CHANNEL_NEEDS_HUMAN variable) is not set; nothing posted")
 		return nil
 	}
-	slack := &notify.Slack{BaseURL: envOr(getenv, "SLACK_API_URL", "https://slack.com/api"), Token: token}
-	if err := slack.PostMessage(ctx, channel, msg); err != nil {
+	slack := &slackkit.Client{BaseURL: getenv("SLACK_API_URL"), Token: token}
+	if _, err := slack.Post(ctx, channel, card); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "posted to %s\n", channel)

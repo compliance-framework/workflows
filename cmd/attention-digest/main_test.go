@@ -27,7 +27,7 @@ func setup(t *testing.T, prs map[string]string) (map[string]string, *[]map[strin
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		*posts = append(*posts, body)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true,"channel":"C0HUMAN","ts":"1.1"}`))
 	}))
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -85,10 +85,15 @@ func TestPost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	want := ":raising_hand: 1 PR needs a human\n*mock-ui*\n• <https://github.com/compliance-framework/mock-ui/pull/13|mock-ui#13> " +
-		"chore(deps): update typescript to v7 · labelled needs-human, open over 7d · 9d\n<https://github.com/compliance-framework/workflows/actions/runs/7|run>"
-	if len(*posts) != 1 || (*posts)[0]["channel"] != "C0HUMAN" || (*posts)[0]["text"] != want {
-		t.Fatalf("posts = %v\nwant %q", *posts, want)
+	want := "1 PR needs a human: compliance-framework/mock-ui#13"
+	line := "• <https://github.com/compliance-framework/mock-ui/pull/13|compliance-framework/mock-ui#13> " +
+		"chore(deps): update typescript to v7 · labelled needs-human, open over 7d · 9d"
+	if len(*posts) != 1 || (*posts)[0]["channel"] != "C0HUMAN" || (*posts)[0]["text"] != want ||
+		!strings.Contains(fmt.Sprint((*posts)[0]["attachments"]), line) || !strings.Contains(fmt.Sprint((*posts)[0]["blocks"]), "1 PR needs a human") {
+		t.Fatalf("posts = %v\nwant %q with %q", *posts, want, line)
+	}
+	if !strings.Contains(out, line) {
+		t.Errorf("the log lacks the digest:\n%s", out)
 	}
 	if strings.Contains(out, "gh-token") || strings.Contains(out, "xoxb-test") {
 		t.Error("a token was printed")
@@ -126,7 +131,7 @@ func TestPostFailsAfterPosting(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "could not read mock-api") {
 		t.Errorf("err = %v", err)
 	}
-	if len(*posts) != 1 || !strings.Contains((*posts)[0]["text"].(string), "Could not read: mock-api") {
+	if len(*posts) != 1 || !strings.Contains(fmt.Sprint((*posts)[0]["attachments"]), "Could not read: mock-api") {
 		t.Errorf("posts = %v", *posts)
 	}
 	if !strings.Contains(out, "::warning::attention-digest: mock-api: ") {

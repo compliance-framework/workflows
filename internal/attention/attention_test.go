@@ -3,11 +3,15 @@ package attention
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
 var now = time.Date(2026, 10, 12, 8, 30, 0, 0, time.UTC)
@@ -116,7 +120,7 @@ func TestReleaseReasonApproved(t *testing.T) {
 	}
 }
 
-func TestMessage(t *testing.T) {
+func TestMessageAndCard(t *testing.T) {
 	d := Digest{
 		Items: []Item{
 			{PR: PR{Repo: "mock-ui", Number: 13, Title: "chore(deps): update typescript to v7 <major>", URL: "https://github.com/o/mock-ui/pull/13", Created: now.Add(-9*24*time.Hour - time.Hour)},
@@ -127,19 +131,52 @@ func TestMessage(t *testing.T) {
 		},
 		Failed: []Failure{{Where: "mock-gone", Err: errors.New("404")}},
 	}
-	want := `:raising_hand: 3 PRs need a human
-*mock-ui*
-• <https://github.com/o/mock-ui/pull/13|mock-ui#13> chore(deps): update typescript to v7 &lt;major&gt; · labelled needs-human, open over 7d · 9d
-• <https://github.com/o/mock-ui/pull/14|mock-ui#14> t · x · 5h
-*workflows*
-• <https://github.com/o/workflows/pull/3|workflows#3> chore(main): release 2.0.0 · needs release:major-approved (.: v1.4.0 -&gt; v2.0.0) · <1h
-Could not read: mock-gone
-<https://github.com/o/workflows/actions/runs/7|run>`
-	if got := Message(d, now, "https://github.com/o/workflows/actions/runs/7"); got != want {
+	mockUI := "*o/mock-ui*\n" +
+		"• <https://github.com/o/mock-ui/pull/13|o/mock-ui#13> chore(deps): update typescript to v7 &lt;major&gt; · labelled needs-human, open over 7d · 9d\n" +
+		"• <https://github.com/o/mock-ui/pull/14|o/mock-ui#14> t · x · 5h"
+	workflows := "*o/workflows*\n• <https://github.com/o/workflows/pull/3|o/workflows#3> chore(main): release 2.0.0 · needs release:major-approved (.: v1.4.0 -&gt; v2.0.0) · <1h"
+	run := "https://github.com/o/workflows/actions/runs/7"
+	want := ":raising_hand: 3 PRs need a human\n" + mockUI + "\n" + workflows + "\nCould not read: mock-gone\n<" + run + "|run>"
+	if got := Message(d, "o", now, run); got != want {
 		t.Errorf("message:\n%s\nwant:\n%s", got, want)
 	}
-	if got := Message(Digest{Items: d.Items[:1]}, now, ""); !strings.HasPrefix(got, ":raising_hand: 1 PR needs a human\n") || strings.Contains(got, "run>") {
+	if got := Message(Digest{Items: d.Items[:1]}, "o", now, ""); !strings.HasPrefix(got, ":raising_hand: 1 PR needs a human\n") || strings.Contains(got, "run>") {
 		t.Errorf("one item:\n%s", got)
+	}
+
+	card := Card(d, "o", now, run)
+	wantCard := slackkit.Message{
+		Text:   "3 PRs need a human: o/mock-ui#13, o/mock-ui#14, o/workflows#3",
+		Header: ":raising_hand: 3 PRs need a human",
+		Blocks: append([]slackkit.Block{slackkit.Section(mockUI), slackkit.Section(workflows)},
+			slackkit.Context(":warning: Could not read: mock-gone", "<"+run+"|Digest run>")...),
+		Color: slackkit.ColorAmber,
+	}
+	if !reflect.DeepEqual(card, wantCard) {
+		t.Errorf("card = %+v\nwant %+v", card, wantCard)
+	}
+	if got := Card(Digest{Items: d.Items[:1]}, "o", now, ""); len(got.Blocks) != 1 || got.Header != ":raising_hand: 1 PR needs a human" {
+		t.Errorf("one item, no run, nothing failed: %+v", got)
+	}
+
+	// A repo too long for one section continues in the next; past maxSections, the rest share
+	// the last one.
+	var many Digest
+	for i := range maxSections + 5 {
+		many.Items = append(many.Items, Item{PR: PR{Repo: fmt.Sprintf("r%02d", i), Number: 1, URL: "u", Created: now}, Reasons: []string{"x"}})
+	}
+	blocks := Card(many, "o", now, "").Blocks
+	if len(blocks) != maxSections || !strings.Contains(blocks[maxSections-1].Text.Text, "*o/r44*") {
+		t.Errorf("%d blocks for %d repos; last: %+v", len(blocks), len(many.Items), blocks[len(blocks)-1])
+	}
+	var long Digest
+	for i := range 30 {
+		long.Items = append(long.Items, Item{PR: PR{Repo: "r", Number: i, Title: strings.Repeat("t", 150), URL: "u", Created: now}, Reasons: []string{"x"}})
+	}
+	blocks = Card(long, "o", now, "").Blocks
+	if len(blocks) != 2 || !strings.HasPrefix(blocks[1].Text.Text, "• <u|o/r#") || strings.Contains(blocks[0].Text.Text+blocks[1].Text.Text, "…") ||
+		strings.Count(blocks[0].Text.Text+blocks[1].Text.Text, "• ") != 30 {
+		t.Errorf("long repo: %d blocks: %+v", len(blocks), blocks)
 	}
 }
 
