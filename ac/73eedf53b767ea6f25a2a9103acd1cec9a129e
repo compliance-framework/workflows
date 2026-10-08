@@ -1,0 +1,2 @@
+lisa-addressed:
+- releaseTags: proposed versions hoisted out of the per-tag closure; predicate split for readability.
