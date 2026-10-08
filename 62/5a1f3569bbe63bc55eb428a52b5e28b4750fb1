@@ -4,3 +4,6 @@ lisa-design:
 - The needs-human CI field reflects the run's original result (before Route strips a release-checks-only failure), so the card says why release-checks blocked it.
 - notify.Slack is kept (vuln-summary, attention-digest and train still post plain text) but delegates to slackkit.Client: one HTTP client for Slack. Its unused HTTP field was dropped.
 - The closed-PR updates (needs-human card -> Handled, open incident -> Closed) come in the next PR of the stack; this one keeps the merged closed-PR guard unchanged.
+
+lisa-selfreview:
+pass 1: fixed — gofmt on notify.go; a vacuous Buttons assertion in TestIncidentCard; swapped got/want in its message; unused envOr in cmd/notify; stale attention.md/README message examples. pass 2: no findings.
