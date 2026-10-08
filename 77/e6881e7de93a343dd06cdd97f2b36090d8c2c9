@@ -5,3 +5,8 @@ lisa-design:
 - Closing/deleting a superseded PR's branch failing is a warning, not a run failure (the new bump PR is open). Order: comment, close, then delete branch.
 - Warnings are collected on the bumper and repeated at the end of stdout and appended to $GITHUB_STEP_SUMMARY when set (the code wrote no summary before).
 - No workflow change: the live token already has contents write (delete ref) and pull-requests write (comment, close); dry runs only list PRs (pull-requests read).
+
+lisa-selfreview:
+pass 1 (strict):
+- CORE-TEST-001 must-fix cmd/ccf-bump/bumper.go closeSuperseded: the close-failure warning path and the empty-author guard have no test.
+- CORE-STYLE-001 nit cmd/ccf-bump/bumper.go superseded: doc comment "and mine" reads unclearly.
