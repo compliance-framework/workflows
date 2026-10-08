@@ -219,3 +219,39 @@ func TestHolds(t *testing.T) {
 		}
 	}
 }
+
+// A fork's PR named like release-please's is never the release PR: the repo has nothing to
+// release, and the train merges nothing.
+func TestForkReleasePRIsNeverMerged(t *testing.T) {
+	w := newWorld(t)
+	w.repo("mock-api", "0.1.0").pending("0.2.0")
+	gooci := w.repo("mock-gooci", "0.1.0")
+	gooci.prs[99] = &PR{Number: 99, URL: ReleaseBranchPrefix + "main", Open: true, Fork: true, HeadSHA: "evil", BaseSHA: gooci.main}
+	w.green(gooci, "evil", true)
+	e := w.engine(trainDay)
+	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api", "mock-gooci"}})
+	drive(t, w, e, 6)
+	if g := w.state(1).Repo("mock-gooci"); g.Phase != Released || g.Detail != "nothing to release" {
+		t.Errorf("mock-gooci = %s %q", g.Status(), g.Detail)
+	}
+	if slices.Contains(w.merges, "mock-gooci#99") {
+		t.Errorf("merged the fork's PR: %v", w.merges)
+	}
+}
+
+// A state recorded before OpenPR skipped forks may point at a fork's PR: merge drops it and
+// looks for the release PR again.
+func TestMergeDropsAForkPR(t *testing.T) {
+	w := newWorld(t)
+	api := w.repo("mock-api", "0.1.0")
+	api.prs[99] = &PR{Number: 99, URL: ReleaseBranchPrefix + "main", Open: true, Fork: true, HeadSHA: "evil", BaseSHA: api.main}
+	w.green(api, "evil", true)
+	e := w.engine(trainDay)
+	r := &RepoState{Name: "mock-api", Phase: Merging, ReleasePR: 99}
+	if err := e.merge(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Phase != ReleasePR || r.ReleasePR != 0 || !strings.Contains(r.Detail, "is from a fork") || len(w.merges) > 0 {
+		t.Errorf("after merge: %s %q, merges %v", r.Status(), r.Detail, w.merges)
+	}
+}

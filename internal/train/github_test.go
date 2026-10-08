@@ -41,9 +41,13 @@ func TestGitHubRepos(t *testing.T) {
 		"GET /repos/o/r":               `{"default_branch":"main"}`,
 		"GET /repos/o/r/branches/main": `{"commit":{"sha":"abc"}}`,
 		"GET /repos/o/r/contents/.release-please-manifest.json?ref=abc": `{"content":"eyIuIjoi\nMC4xLjAifQ=="}`,
-		"GET /repos/o/r/pulls?state=open&sort=created&direction=asc&per_page=100&page=1": `[{"number":3,"head":{"ref":"ccf-bump/train-x"}},
-			{"number":4,"state":"open","html_url":"u4","auto_merge":{"merge_method":"squash"},"head":{"ref":"release-please--branches--main","sha":"h"},"base":{"sha":"b"},"labels":[{"name":"l"}]}]`,
-		"GET /repos/o/r/pulls/4": `{"number":4,"state":"closed","merged_at":"2026-12-01T00:00:00Z","merge_commit_sha":"m","head":{"sha":"h"},"base":{"sha":"b"}}`,
+		// #1 and #2 are fork PRs named like release-please's (#2's fork was deleted): never adopted.
+		"GET /repos/o/r/pulls?state=open&sort=created&direction=asc&per_page=100&page=1": `[{"number":1,"state":"open","head":{"ref":"release-please--branches--main","sha":"f","repo":{"full_name":"mallory/r"}}},
+			{"number":2,"state":"open","head":{"ref":"release-please--branches--main","sha":"g","repo":null}},
+			{"number":3,"head":{"ref":"ccf-bump/train-x","repo":{"full_name":"o/r"}}},
+			{"number":4,"state":"open","html_url":"u4","auto_merge":{"merge_method":"squash"},"head":{"ref":"release-please--branches--main","sha":"h","repo":{"full_name":"O/r"}},"base":{"sha":"b"},"labels":[{"name":"l"}]}]`,
+		"GET /repos/o/r/pulls/4": `{"number":4,"state":"closed","merged_at":"2026-12-01T00:00:00Z","merge_commit_sha":"m","head":{"sha":"h","repo":{"full_name":"o/r"}},"base":{"sha":"b"}}`,
+		"GET /repos/o/r/pulls/1": `{"number":1,"state":"open","head":{"ref":"release-please--branches--main","sha":"f","repo":{"full_name":"mallory/r"}}}`,
 		"GET /repos/o/r/commits/h/check-runs?filter=all&per_page=100&page=1": `{"check_runs":[{"id":1,"name":"ci / required","status":"completed","conclusion":"success","started_at":"2026-10-08T05:01:00Z"}]}`,
 		"GET /repos/o/r/commits/h/status?per_page=100":                       `{"statuses":[{"id":7,"context":"osv","state":"error"},{"id":8,"context":"cla","state":"pending"}]}`,
 		"GET /repos/o/r/tags?per_page=100&page=1":                            `[{"name":"v0.2.0","commit":{"sha":"m"}},{"name":"v0.1.0","commit":{"sha":"x"}}]`,
@@ -63,8 +67,11 @@ func TestGitHubRepos(t *testing.T) {
 	if want := (&PR{Number: 4, URL: "u4", HeadSHA: "h", BaseSHA: "b", Open: true, AutoMerge: true, Labels: []string{"l"}}); err != nil || !reflect.DeepEqual(pr, want) {
 		t.Errorf("OpenPR = %+v %v", pr, err)
 	}
-	if pr, err := g.PR(ctx, "r", 4); err != nil || !pr.Merged || pr.MergeSHA != "m" || pr.Open {
+	if pr, err := g.PR(ctx, "r", 4); err != nil || !pr.Merged || pr.MergeSHA != "m" || pr.Open || pr.Fork {
 		t.Errorf("PR = %+v %v", pr, err)
+	}
+	if pr, err := g.PR(ctx, "r", 1); err != nil || !pr.Fork {
+		t.Errorf("fork PR = %+v %v", pr, err)
 	}
 	checks, err := g.Checks(ctx, "r", "h")
 	// Statuses map onto checks: error fails, pending runs. Checks that are not required are ignored.

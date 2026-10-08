@@ -143,6 +143,13 @@ func (e *Engine) merge(ctx context.Context, r *RepoState) error {
 	if err != nil {
 		return err
 	}
+	if pr.Fork {
+		// OpenPR never adopts a fork's PR, but a state written before it checked could hold one.
+		r.ReleasePR = 0
+		r.next(ReleasePR)
+		r.Detail = fmt.Sprintf("%s is from a fork, not release-please: ignored", e.prLink(r.Name, pr.Number))
+		return nil
+	}
 	if !pr.Merged && !pr.Open {
 		r.ReleasePR = 0
 		r.next(ReleasePR)

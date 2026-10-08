@@ -18,6 +18,9 @@ type PR struct {
 	MergeSHA  string
 	AutoMerge bool // auto-merge is enabled
 	Labels    []string
+	// Fork: the head branch lives in another repo (or a deleted one), so anyone could have
+	// named it like release-please's; the train never merges such a PR.
+	Fork bool
 }
 
 // Check is a check run, or a commit status mapped onto one (Name is the context).
@@ -62,7 +65,8 @@ type Repos interface {
 	DefaultBranch(ctx context.Context, repo string) (branch, sha string, err error)
 	// File returns nil, nil when path doesn't exist at ref.
 	File(ctx context.Context, repo, ref, path string) ([]byte, error)
-	// OpenPR returns the open PR whose head branch starts with headPrefix, or nil.
+	// OpenPR returns the oldest open PR whose head branch, in the repo itself (not a fork), starts
+	// with headPrefix, or nil.
 	OpenPR(ctx context.Context, repo, headPrefix string) (*PR, error)
 	PR(ctx context.Context, repo string, number int) (*PR, error)
 	Checks(ctx context.Context, repo, sha string) ([]Check, error)

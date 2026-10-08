@@ -83,7 +83,7 @@ func (w *world) get(name string) *fakeRepo { return w.repos[name] }
 
 func (r *fakeRepo) openPR(prefix string) *PR {
 	for _, n := range slices.Sorted(maps.Keys(r.prs)) {
-		if pr := r.prs[n]; pr.Open && strings.HasPrefix(pr.URL, prefix) {
+		if pr := r.prs[n]; pr.Open && !pr.Fork && strings.HasPrefix(pr.URL, prefix) {
 			return pr
 		}
 	}
