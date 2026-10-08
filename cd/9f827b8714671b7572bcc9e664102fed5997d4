@@ -1,0 +1,9 @@
+lisa-design:
+- Digest posts to SLACK_CHANNEL_NEEDS_HUMAN (spec change), not SLACK_CHANNEL_RELEASES. Empty var or missing SLACK_BOT_TOKEN: prints the digest, posts nothing, succeeds.
+- Schedule Mondays 08:30 UTC; manifest input default repos.mock.yaml with the same `inputs.manifest || 'repos.mock.yaml'` fallback as renovate.yml/vuln-summary.yml; dry_run input default true; scheduled runs live only when vars.ATTENTION_DIGEST_LIVE == 'true' (RENOVATE_LIVE / CCF_BUMP_SYNC_LIVE pattern, normalized to true/false in the select step).
+- Token: ccf-release-bot scoped with repositories: to the listed manifest repos (workflows included), permissions pull-requests/checks/contents: read only; empty selection refused.
+- N == 0: logs "no PR needs a human ... nothing posted" and posts nothing; read failures still fail the run (after posting when there is something to post).
+- Default --repos selection includes the kind: workflows repo (spec: include `workflows` itself), unlike vuln-summary.
+
+lisa-selfreview:
+pass 1 (strict): approve, no findings. Checked DRY_RUN truth table (schedule live/not, dispatch true/false), token scoping + read-only perms, actionlint, tokens never printed (tested), N==0 silence, docs vs code (flags, defaults, check names).
