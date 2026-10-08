@@ -33,7 +33,10 @@ so the required check still gates every merge.
 
 The cost is merge lag: GitHub would merge as soon as the check passes, while Renovate merges on
 its next run that finds the checks green. `renovate.yml` runs daily, so a PR merges up to about a
-day after its checks pass. A PR whose checks fail stays open, and Renovate rebases or recreates it
+day after its checks pass. The 8th/22nd `schedule` doesn't delay this: it only limits when new
+branches are created, while Renovate keeps updating and merging existing PRs on the other days
+(its defaults `updateNotScheduled: true` and `automergeSchedule: ["at any time"]`, which the preset
+leaves alone). A PR whose checks fail stays open, and Renovate rebases or recreates it
 on later runs as usual. The repo's "allow auto-merge" setting is no longer used by Renovate.
 
 It extends `config:recommended`, which adds the Dependency Dashboard issue (where majors and pending
