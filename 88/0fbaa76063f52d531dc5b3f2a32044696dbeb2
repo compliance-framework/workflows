@@ -11,3 +11,8 @@ lisa-design:
 - --dry-run doesn't wait.
 - Token: added permission-checks: read to the sync token (merge reads check runs; train/renovate/attention all do the same). Merge-only workflow also gets workflows: write when live (merging a PR that edits .github/workflows needs it).
 - ccf-bump-merge.yml manifest: input default and schedule fallback repos.mock.yaml (the attention/vuln/train/renovate convention: fallback equals the input default), unlike ccf-bump-sync's repos.yaml; move both to repos.yaml when going live on product repos.
+
+lisa-selfreview:
+pass 1 (strict):
+- should-fix (CORE-ERR-001-ish, no rule: closed-pr-polled-as-pending) cmd/ccf-bump/merge.go tryMerge: a PR merged or closed during --wait (e.g. by the train, which merges its own train-mode bump PRs, or a person) has mergeable null, so it is reported as "computing mergeability" and polled until --wait ends, then listed as still pending. Fix: read `state` and leave a PR that is no longer open.
+- nit (CORE-STYLE-001) merge.go: "no longer labelled ccf-bump:automerge alone" reads awkwardly; say the labels changed.
