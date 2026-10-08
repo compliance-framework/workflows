@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.3.0](https://github.com/compliance-framework/workflows/compare/v1.2.0...v1.3.0) (2026-10-08)
+
+
+### Features
+
+* **repo-settings:** manage the workflows repo; tag ruleset, strict review and Actions settings ([8e4c27b](https://github.com/compliance-framework/workflows/commit/8e4c27b2a824715c293364128670d9c6361dadfa))
+* **repo-settings:** manage the workflows repo; tag ruleset, strict review and Actions settings ([ddf5d7c](https://github.com/compliance-framework/workflows/commit/ddf5d7c92cdde97c3d7cea914f40cbfced3b528f))
+* **repo-settings:** release environment for the ccf-release-bot secrets ([9b8311e](https://github.com/compliance-framework/workflows/commit/9b8311e7c03804e28b785d6bfd2d7ad63b31ef0e))
+* **repo-settings:** release environment for the ccf-release-bot secrets ([6a44da0](https://github.com/compliance-framework/workflows/commit/6a44da050f0f2a9a382101c2457387de1d9ddc2f))
+
+
+### Bug Fixes
+
+* **ccf-bump:** move workflows pins only to bot releases on the default branch ([2a9b345](https://github.com/compliance-framework/workflows/commit/2a9b345009652e8fb1006baf7a778b5f52b36172))
+* **ccf-bump:** move workflows pins only to bot releases on the default branch ([86b1188](https://github.com/compliance-framework/workflows/commit/86b11887aeb6096e32b705efa36dece825cb4897))
+* **ci:** pass ci / required when release-checks is skipped ([d628ff2](https://github.com/compliance-framework/workflows/commit/d628ff2c8ac629e451f5aed1c2795eeab6bcc23d))
+* **ci:** pass ci / required when release-checks is skipped ([1e26f5f](https://github.com/compliance-framework/workflows/commit/1e26f5fa51f3639a32af471ac32cd67a28034c67))
+* **ci:** pass ci / required when release-checks is skipped ([7ded49c](https://github.com/compliance-framework/workflows/commit/7ded49c636195ae57dcd73481faad999e504b5fb))
+* **train:** never adopt a fork's PR as the release PR ([f1565f7](https://github.com/compliance-framework/workflows/commit/f1565f70b08952d6c04263445e7e18dc4acc77af))
+* **train:** never adopt a fork's PR as the release PR ([443ecdd](https://github.com/compliance-framework/workflows/commit/443ecdd710cf5ec432452a452e2076fc9b5d4126))
+
 ## [1.2.0](https://github.com/compliance-framework/workflows/compare/v1.1.1...v1.2.0) (2026-10-08)
 
 
