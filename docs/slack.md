@@ -50,6 +50,24 @@ Block Kit's limits (header 150, section 3000, field 2000 characters, button 75),
 into sections of 10 and buttons into actions blocks of 25, and leave out empty fields, empty
 context lines and buttons without a URL.
 
+## The cards
+
+| Card | Channel | Edited in place |
+| --- | --- | --- |
+| `IncidentCard` | #ccf-ci-failures | on every transition: Failing → Failing again → Resolved (resolved time, duration, failed jobs struck through), or Closed when the PR is merged or closed |
+| `NeedsHumanCard` | #ccf-pr-needs-human | to Handled, with "Merged by …" or "Closed by …" and how long it waited |
+| `TrainBoard` | #ccf-releases | at every train step: stages, per-repo pills and versions, "Stage n of m" |
+| `DigestCard` | #ccf-release-digests | no: posted once at train end, marked draft |
+| `Note` | thread replies | no |
+
+Each tool fills its card from its state as it moves onto the kit, so each channel's design
+lives in one place. On the train board each repo has a pill: :large_green_circle: released,
+:large_yellow_circle: in progress, :red_circle: held, :white_circle: waiting, :fast_forward:
+skipped.
+`testdata/*.golden` in `internal/slackkit` holds each card's `chat.postMessage` payload, one
+JSON value per line; after an intended change, rewrite them with
+`go test ./internal/slackkit -update` and review the diff.
+
 ## The client
 
 `slackkit.Client` calls the Web API with a bot token that has `chat:write`, the only scope

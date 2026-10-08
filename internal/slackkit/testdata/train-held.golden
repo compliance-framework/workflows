@@ -1,0 +1,10 @@
+{"text":"Release train 2026-10: Stage 2 of 3 · 1 held","unfurl_links":false,"unfurl_media":false}
+blocks {"type":"header","text":{"type":"plain_text","text":":steam_locomotive: Release train 2026-10","emoji":true}}
+attachment {"color":"#D1242F","fallback":"Release train 2026-10: Stage 2 of 3 · 1 held"}
+  blocks {"type":"section","text":{"type":"mrkdwn","text":"*Stage 2 of 3* · 1 held"}}
+  blocks {"type":"divider"}
+  blocks {"type":"section","text":{"type":"mrkdwn","text":"*Stage 1*"},"fields":[{"type":"mrkdwn","text":"*<https://github.com/compliance-framework/mock-api|mock-api>*\n:large_green_circle: released `v1.4.0`"},{"type":"mrkdwn","text":"*<https://github.com/compliance-framework/mock-gooci|mock-gooci>*\n:fast_forward: skipped"}]}
+  blocks {"type":"section","text":{"type":"mrkdwn","text":"*Stage 2*"},"fields":[{"type":"mrkdwn","text":"*<https://github.com/compliance-framework/mock-agent|mock-agent>*\n:large_yellow_circle: publishing `v0.9.0`"},{"type":"mrkdwn","text":"*mock-ui*\n:red_circle: blocked: release checks failed"}]}
+  blocks {"type":"section","text":{"type":"mrkdwn","text":"*Stage 3*"},"fields":[{"type":"mrkdwn","text":"*<https://github.com/compliance-framework/mock-agent-action|mock-agent-action>*\n:white_circle: waiting"}]}
+  blocks {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"Tracking issue","emoji":true},"url":"https://github.com/compliance-framework/workflows/issues/70","action_id":"link-0"}]}
+  blocks {"type":"context","elements":[{"type":"mrkdwn","text":":test_tube: Dry run"},{"type":"mrkdwn","text":"Updated <!date^1791450000^{date_short_pretty} at {time}|2026-10-08 09:00 UTC>"}]}

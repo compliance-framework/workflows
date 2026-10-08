@@ -1,0 +1,7 @@
+{"text":"CI failing again: compliance-framework/mock-api#12 ci","unfurl_links":false,"unfurl_media":false}
+blocks {"type":"header","text":{"type":"plain_text","text":":red_circle: CI failing again · mock-api","emoji":true}}
+attachment {"color":"#D1242F","fallback":"CI failing again: compliance-framework/mock-api#12 ci"}
+  blocks {"type":"section","text":{"type":"mrkdwn","text":"*<https://github.com/compliance-framework/mock-api/pull/12|compliance-framework/mock-api#12>* fix(deps): update module &lt;x&gt; to v2"}}
+  blocks {"type":"section","fields":[{"type":"mrkdwn","text":"*Status*\nFailing again"},{"type":"mrkdwn","text":"*Workflow*\nci"},{"type":"mrkdwn","text":"*Opened at*\n<https://github.com/compliance-framework/mock-api/commit/2222222abcdef|2222222> · <!date^1791450000^{date_short_pretty} at {time}|2026-10-08 09:00 UTC>"},{"type":"mrkdwn","text":"*Failed jobs*\ngo / test\nrequired"}]}
+  blocks {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View PR","emoji":true},"url":"https://github.com/compliance-framework/mock-api/pull/12","action_id":"link-0"},{"type":"button","text":{"type":"plain_text","text":"Latest run","emoji":true},"url":"https://github.com/compliance-framework/mock-api/actions/runs/7","action_id":"link-1"}]}
+  blocks {"type":"context","elements":[{"type":"mrkdwn","text":"Updated <!date^1791451200^{date_short_pretty} at {time}|2026-10-08 09:20 UTC>"}]}

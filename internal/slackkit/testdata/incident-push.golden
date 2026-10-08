@@ -1,0 +1,6 @@
+{"text":"CI failing: compliance-framework/mock-api@main ci","unfurl_links":false,"unfurl_media":false}
+blocks {"type":"header","text":{"type":"plain_text","text":":red_circle: CI failing · mock-api","emoji":true}}
+attachment {"color":"#D1242F","fallback":"CI failing: compliance-framework/mock-api@main ci"}
+  blocks {"type":"section","text":{"type":"mrkdwn","text":"*<https://github.com/compliance-framework/mock-api/tree/main|compliance-framework/mock-api@main>*"}}
+  blocks {"type":"section","fields":[{"type":"mrkdwn","text":"*Status*\nFailing"},{"type":"mrkdwn","text":"*Workflow*\nci"},{"type":"mrkdwn","text":"*Opened at*\nabc1234"},{"type":"mrkdwn","text":"*Failed jobs*\ngo"}]}
+  blocks {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"Latest run","emoji":true},"url":"https://github.com/compliance-framework/mock-api/actions/runs/8","action_id":"link-0"}]}
