@@ -16,13 +16,15 @@ import (
 )
 
 type fakeGH struct {
-	failFor string // LatestFinal fails for this repo
-	finals  map[string]string
-	files   map[string]string // "repo@ref:path" -> content
-	open    map[string]*bump.PR
-	calls   []string
-	nextPR  int
-	autoErr error
+	failFor  string // LatestFinal fails for this repo
+	finals   map[string]string
+	files    map[string]string // "repo@ref:path" -> content
+	open     map[string]*bump.PR
+	calls    []string
+	nextPR   int
+	autoErr  error
+	closeErr error
+	anon     bool // CreatePR returns a PR without its author
 }
 
 func (f *fakeGH) LatestFinal(_ context.Context, repo string) (string, error) {
@@ -45,9 +47,23 @@ func (f *fakeGH) DefaultBranch(context.Context, string) (string, error) { return
 func (f *fakeGH) OpenPR(_ context.Context, repo, branch string) (*bump.PR, error) {
 	return f.open[repo+" "+branch], nil
 }
+
+// newPR is an open PR from branch in owner/repo.
+func newPR(n int, owner, repo, branch, login, typ string) *bump.PR {
+	pr := &bump.PR{Number: n, NodeID: fmt.Sprintf("PR_%d", n), URL: fmt.Sprintf("https://example/%s/%d", repo, n)}
+	pr.User.Login, pr.User.Type, pr.Head.Ref = login, typ, branch
+	pr.Head.Repo = &struct {
+		FullName string `json:"full_name"`
+	}{owner + "/" + repo}
+	return pr
+}
+
 func (f *fakeGH) CreatePR(_ context.Context, repo, base, head, title, _ string) (*bump.PR, error) {
 	f.nextPR++
-	pr := &bump.PR{Number: f.nextPR, NodeID: fmt.Sprintf("PR_%d", f.nextPR), URL: fmt.Sprintf("https://example/%s/%d", repo, f.nextPR)}
+	pr := newPR(f.nextPR, "compliance-framework", repo, head, "ccf-release-bot[bot]", "Bot")
+	if f.anon {
+		pr.User.Login = ""
+	}
 	f.open[repo+" "+head] = pr
 	f.calls = append(f.calls, fmt.Sprintf("create %s %s<-%s %q", repo, base, head, title))
 	return pr, nil
@@ -59,6 +75,32 @@ func (f *fakeGH) UpdatePR(_ context.Context, repo string, n int, title, _ string
 func (f *fakeGH) EnableAutoMerge(_ context.Context, id string) error {
 	f.calls = append(f.calls, "automerge "+id)
 	return f.autoErr
+}
+func (f *fakeGH) OpenPRs(_ context.Context, repo string) ([]bump.PR, error) {
+	var out []bump.PR
+	for k, pr := range f.open {
+		if strings.HasPrefix(k, repo+" ") {
+			out = append(out, *pr)
+		}
+	}
+	slices.SortFunc(out, func(a, b bump.PR) int { return a.Number - b.Number })
+	return out, nil
+}
+func (f *fakeGH) ClosePR(_ context.Context, repo string, n int, comment string) error {
+	f.calls = append(f.calls, fmt.Sprintf("close %s#%d %q", repo, n, comment))
+	if f.closeErr != nil {
+		return f.closeErr
+	}
+	for k, pr := range f.open {
+		if strings.HasPrefix(k, repo+" ") && pr.Number == n {
+			delete(f.open, k)
+		}
+	}
+	return nil
+}
+func (f *fakeGH) DeleteBranch(_ context.Context, repo, branch string) error {
+	f.calls = append(f.calls, "delete "+repo+" "+branch)
+	return nil
 }
 
 const testManifest = `repos:
@@ -248,6 +290,114 @@ func TestOneRepoFailing(t *testing.T) {
 	}
 	if created != 3 {
 		t.Errorf("created %d PRs, want 3 (every repo but mock-plugin-1): %q", created, gh.calls)
+	}
+}
+
+func TestAutoMergeFailureWarns(t *testing.T) {
+	root, e, gh, out := setup(t)
+	gh.autoErr = fmt.Errorf("enable auto-merge: Protected branch rules not configured for this branch")
+	summary := filepath.Join(root, "summary.md")
+	e.getenv = func(k string) string { return map[string]string{"GITHUB_STEP_SUMMARY": summary}[k] }
+	if err := run(context.Background(), []string{"sync", "--all", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}, e); err != nil {
+		t.Fatalf("run failed on an auto-merge error: %v\n%s", err, out)
+	}
+	if n := strings.Count(strings.Join(gh.calls, "\n"), "create "); n != 4 {
+		t.Errorf("created %d PRs, want 4: %q", n, gh.calls)
+	}
+	want := "mock-ui#1: enable auto-merge: Protected branch rules not configured for this branch"
+	if !strings.Contains(out.String(), "::warning::ccf-bump: "+want) {
+		t.Errorf("no ::warning:: line:\n%s", out)
+	}
+	got, err := os.ReadFile(summary)
+	if err != nil || !strings.Contains(string(got), "### ccf-bump warnings") || !strings.Contains(string(got), "- "+want) {
+		t.Errorf("step summary %q, %v", got, err)
+	}
+}
+
+// stalePRs seeds open PRs (keyed "base-repo head") that ccf-bump on mock-ui must leave alone, but
+// for #50, its own earlier sync PR.
+func stalePRs(gh *fakeGH) {
+	const o, bot = "compliance-framework", "ccf-release-bot[bot]"
+	gh.open = map[string]*bump.PR{
+		"mock-ui ccf-bump/sync-2026-09-22":           newPR(50, o, "mock-ui", "ccf-bump/sync-2026-09-22", bot, "Bot"),
+		"mock-ui ccf-bump/sync-2026-09-08":           newPR(51, o, "mock-ui", "ccf-bump/sync-2026-09-08", "someone", "User"),
+		"mock-ui renovate/go":                        newPR(52, o, "mock-ui", "renovate/go", "renovate[bot]", "Bot"),
+		"mock-ui fork:ccf-bump/sync-2026-09-01":      newPR(53, "fork", "mock-ui", "ccf-bump/sync-2026-09-01", bot, "Bot"),
+		"mock-ui ccf-bump/train-2026-09-30":          newPR(54, o, "mock-ui", "ccf-bump/train-2026-09-30", bot, "Bot"),
+		"mock-agent-action ccf-bump/sync-2026-09-22": newPR(55, o, "mock-agent-action", "ccf-bump/sync-2026-09-22", bot, "Bot"),
+	}
+	gh.nextPR = 99
+}
+
+func TestSupersededPRsClosed(t *testing.T) {
+	root, e, gh, out := setup(t)
+	stalePRs(gh)
+	if err := run(context.Background(), []string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}, e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	want := []string{
+		`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
+		`close mock-ui#50 "Superseded by #100."`,
+		"delete mock-ui ccf-bump/sync-2026-09-22",
+		"automerge PR_100",
+	}
+	if !slices.Equal(gh.calls, want) {
+		t.Errorf("calls:\n%s\nwant:\n%s\noutput:\n%s", strings.Join(gh.calls, "\n"), strings.Join(want, "\n"), out)
+	}
+	if !strings.Contains(out.String(), "closed #50 (ccf-bump/sync-2026-09-22): superseded by #100") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestSupersededPRsWarnings(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fake  func(*fakeGH)
+		warn  string
+		calls []string
+	}{
+		"close fails": {
+			fake: func(f *fakeGH) { f.closeErr = fmt.Errorf("403 Forbidden") },
+			warn: "mock-ui#50: close superseded PR: 403 Forbidden",
+			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
+				`close mock-ui#50 "Superseded by #100."`, "automerge PR_100"},
+		},
+		"author unknown": {
+			fake:  func(f *fakeGH) { f.anon = true },
+			warn:  "mock-ui#100: author unknown; earlier ccf-bump PRs left open",
+			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`, "automerge PR_100"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, e, gh, out := setup(t)
+			stalePRs(gh)
+			tc.fake(gh)
+			if err := run(context.Background(), []string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}, e); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if !slices.Equal(gh.calls, tc.calls) {
+				t.Errorf("calls %q, want %q", gh.calls, tc.calls)
+			}
+			if !strings.Contains(out.String(), "::warning::ccf-bump: "+tc.warn) {
+				t.Errorf("no warning %q:\n%s", tc.warn, out)
+			}
+		})
+	}
+}
+
+func TestSupersededPRsDryRun(t *testing.T) {
+	root, e, gh, out := setup(t)
+	stalePRs(gh)
+	if err := run(context.Background(), []string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr", "--dry-run"}, e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(gh.calls) != 0 {
+		t.Errorf("dry run wrote: %q", gh.calls)
+	}
+	if !strings.Contains(out.String(), "dry run: would close #50 (ccf-bump/sync-2026-09-22, by ccf-release-bot[bot]) as superseded") {
+		t.Errorf("output:\n%s", out)
+	}
+	if n := strings.Count(out.String(), "would close"); n != 1 {
+		t.Errorf("would close %d PRs, want only #50:\n%s", n, out)
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +23,40 @@ type bumper struct {
 	o      options
 	m      *manifest.Manifest
 	finals map[string]string // repo -> latest final tag, cached across repos
+	// warnings are problems that don't fail the run (auto-merge, superseded PRs), for the summary.
+	warnings []string
+}
+
+// warn prints a GitHub Actions warning and keeps it for the run summary.
+func (b *bumper) warn(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Fprintln(b.e.stdout, "::warning::ccf-bump: "+msg)
+	b.warnings = append(b.warnings, msg)
+}
+
+// summary repeats the warnings at the end of the output and in $GITHUB_STEP_SUMMARY when set.
+func (b *bumper) summary() {
+	if len(b.warnings) == 0 {
+		return
+	}
+	var s strings.Builder
+	s.WriteString("### ccf-bump warnings\n\n")
+	for _, w := range b.warnings {
+		fmt.Fprintf(&s, "- %s\n", w)
+	}
+	fmt.Fprint(b.e.stdout, "\n"+s.String())
+	p := b.e.getenv("GITHUB_STEP_SUMMARY")
+	if p == "" {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err == nil {
+		_, err = f.WriteString(s.String())
+		err = errors.Join(err, f.Close())
+	}
+	if err != nil {
+		fmt.Fprintln(b.e.stdout, "::warning::ccf-bump: step summary: "+err.Error())
+	}
 }
 
 // config derives the updaters' settings for repo from its kind and dependencies.
@@ -199,6 +234,14 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	branch := "ccf-bump/" + b.o.mode + "-" + b.e.now().UTC().Format("2006-01-02")
 	if b.o.dryRun {
 		fmt.Fprintf(out, "  dry run: would push %s and open %q\n%s", branch, title, indent(body))
+		// Nothing was opened to tell who ccf-bump runs as, so any bot's ccf-bump PR is listed.
+		old, err := b.superseded(ctx, name, branch, func(p bump.PR) bool { return p.User.Type == "Bot" })
+		if err != nil {
+			b.warn("%s: list open PRs: %v", name, err)
+		}
+		for _, p := range old {
+			fmt.Fprintf(out, "  dry run: would close #%d (%s, by %s) as superseded and delete its branch\n", p.Number, p.Head.Ref, p.User.Login)
+		}
 		return false, nil
 	}
 	if _, err := b.git(ctx, dir, "checkout", "--quiet", "-B", branch); err != nil {
@@ -230,15 +273,59 @@ func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, p
 		return err
 	}
 	fmt.Fprintf(b.e.stdout, "  PR: %s\n", pr.URL)
+	b.closeSuperseded(ctx, repo, branch, pr)
 	if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
 		fmt.Fprintln(b.e.stdout, "  auto-merge: off (a major update, or a pin that was not a version)")
 		return nil
 	}
 	if err := b.e.gh.EnableAutoMerge(ctx, pr.NodeID); err != nil {
-		return err
+		// e.g. the base branch has no protection rules, or the PR is already mergeable ("clean
+		// status"). The PR is open either way; a human merges it.
+		b.warn("%s#%d: %v", repo, pr.Number, err)
+		return nil
 	}
 	fmt.Fprintln(b.e.stdout, "  auto-merge: on")
 	return nil
+}
+
+// superseded returns repo's other open PRs that ccf-bump opened in this mode: head branch
+// ccf-bump/<mode>-* in repo itself (not a fork), other than branch, for which mine (who opened
+// it) is true.
+func (b *bumper) superseded(ctx context.Context, repo, branch string, mine func(bump.PR) bool) ([]bump.PR, error) {
+	prs, err := b.e.gh.OpenPRs(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	prefix := "ccf-bump/" + b.o.mode + "-"
+	return slices.DeleteFunc(prs, func(p bump.PR) bool {
+		return p.Head.Ref == branch || !strings.HasPrefix(p.Head.Ref, prefix) || p.Head.Repo == nil ||
+			!strings.EqualFold(p.Head.Repo.FullName, b.o.owner+"/"+repo) || !mine(p)
+	}), nil
+}
+
+// closeSuperseded closes repo's earlier ccf-bump PRs opened by the same account as pr, with a
+// comment pointing at pr, and deletes their branches. Failures are warnings: pr is open.
+func (b *bumper) closeSuperseded(ctx context.Context, repo, branch string, pr *bump.PR) {
+	if pr.User.Login == "" {
+		b.warn("%s#%d: author unknown; earlier ccf-bump PRs left open", repo, pr.Number)
+		return
+	}
+	old, err := b.superseded(ctx, repo, branch, func(p bump.PR) bool { return p.User.Login == pr.User.Login })
+	if err != nil {
+		b.warn("%s: list open PRs: %v", repo, err)
+		return
+	}
+	for _, p := range old {
+		if err := b.e.gh.ClosePR(ctx, repo, p.Number, fmt.Sprintf("Superseded by #%d.", pr.Number)); err != nil {
+			b.warn("%s#%d: close superseded PR: %v", repo, p.Number, err)
+			continue
+		}
+		if err := b.e.gh.DeleteBranch(ctx, repo, p.Head.Ref); err != nil {
+			b.warn("%s#%d: closed, but deleting branch %s: %v", repo, p.Number, p.Head.Ref, err)
+			continue
+		}
+		fmt.Fprintf(b.e.stdout, "  closed #%d (%s): superseded by #%d\n", p.Number, p.Head.Ref, pr.Number)
+	}
 }
 
 // targetsOf lists "dep to version" for each changed dep, sorted.

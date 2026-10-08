@@ -21,7 +21,17 @@ ccf-bump list [--repos a,b]
   updates the open one. `--pr --dry-run` prints the PR instead.
 - `--batch N` (sync): at most N PRs per hour; it waits for the hour to pass.
 - A repo that fails is reported (`::error::`) and the others still run; the exit code is non-zero.
-- A ccf-bump PR from an earlier date is not closed by a later run; close it by hand.
+  Failures are a branch push, a PR create/update, or resolving the manifest or a version.
+- **Warnings** don't fail the run: they are printed as `::warning::` and repeated at the end of the
+  output and in `$GITHUB_STEP_SUMMARY` (when set). Failing to enable auto-merge is one (GitHub
+  refuses it when the base branch has no protection rules, or when the PR is already mergeable,
+  "clean status"); the PR stays open for a human to merge.
+- **Superseded PRs**: after opening or updating a repo's bump PR, ccf-bump closes that repo's other
+  open PRs it opened in the same mode: head branch `ccf-bump/<mode>-*` in the repo itself (not a
+  fork), opened by the same account as the new PR (the release bot). Each gets the comment
+  `Superseded by #N.` and its branch is deleted. Other PRs, including a `sync` PR during a `train`
+  run, are never touched. A failure to close one is a warning. `--dry-run` only lists the PRs it
+  would close; with nothing opened to tell who it runs as, it lists any bot's.
 - `--manifest` (default `repos.yaml`; `repos.mock.yaml` for the mocks) gives the repos, their kinds
   and the dependency edges. `sync --all` takes every repo with `release: true`, in stage order.
 - `--clones DIR` reads `DIR/<repo>` (its committed `HEAD`) instead of cloning from GitHub, for dry
