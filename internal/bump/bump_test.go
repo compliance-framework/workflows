@@ -364,14 +364,14 @@ func TestMajor(t *testing.T) {
 
 func TestNeedsHuman(t *testing.T) {
 	app := func(file, key, from, to string) Change {
-		return Change{Ref: Ref{Updater: "helm", Dep: "api", Key: key, Current: from, File: file}, To: to}
+		return Change{Ref: Ref{Updater: helm{}.Name(), Dep: "api", Key: key, Current: from, File: file}, To: to}
 	}
 	tag := func(from, to string) Change { return app("charts/ccf/values.yaml", "api.image.tag", from, to) }
 	appVersion := func(from, to string) Change { return app("charts/ccf/Chart.yaml", "appVersion", from, to) }
 	wf := func(from, version, to string) Change {
-		return Change{Ref: Ref{Updater: "workflow", Dep: DepWorkflows, Current: from, Version: version}, To: to}
+		return Change{Ref: Ref{Updater: workflowRef{}.Name(), Dep: DepWorkflows, Current: from, Version: version}, To: to}
 	}
-	gomod := Change{Ref: Ref{Updater: "gomod", Dep: "api", Current: "v0.21.0"}, To: "v0.22.0"}
+	gomod := Change{Ref: Ref{Updater: goMod{}.Name(), Dep: "api", Current: "v0.21.0"}, To: "v0.22.0"}
 	const helm, service = manifest.KindHelm, manifest.KindGoService
 	for name, tc := range map[string]struct {
 		c    Change
@@ -391,7 +391,7 @@ func TestNeedsHuman(t *testing.T) {
 		"helm workflows pin major":      {wf("v1.0.0", "", WorkflowsPin(sha20, "v2.0.0")), helm, MajorReason},
 		"go-service minor":              {gomod, service, ""},
 		"go-service app minor":          {tag("0.21.0", "v0.22.0"), service, ""}, // helm refs outside a helm repo
-		"go-service major":              {Change{Ref: Ref{Updater: "gomod", Current: "v1.9.0"}, To: "v2.0.0"}, service, MajorReason},
+		"go-service major":              {Change{Ref: Ref{Updater: goMod{}.Name(), Current: "v1.9.0"}, To: "v2.0.0"}, service, MajorReason},
 	} {
 		if got := tc.c.HoldReason(tc.kind); got != tc.want {
 			t.Errorf("%s: HoldReason(%s) = %q, want %q", name, tc.kind, got, tc.want)
