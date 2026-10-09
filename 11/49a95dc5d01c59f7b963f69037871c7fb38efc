@@ -1,0 +1,7 @@
+lisa-design:
+- Change.Major is unchanged; the new rule is a separate kind-aware predicate Change.NeedsHuman(kind) / HoldReason(kind), plus Plan.HoldReasons(kind) for the PR (distinct reasons, in change order).
+- "App version" = a ref of the helm updater (Updater == helm{}.Name()): org image tags in values.yaml and Chart.yaml appVersion. No file-name guessing; workflow pins (workflowRef updater) in a helm repo keep the major rule.
+- Minor-or-more uses semver.MajorMinor, so 0.x minors (where release-please bump-minor-pre-major lands breaking changes) are held; an unparseable from/to is held with the helm reason too.
+- Helm reason wins over MajorReason for a helm app major, since its advice (check values/templates) is the useful one there.
+- internal/bump now imports internal/manifest (for Kind); manifest imports nothing internal, so no cycle.
+- The reason goes in the PR body ("Not auto-merged, a human merges this PR:") and in the output ("auto-merge: off (<reasons>)", and in the dry-run lines).
