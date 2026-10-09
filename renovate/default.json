@@ -14,7 +14,8 @@
   "vulnerabilityAlerts": {
     "enabled": true,
     "schedule": ["at any time"],
-    "minimumReleaseAge": null
+    "minimumReleaseAge": null,
+    "semanticCommitType": "fix"
   },
   "osvVulnerabilityAlerts": true,
   "platformAutomerge": false,
@@ -30,7 +31,7 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "Indirect Go modules (depType indirect, chore(deps) by default) are linked into the binary too, so their updates (security fixes included) are fix(deps) and release.",
+      "description": "Indirect Go modules (depType indirect, chore(deps) by default) are linked into the binary too, so their updates are fix(deps) and release (security fixes are fix(deps) through vulnerabilityAlerts whatever their depType).",
       "matchManagers": ["gomod"],
       "matchDepTypes": ["indirect"],
       "semanticCommitType": "fix"

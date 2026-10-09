@@ -142,8 +142,9 @@ func TestSharedPreset(t *testing.T) {
 		PostUpdateOptions      []string `json:"postUpdateOptions"`
 		Extends                []string `json:"extends"`
 		VulnerabilityAlerts    struct {
-			Schedule          []string        `json:"schedule"`
-			MinimumReleaseAge json.RawMessage `json:"minimumReleaseAge"`
+			Schedule           []string        `json:"schedule"`
+			MinimumReleaseAge  json.RawMessage `json:"minimumReleaseAge"`
+			SemanticCommitType string          `json:"semanticCommitType"`
 		} `json:"vulnerabilityAlerts"`
 		PackageRules []struct {
 			MatchManagers      []string `json:"matchManagers"`
@@ -166,6 +167,12 @@ func TestSharedPreset(t *testing.T) {
 	}
 	if !slices.Equal(p.VulnerabilityAlerts.Schedule, []string{"at any time"}) || string(p.VulnerabilityAlerts.MinimumReleaseAge) != "null" {
 		t.Errorf("vulnerabilityAlerts = %+v, want any time and no minimum age", p.VulnerabilityAlerts)
+	}
+	// Renovate forces the vulnerabilityAlerts settings onto every security update, over the
+	// packageRules, so each one is fix(deps) and releases whatever its depType (mock-plugin-2#14
+	// came out as chore(deps), which release-please hides).
+	if p.VulnerabilityAlerts.SemanticCommitType != "fix" {
+		t.Errorf("vulnerabilityAlerts.semanticCommitType = %q, want fix", p.VulnerabilityAlerts.SemanticCommitType)
 	}
 	if p.MinimumReleaseAge != "7 days" || p.InternalChecksFilter != "strict" {
 		t.Errorf("minimumReleaseAge %q, internalChecksFilter %q", p.MinimumReleaseAge, p.InternalChecksFilter)
