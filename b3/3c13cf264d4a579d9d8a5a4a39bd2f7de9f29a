@@ -1,3 +1,7 @@
 lisa-addressed:
 pass 2:
 - internal/bump/bump_test.go TestNeedsHuman builds refs with the real updater names (helm{}, workflowRef{}, goMod{}).
+
+lisa-selfreview:
+pass 3 (strict):
+- CORE-STYLE-001 internal/bump/bump_test.go TestNeedsHuman: `const helm, service` shadows the helm updater type inside the test; rename to helmRepo/serviceRepo.
