@@ -143,7 +143,7 @@ start time, then ID) decides.
 | the newest run concluded `success`, and GitHub reports the PR mergeable | squash-merges it as the token's identity, with the PR title plus ` (#N)` as the commit title, if its head is still that commit. Behind its base is fine (`ccf-required` is not strict). |
 | the newest run concluded otherwise | leaves it, with a warning: `notify-failure.yml` already posted the failure and the attention digest lists the PR |
 | conflicting with its base | leaves it, with a warning |
-| a run queued or running, no run yet, mergeability not computed, or GitHub refusing the merge with 405 "Required status check … is expected" (a run started after the runs were read) | pending: with `--wait D` it looks again every 30s for up to `D`, then reports what is still pending (a later pass merges it) |
+| a run queued or running, no run yet, mergeability not computed, or GitHub refusing the merge with 405 "Required status check … is expected" (or `queued`, `in progress`, `pending`: a run started after the runs were read) | pending: with `--wait D` it looks again every 30s for up to `D`, then reports what is still pending (a later pass merges it) |
 
 Any other merge GitHub refuses is a warning; failing to list a repo's PRs, or to read a PR or its check,
 fails the run (the other repos still run). It removes no label. `--dry-run` prints what it would

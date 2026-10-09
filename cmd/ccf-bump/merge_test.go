@@ -59,6 +59,9 @@ func TestMerge(t *testing.T) {
 	green := [][]bump.CheckRun{{check("completed", "success")}}
 	expected := &bump.StatusError{Method: "PUT", Path: "/repos/compliance-framework/mock-ui/pulls/1/merge", Code: 405,
 		Body: []byte(`{"message":"Required status check \"ci / required\" is expected."}`)}
+	// queued is mock-plugin-2#30's refusal (run 37915939413): the labeled run was queued.
+	queued := &bump.StatusError{Method: "PUT", Path: "/repos/compliance-framework/mock-ui/pulls/1/merge", Code: 405,
+		Body: []byte(`{"message":"Repository rule violations found\n\nRequired status check \"ci / required\" is queued.\n\n"}`)}
 	for name, tc := range map[string]struct {
 		fake  func(*fakeGH)
 		flags []string
@@ -149,6 +152,11 @@ func TestMerge(t *testing.T) {
 		},
 		"GitHub still expects the check, no wait": {
 			fake:  func(f *fakeGH) { f.checks["sha1"], f.mergeErr = green, expected },
+			calls: []string{merged(1)},
+			out:   []string{"mock-ui#1: still pending (GitHub still expects ci / required)"},
+		},
+		"GitHub reports the check queued, no wait": {
+			fake:  func(f *fakeGH) { f.checks["sha1"], f.mergeErr = green, queued },
 			calls: []string{merged(1)},
 			out:   []string{"mock-ui#1: still pending (GitHub still expects ci / required)"},
 		},

@@ -51,8 +51,9 @@ Each required check is judged over every run on the PR's head commit (a re-run, 
   when a newer one starts) or `stale` is **pending**, waiting for a newer run, never a failure; `failure`,
   `timed_out`, `action_required` or `startup_failure` is **failing** and holds the repo `blocked`.
 
-A merge GitHub refuses with 405 "Required status check … is expected" (a run that started after
-the checks were read) is waiting, not `blocked`: the next run retries it.
+A merge GitHub refuses with 405 "Required status check … is expected" (or `queued`, `in progress`,
+`pending`: a run that started after the checks were read) is waiting, not `blocked`: the next run
+retries it. A 405 naming any other check state, such as a failing one, holds the repo `blocked`.
 
 ## Tracking issue
 

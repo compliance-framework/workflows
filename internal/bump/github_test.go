@@ -282,16 +282,27 @@ func TestRequiredCheck(t *testing.T) {
 
 func TestExpectsCheck(t *testing.T) {
 	expected := []byte(`{"message":"Required status check \"ci / required\" is expected."}`)
+	// refused is GitHub's 405 for a ruleset violation, as on mock-plugin-2#30 (run 37915939413).
+	refused := func(violation string) error {
+		return &StatusError{Code: http.StatusMethodNotAllowed, Body: []byte(`{"message":"Repository rule violations found\n\n` + violation + `\n\n"}`)}
+	}
 	for name, tc := range map[string]struct {
 		err  error
 		want bool
 	}{
-		"405 check expected": {&StatusError{Code: http.StatusMethodNotAllowed, Body: expected}, true},
-		"wrapped":            {fmt.Errorf("merge: %w", &StatusError{Code: http.StatusMethodNotAllowed, Body: expected}), true},
-		"405 other":          {&StatusError{Code: http.StatusMethodNotAllowed, Body: []byte(`{"message":"Pull Request is not mergeable"}`)}, false},
-		"409 head moved":     {&StatusError{Code: http.StatusConflict, Body: expected}, false},
-		"not a StatusError":  {errors.New("Required status check is expected"), false},
-		"nil":                {nil, false},
+		"405 check expected":     {&StatusError{Code: http.StatusMethodNotAllowed, Body: expected}, true},
+		"405 check queued":       {refused(`Required status check \"ci / required\" is queued.`), true},
+		"405 check in progress":  {refused(`Required status check \"ci / required\" is in progress.`), true},
+		"405 check pending":      {refused(`Required status check \"ci / required\" is pending.`), true},
+		"405 checks expected":    {refused(`2 of 2 required status checks are expected.`), true},
+		"405 check failing":      {refused(`Required status check \"ci / required\" is failing.`), false},
+		"405 one of two failing": {refused(`Required status check \"a\" is queued.\n\nRequired status check \"b\" is failing.`), false},
+		"405 review required":    {refused(`At least 1 approving review is required by reviewers with write access.`), false},
+		"405 other":              {&StatusError{Code: http.StatusMethodNotAllowed, Body: []byte(`{"message":"Pull Request is not mergeable"}`)}, false},
+		"wrapped":                {fmt.Errorf("merge: %w", &StatusError{Code: http.StatusMethodNotAllowed, Body: expected}), true},
+		"409 head moved":         {&StatusError{Code: http.StatusConflict, Body: expected}, false},
+		"not a StatusError":      {errors.New("Required status check is expected"), false},
+		"nil":                    {nil, false},
 	} {
 		if got := ExpectsCheck(tc.err); got != tc.want {
 			t.Errorf("%s: ExpectsCheck = %v, want %v", name, got, tc.want)
