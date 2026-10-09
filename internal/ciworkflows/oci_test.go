@@ -82,15 +82,15 @@ func TestGoociUpload(t *testing.T) {
 const tagTheRest = "Tag the rest"
 
 // TestUploadOnceTagTheRest: every job that uploads a gooci artifact uploads it once and then
-// runs the one "Tag the rest" step, so all of a build's tags share one manifest digest (the
-// agent records it as _plugin_digest and _policy_digest). A gooci upload per tag made a new
-// manifest each time.
+// runs the one "Tag the rest" step, with the one crane install, so all of a build's tags share
+// one manifest digest (the agent records it as _plugin_digest and _policy_digest). A gooci
+// upload per tag made a new manifest each time.
 func TestUploadOnceTagTheRest(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var want, first string
+	var want, first, wantCrane string
 	var jobs []string
 	for _, path := range files {
 		file := filepath.Base(path)
@@ -100,8 +100,11 @@ func TestUploadOnceTagTheRest(t *testing.T) {
 		var wf workflow
 		read(t, file, &wf)
 		for name, job := range wf.Jobs {
-			upload := -1
+			upload, crane := -1, ""
 			for i, s := range job.Steps {
+				if s.Name == "Install crane" {
+					crane = s.Run
+				}
 				if !strings.Contains(s.Run, "gooci upload") {
 					continue
 				}
@@ -114,6 +117,14 @@ func TestUploadOnceTagTheRest(t *testing.T) {
 				continue
 			}
 			jobs = append(jobs, file+":"+name)
+			switch {
+			case !strings.Contains(crane, "go install github.com/google/go-containerregistry/cmd/crane@v"):
+				t.Errorf("%s: job %s: want an \"Install crane\" step with a pinned go install, got %q", file, name, crane)
+			case wantCrane == "":
+				wantCrane = crane
+			case crane != wantCrane:
+				t.Errorf("%s: job %s: \"Install crane\" is %q, want %q (every job the same version)", file, name, crane, wantCrane)
+			}
 			if upload+1 >= len(job.Steps) || job.Steps[upload+1].Name != tagTheRest {
 				t.Errorf("%s: job %s: want %q right after the upload", file, name, tagTheRest)
 				continue
