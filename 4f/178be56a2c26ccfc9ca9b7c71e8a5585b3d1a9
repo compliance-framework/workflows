@@ -1,3 +1,6 @@
 lisa-addressed:
 pass 3:
 - TestNeedsHuman kind constants renamed helmRepo/serviceRepo (no longer shadow the helm type).
+
+lisa-selfreview:
+pass 4 (final, lenient): approve; no findings. Full gate green (go test -race ./..., go vet, gofmt, actionlint v1.7.12, both manifests).
