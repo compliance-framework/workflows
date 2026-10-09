@@ -222,7 +222,7 @@ func setup(t *testing.T) (root string, e env, gh *fakeGH, out *bytes.Buffer) {
 	}
 	root = t.TempDir()
 	fixtures := map[string]string{"mock-api": "", "mock-agent": "", "mock-ui": "ui", "mock-agent-action": "action",
-		"mock-plugin-1": "plugin", "mock-plugin-policies-1": "policies"}
+		"mock-plugin-1": "plugin", "mock-plugin-policies-1": "policies", "mock-helm-charts": "helm"}
 	for repo, fx := range fixtures {
 		dir := filepath.Join(root, "clones", repo)
 		if fx != "" {
@@ -635,6 +635,62 @@ func TestLabels(t *testing.T) {
 	}
 }
 
+// TestHelmAppMinor: in a helm repo an app version moved by a minor or more needs a human; a patch
+// is auto-merged. The helm fixture pins api 0.17.1 (image tag and appVersion) and ui 2.10.1.
+func TestHelmAppMinor(t *testing.T) {
+	const manifest = testManifest + "  - {name: mock-helm-charts, kind: helm, release: true}\n"
+	automerge := []bump.PRLabel{{Name: bump.AutomergeLabel}}
+	held := "auto-merge: off (" + bump.HelmAppReason + ")"
+	for name, tc := range map[string]struct {
+		set   string
+		open  *bump.PR // the PR an earlier run opened on today's branch
+		calls []string
+		out   string
+	}{
+		"0.x minor":  {set: "api=0.18.0", calls: []string{"label mock-helm-charts#1 needs-human"}, out: held},
+		"0.x patch":  {set: "api=0.17.2", calls: []string{"label mock-helm-charts#1 ccf-bump:automerge"}, out: "label: ccf-bump:automerge"},
+		"1.x+ minor": {set: "ui=2.11.0", calls: []string{"label mock-helm-charts#1 needs-human"}, out: held},
+		"1.x+ patch": {set: "ui=2.10.2", calls: []string{"label mock-helm-charts#1 ccf-bump:automerge"}, out: "label: ccf-bump:automerge"},
+		"major":      {set: "ui=3.0.0", calls: []string{"label mock-helm-charts#1 needs-human"}, out: held},
+		"minor, earlier run patch": {set: "api=0.18.0", open: &bump.PR{Number: 7, Labels: automerge},
+			calls: []string{"unlabel mock-helm-charts#7 ccf-bump:automerge", "label mock-helm-charts#7 needs-human"}, out: held},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, e, gh, out := setup(t)
+			m := filepath.Join(root, "helm.yaml")
+			if err := os.WriteFile(m, []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tc.open != nil {
+				gh.open["mock-helm-charts ccf-bump/train-2026-10-08"] = tc.open
+			}
+			args := []string{"--repo", "mock-helm-charts", "--mode", "train", "--set", tc.set, "--manifest", m, "--pr"}
+			if err := run(context.Background(), args, e); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if got := gh.calls[1:]; !slices.Equal(got, tc.calls) { // [0] is the create or update
+				t.Errorf("calls %q, want %q\n%s", got, tc.calls, out)
+			}
+			if !strings.Contains(out.String(), tc.out) {
+				t.Errorf("output lacks %q:\n%s", tc.out, out)
+			}
+			if strings.Contains(tc.calls[len(tc.calls)-1], "needs-human") == strings.Contains(out.String(), "label: ccf-bump:automerge") {
+				t.Errorf("held PR labelled ccf-bump:automerge, or an eligible one not:\n%s", out)
+			}
+
+			// The PR body says why too.
+			out.Reset()
+			if err := run(context.Background(), append(args, "--dry-run"), e); err != nil {
+				t.Fatalf("dry run: %v\n%s", err, out)
+			}
+			body := "Not auto-merged, a human merges this PR:\n    \n    - " + bump.HelmAppReason + ".\n"
+			if got := strings.Contains(out.String(), body); got != (tc.out == held) {
+				t.Errorf("dry run body has the reason: %v, want %v:\n%s", got, tc.out == held, out)
+			}
+		})
+	}
+}
+
 func TestNeedsHumanDryRun(t *testing.T) {
 	root, e, gh, out := setup(t)
 	args := []string{"--repo", "mock-agent-action", "--manifest", filepath.Join(root, "repos.yaml"), "--pr", "--dry-run"}
@@ -664,7 +720,7 @@ func TestPRTitleType(t *testing.T) {
 		"only a runtime dep":    {[]bump.Change{gomod}, "fix(deps): bump mock-api to v0.2.0"},
 		"OPA counts as runtime": {[]bump.Change{{Ref: bump.Ref{Dep: bump.DepOPA, File: ".github/workflows/release.yml"}, To: "v1.15.0"}, wf("x")}, "fix(deps): bump opa to v1.15.0, workflows to v1.1.0"},
 	} {
-		if title, _ := prText(options{owner: "compliance-framework", mode: "sync"}, bump.Plan{Changes: tc.changes}); title != tc.want {
+		if title, _ := prText(options{owner: "compliance-framework", mode: "sync"}, bump.Plan{Changes: tc.changes}, nil); title != tc.want {
 			t.Errorf("%s: title %q, want %q", name, title, tc.want)
 		}
 	}

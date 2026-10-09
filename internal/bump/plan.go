@@ -7,11 +7,14 @@ package bump
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
+
+	"github.com/compliance-framework/workflows/internal/manifest"
 )
 
 // Dependency names that are not repos: OPA (policy repos copy it from the agent's go.mod) and the
@@ -199,4 +202,47 @@ func (c Change) Major() bool {
 		return true
 	}
 	return semver.Major(from) != semver.Major(c.To)
+}
+
+// Why a bump PR is not auto-merged (Change.HoldReason), in its body and ccf-bump's output.
+const (
+	MajorReason   = "a major update, or a pin that was not a version"
+	HelmAppReason = "a minor (or major) app update in a helm repo: check whether the chart needs new " +
+		"values or templates, push them to this PR if so, then merge"
+)
+
+// AppVersion reports whether the change moves an app version a chart deploys: an org image tag in
+// a chart's values.yaml or its Chart.yaml appVersion, the refs of the helm updater.
+func (c Change) AppVersion() bool { return c.Updater == helm{}.Name() }
+
+// NeedsHuman reports whether the change must not be auto-merged in a repo of kind.
+func (c Change) NeedsHuman(kind manifest.Kind) bool { return c.HoldReason(kind) != "" }
+
+// HoldReason returns why the change must not be auto-merged in a repo of kind, or "" when it may
+// be. Any major change needs a human. In a helm repo so does an app version move of a minor or
+// more: chart CI can't tell that the new app needs new values or templates, and on 0.x a minor is
+// where breaking changes land. Shared-workflow pins keep the major rule in every repo.
+func (c Change) HoldReason(kind manifest.Kind) string {
+	if kind == manifest.KindHelm && c.AppVersion() {
+		from := Canonical(c.Current)
+		if !semver.IsValid(from) || !semver.IsValid(c.To) || semver.MajorMinor(from) != semver.MajorMinor(c.To) {
+			return HelmAppReason
+		}
+	}
+	if c.Major() {
+		return MajorReason
+	}
+	return ""
+}
+
+// HoldReasons returns, once each in the order of the changes, why the plan's PR must not be
+// auto-merged in a repo of kind; none when it may be.
+func (p Plan) HoldReasons(kind manifest.Kind) []string {
+	var out []string
+	for _, c := range p.Changes {
+		if r := c.HoldReason(kind); r != "" && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
