@@ -14,7 +14,8 @@
   "vulnerabilityAlerts": {
     "enabled": true,
     "schedule": ["at any time"],
-    "minimumReleaseAge": null
+    "minimumReleaseAge": null,
+    "semanticCommitType": "fix"
   },
   "osvVulnerabilityAlerts": true,
   "platformAutomerge": false,
