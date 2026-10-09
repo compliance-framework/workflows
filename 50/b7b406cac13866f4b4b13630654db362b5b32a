@@ -1,0 +1,5 @@
+lisa-design:
+- No --timeout is passed to golangci-lint: the lint job sets none today and golangci-lint v2 has no timeout by default, so the job's timeout-minutes is the only limit. A repo's own .golangci.yml run.timeout (if any) still applies; overriding it was out of scope. TestLintTimeout fails if a --timeout is ever added, so it gets wired to the input too.
+- Default stays 15 (the former fixed value), so callers that don't pass the input behave exactly as before.
+- The input is added identically to all three Go kind workflows; TestSharedCopies still pins the lint job as one copy across them.
+- The api snippet in the README is not changed to pass lint-timeout-minutes: 30; that belongs to W1-S2-T01 (onboarding api).
