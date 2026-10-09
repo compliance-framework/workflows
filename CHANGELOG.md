@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/compliance-framework/workflows/compare/v1.3.1...v1.3.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* **ccf-bump,train:** a queued or in-progress required check is pending, not a refusal ([#86](https://github.com/compliance-framework/workflows/issues/86)) ([b3e60a6](https://github.com/compliance-framework/workflows/commit/b3e60a632c5a0285591792becff54816516798ac))
+
 ## [1.3.1](https://github.com/compliance-framework/workflows/compare/v1.3.0...v1.3.1) (2026-10-09)
 
 
