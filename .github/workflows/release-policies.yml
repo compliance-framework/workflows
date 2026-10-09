@@ -1,6 +1,7 @@
 # Publishes a policy bundle release (kind policies) when the caller's release is published:
-# opa build at the given OPA version, then gooci upload-single to
-# ghcr.io/<owner>/<repo>:vX.Y.Z, and to :latest for a final tag (decided from the tag name).
+# opa build at the given OPA version, then gooci upload-single once to
+# ghcr.io/<owner>/<repo>:vX.Y.Z, and for a final tag (decided from the tag name) crane points
+# :latest at that same manifest, so both tags have one digest (checked here).
 # release-finished.yml reports the result. Call it on `release: published` with
 # `secrets: inherit`; see README. Tag rules: internal/release (ReleaseTags).
 name: release-policies
@@ -91,7 +92,11 @@ jobs:
           cache: false
       - name: Install gooci
         run: go install github.com/compliance-framework/gooci@v0.0.7
-      # gooci reads the Docker credentials (the default keychain).
+      # crane (go-containerregistry, the library gooci is built on) points the other tags at the
+      # uploaded manifest. v0.20.7 is the newest release that needs no Go above gooci's 1.24.
+      - name: Install crane
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.20.7
+      # gooci and crane read the Docker credentials (the default keychain).
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -102,10 +107,36 @@ jobs:
           TAGS: ${{ needs.tags.outputs.tags }}
         run: |
           [ -n "$TAGS" ] || { echo "::error::no tags to publish"; exit 1; }
-          for tag in $TAGS; do
-            echo "Uploading the bundle to ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
-            gooci upload-single "$RUNNER_TEMP/bundle.tar.gz" "ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
+          # Once, to the first (most specific) tag: each upload makes a new manifest, so the
+          # other tags are pointed at this one by the next step.
+          read -r tag _ <<<"$TAGS"
+          echo "Uploading the bundle to ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
+          gooci upload-single "$RUNNER_TEMP/bundle.tar.gz" "ghcr.io/${GITHUB_REPOSITORY,,}:$tag"
+      # One build, one digest: the agent records the digest it pulled (_plugin_digest,
+      # _policy_digest), so every tag must name the uploaded manifest (a re-upload makes another).
+      - name: Tag the rest
+        env:
+          TAGS: ${{ needs.tags.outputs.tags }}
+        run: |
+          read -r -a tags <<<"$TAGS"
+          [ "${#tags[@]}" -gt 0 ] || { echo "::error::no tags to publish"; exit 1; }
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          digest="$(crane digest "$repo:${tags[0]}")"
+          [ -n "$digest" ] || { echo "::error::no digest for $repo:${tags[0]}"; exit 1; }
+          for tag in "${tags[@]:1}"; do
+            echo "Tagging $repo@$digest as $tag"
+            crane tag "$repo@$digest" "$tag"
           done
+          failed=""
+          for tag in "${tags[@]}"; do
+            got="$(crane digest "$repo:$tag")"
+            if [ "$got" != "$digest" ]; then
+              echo "::error::$repo:$tag is $got, not $digest (the upload to :${tags[0]})"
+              failed=1
+            fi
+          done
+          [ -z "$failed" ] || exit 1
+          echo "$repo: ${tags[*]} all at $digest"
 
   finished:
     name: finished
