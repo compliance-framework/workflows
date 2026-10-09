@@ -1,0 +1,7 @@
+lisa-design:
+- Scope set by the coordinator (security): NO free-form build-args input on any workflow. Build args land in image history/provenance, are an injection point, and could override VERSION. TestNoBuildArgsInput pins this for every workflow.
+- publish-image.yml takes a narrow `version` input (required string), checked in the build job against ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ via env (the error does not echo the value), and passed as `build-args: VERSION=${{ inputs.version }}` (data, never a run: line).
+- Release VERSION = the tag without its prefix, from internal/release ReleaseVersion (the same validation ReleaseTags used; ReleaseTags now calls it). cmd/release release-tags writes it as `version`.
+- Preview VERSION = main-<sha7> (push to default branch, matching the literal :main tag even if the default branch has another name) or pr-<number>-<sha7>; sha7 is GITHUB_SHA, the commit the image is built from and its revision label (for a PR that is the merge commit). No 0.0.0-<kind>.<id> convention existed in the repo, so the spec's fallback was used; non-semver on purpose so a preview never looks like a release.
+- The tags job is one copy across release-go-image/-go-plugin/-policies (TestReleaseCopies), so the version output was added to all three, unused in the OCI ones.
+- release-ui.yml is unchanged: it calls release-go-image.yml, which computes VERSION.
