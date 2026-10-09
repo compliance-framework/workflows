@@ -10,6 +10,10 @@ on:
         description: "Report only lint issues the change adds (vs the PR's merge base, or the pushed range); false lints everything"
         type: boolean
         default: true
+      lint-timeout-minutes:
+        description: "Minutes the golangci-lint job may run before it is cancelled"
+        type: number
+        default: 15
 
 permissions: {}
 
@@ -29,7 +33,7 @@ jobs:
     name: golangci-lint
     if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ inputs.lint-timeout-minutes }}
     permissions:
       contents: read
     steps:
