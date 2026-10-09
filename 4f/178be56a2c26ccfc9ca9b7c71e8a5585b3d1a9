@@ -1,0 +1,3 @@
+lisa-addressed:
+pass 3:
+- TestNeedsHuman kind constants renamed helmRepo/serviceRepo (no longer shadow the helm type).
