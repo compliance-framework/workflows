@@ -211,9 +211,9 @@ const (
 		"values or templates, push them to this PR if so, then merge"
 )
 
-// AppVersion reports whether the change moves an app version a chart deploys: an org image tag in
-// a chart's values.yaml or its Chart.yaml appVersion, the refs of the helm updater.
-func (c Change) AppVersion() bool { return c.Updater == helm{}.Name() }
+// movesAppVersion reports whether the change moves an app version a chart deploys: an org image
+// tag in a chart's values.yaml or its Chart.yaml appVersion, the refs of the helm updater.
+func (c Change) movesAppVersion() bool { return c.Updater == helm{}.Name() }
 
 // NeedsHuman reports whether the change must not be auto-merged in a repo of kind.
 func (c Change) NeedsHuman(kind manifest.Kind) bool { return c.HoldReason(kind) != "" }
@@ -223,7 +223,7 @@ func (c Change) NeedsHuman(kind manifest.Kind) bool { return c.HoldReason(kind) 
 // more: chart CI can't tell that the new app needs new values or templates, and on 0.x a minor is
 // where breaking changes land. Shared-workflow pins keep the major rule in every repo.
 func (c Change) HoldReason(kind manifest.Kind) string {
-	if kind == manifest.KindHelm && c.AppVersion() {
+	if kind == manifest.KindHelm && c.movesAppVersion() {
 		from := Canonical(c.Current)
 		if !semver.IsValid(from) || !semver.IsValid(c.To) || semver.MajorMinor(from) != semver.MajorMinor(c.To) {
 			return HelmAppReason

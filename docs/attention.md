@@ -14,7 +14,7 @@ Every bot PR that needs a human carries one label, **`needs-human`** (the same n
 | Bot | PRs | How |
 | --- | --- | --- |
 | Renovate (`renovate/default.json`) | Majors, and OPA in the api (its own `renovate/opa` PR, never auto-merged) | The rules add `"addLabels": ["needs-human"]`, merged with any other labels. Renovate sets labels when it opens the PR; GitHub creates the label if the repo lacks it. |
-| ccf-bump | A PR it doesn't merge: a major update or a pin that was not a version, or a PR it failed to label `ccf-bump:automerge` | After opening or updating the PR, ccf-bump adds the label, creating it with the color and description above when the repo lacks it. A failure is a warning: the PR is open either way. `--dry-run` prints `would add label needs-human`. ccf-bump's other label, `ccf-bump:automerge`, is not a human signal: it marks the PRs `ccf-bump merge` merges ([ccf-bump.md](ccf-bump.md#the-merge-pass)). |
+| ccf-bump | A PR it doesn't merge: a major update, a pin that was not a version, or in a helm repo an app update of a minor or more; or a PR it failed to label `ccf-bump:automerge` | After opening or updating the PR, ccf-bump adds the label, creating it with the color and description above when the repo lacks it. A failure is a warning: the PR is open either way. `--dry-run` prints `would add label needs-human`. ccf-bump's other label, `ccf-bump:automerge`, is not a human signal: it marks the PRs `ccf-bump merge` merges ([ccf-bump.md](ccf-bump.md#the-merge-pass)). |
 
 Both run as `ccf-release-bot`; adding and creating a label needs **Pull requests: write** (or
 Issues: write), which their live tokens already have.

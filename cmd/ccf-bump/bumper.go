@@ -322,7 +322,7 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 		label := bump.AutomergeLabel
 		if len(held) > 0 {
 			label = bump.NeedsHumanLabel
-			fmt.Fprintf(out, "  dry run: auto-merge off (%s)\n", strings.Join(held, "; "))
+			fmt.Fprintf(out, "  dry run: auto-merge: off (%s)\n", strings.Join(held, "; "))
 		}
 		fmt.Fprintf(out, "  dry run: would add label %s\n", label)
 		// Nothing was opened to tell who ccf-bump runs as, so any bot's ccf-bump PR is listed.

@@ -70,7 +70,8 @@ Files are edited in place, so comments and layout stay. Chart versions are left 
   pseudo-version whose commit is newer than the target tag's commit. A pin that is not a version
   (`alpine:3.20`, a branch, a SHA, `latest`) is replaced. Conflicts are printed and listed in the PR.
 - **No target, no change**: a dependency with no final release yet is left alone.
-- **Merged by ccf-bump** when every change stays within its major version: the PR gets the
+- **Merged by ccf-bump** when every change stays within its major version (and, in a `helm`
+  repo, every app version within its minor, below): the PR gets the
   `ccf-bump:automerge` label (color `0e8a16`, "ccf-bump merges this once CI is green", created in
   the repo when missing) and [`ccf-bump merge`](#the-merge-pass) merges it once `ci / required`
   passes. Never GitHub's auto-merge ([why](#why-ccf-bump-merges-not-github)); updating a PR that an

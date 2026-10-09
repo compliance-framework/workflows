@@ -687,6 +687,9 @@ func TestHelmAppMinor(t *testing.T) {
 			if got := strings.Contains(out.String(), body); got != (tc.out == held) {
 				t.Errorf("dry run body has the reason: %v, want %v:\n%s", got, tc.out == held, out)
 			}
+			if got := strings.Contains(out.String(), "dry run: "+held); got != (tc.out == held) {
+				t.Errorf("dry run says auto-merge is off: %v, want %v:\n%s", got, tc.out == held, out)
+			}
 		})
 	}
 }
