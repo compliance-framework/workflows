@@ -1,0 +1,3 @@
+lisa-addressed:
+pass 2:
+- internal/bump/bump_test.go TestNeedsHuman builds refs with the real updater names (helm{}, workflowRef{}, goMod{}).
