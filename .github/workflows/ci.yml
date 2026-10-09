@@ -11,7 +11,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Keyed by PR number: a merged PR's events (e.g. release-please's relabel) carry the base branch
+  # as github.ref, and would otherwise share, and cancel, main's push run.
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
