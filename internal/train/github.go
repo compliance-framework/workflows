@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -39,12 +40,36 @@ func notFound(err error) bool {
 	return errors.As(err, &se) && se.Status == http.StatusNotFound
 }
 
+// checkMention matches each required status check a 405 body names; checkState matches each
+// "Required status check \"<name>\" is <state>" (or "status checks ... are <state>"), capturing
+// the state.
+var (
+	checkMention = regexp.MustCompile(`(?i)status checks?\b`)
+	checkState   = regexp.MustCompile(`(?i)status checks?\b.*?\b(?:is|are) (in progress|[a-z]+)`)
+)
+
+// pendingStates are the states GitHub reports for a required check that hasn't concluded yet.
+var pendingStates = map[string]bool{"expected": true, "queued": true, "in progress": true, "pending": true}
+
 // ExpectsCheck reports whether err is GitHub refusing a merge because a required status check is
-// still expected (it hasn't reported on the head yet, or a new run of it is in progress).
+// still pending: expected (it hasn't reported on the head yet), queued, in progress or pending
+// (a new run of it started). Every check the body names must have a pending state, so a failing
+// check, or one phrased in a way the match doesn't know, is never mistaken for a pending one.
 func ExpectsCheck(err error) bool {
 	var se *StatusError
-	return errors.As(err, &se) && se.Status == http.StatusMethodNotAllowed &&
-		strings.Contains(se.Body, "status check") && strings.Contains(se.Body, "is expected")
+	if !errors.As(err, &se) || se.Status != http.StatusMethodNotAllowed {
+		return false
+	}
+	states := checkState.FindAllStringSubmatch(se.Body, -1)
+	if len(states) == 0 || len(states) != len(checkMention.FindAllStringIndex(se.Body, -1)) {
+		return false
+	}
+	for _, m := range states {
+		if !pendingStates[strings.ToLower(m[1])] {
+			return false
+		}
+	}
+	return true
 }
 
 // maxPages bounds every listing (100 per page).
