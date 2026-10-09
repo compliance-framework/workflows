@@ -455,8 +455,9 @@ A plugin repo calls it with `with: {kind: go-plugin, on-main: false}` (a policy 
 
 The image build is a separate reusable workflow, `publish-image.yml`, that `preview.yml`
 and `release-go-image.yml` call as `./.github/workflows/publish-image.yml`: inputs `images`
-(as above) and `tags` (space-separated tag names without the repository, each checked
-against the registry's tag syntax), permissions `contents: read` and `packages: write`. It
+(as above), `tags` (space-separated tag names without the repository, each checked
+against the registry's tag syntax) and `version` (the `VERSION` build arg, below),
+permissions `contents: read` and `packages: write`. It
 builds each image natively, `linux/amd64` on `ubuntu-latest` and `linux/arm64` on
 `ubuntu-24.04-arm` (no QEMU), with the OCI `source` and `revision` labels, and pushes each
 build by digest only. A `merge` job per image then creates one manifest list from the two
@@ -465,6 +466,20 @@ digests (passed between jobs as `digests-<name>-<arch>` artifacts, kept a day) a
 on the index, which GHCR uses to link the package to the repo. It publishes whatever tags it
 is given; the caller decides them. If any build fails, no image is tagged, and two
 `images` entries with the same name (case-insensitive) fail the run before any build.
+
+**`VERSION` build arg.** Every image build gets exactly one build arg, `VERSION`, for a
+Dockerfile that stamps it into the binary (`ARG VERSION=dev`, as agent's do). The workflows
+compute it, and callers can't pass build args of their own: build args are kept in the
+image's history and provenance, so they are no place for anything but a plain version. A
+release builds with its tag without the prefix (`v1.2.3` → `1.2.3`, `v1.2.3-rc1` →
+`1.2.3-rc1`; the `version` output of `cmd/release release-tags`). A preview builds with
+`main-<sha7>` on a push to the default branch and `pr-<number>-<sha7>` on a PR (`cmd/release
+preview-tags`, `PreviewVersion` in `internal/release`), where `<sha7>` is the built commit's
+(`GITHUB_SHA`, also the image's `revision` label); it is not a semver on purpose, so a preview
+never passes for a release. `publish-image.yml` fails unless `version` matches
+`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`, and passes it to `docker/build-push-action` as data, never
+through a shell line. A Dockerfile without `ARG VERSION` ignores it: docker warns about the
+unused build arg and the build goes on.
 
 #### `cut-prerelease.yml`
 
@@ -505,7 +520,7 @@ from the caller's `release` environment (release tags may use it); callers keep 
 
 | Workflow | Kind | Publishes |
 | --- | --- | --- |
-| `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`. |
+| `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`, built with `VERSION=<the tag without its prefix>` ([`VERSION` build arg](#previewyml)). |
 | `release-ui.yml` | `ui` | The same as `release-go-image.yml` (it calls it), with the ui's single image. |
 | `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release; the config needs `release.prerelease: auto`), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`, once; `crane tag` points `latest` at it. |
 | `release-go-lib.yml` | `go-lib` | `goreleaser release --clean` of the release tag: the binaries and archives go on the GitHub release (the config needs `release.prerelease: auto`). |

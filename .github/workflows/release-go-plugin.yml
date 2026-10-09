@@ -38,6 +38,7 @@ jobs:
       contents: read
     outputs:
       tags: ${{ steps.tags.outputs.tags }}
+      version: ${{ steps.tags.outputs.version }}
     steps:
       - name: Check the tools ref
         env:

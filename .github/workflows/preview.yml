@@ -1,7 +1,8 @@
 # Publishes previews to ghcr.io/compliance-framework: :main and :sha-<7> on pushes to the
 # default branch (unless on-main is false), :pr-<number> on PRs labelled `preview`. It never
 # touches :latest. Tag rules: internal/release (PreviewTags). By kind: container images
-# (publish-image.yml, which the release workflows reuse), or gooci OCI artifacts for plugins
+# (publish-image.yml, which the release workflows reuse; built with VERSION=main-<sha7> or
+# pr-<number>-<sha7>, PreviewVersion), or gooci OCI artifacts for plugins
 # (a goreleaser snapshot) and policies (an opa build bundle), uploaded once to the first tag
 # with the other tags pointed at that manifest by crane, so all share one digest; see README.
 name: preview
@@ -45,6 +46,7 @@ jobs:
       contents: read
     outputs:
       tags: ${{ steps.tags.outputs.tags }}
+      version: ${{ steps.tags.outputs.version }}
     steps:
       - name: Check the kind
         env:
@@ -87,6 +89,7 @@ jobs:
     with:
       images: ${{ inputs.images }}
       tags: ${{ needs.tags.outputs.tags }}
+      version: ${{ needs.tags.outputs.version }}
     permissions:
       contents: read
       packages: write

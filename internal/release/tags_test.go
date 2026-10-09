@@ -68,6 +68,62 @@ func TestPreviewTags(t *testing.T) {
 	}
 }
 
+func TestPreviewVersion(t *testing.T) {
+	const sha = "0123456789abcdef"
+	push := Event{Name: "push", Ref: "refs/heads/main", SHA: sha, DefaultBranch: "main"}
+	trunk := Event{Name: "push", Ref: "refs/heads/trunk", SHA: sha, DefaultBranch: "trunk"}
+	pr := Event{Name: "pull_request", Ref: "refs/pull/7/merge", SHA: sha, DefaultBranch: "main", PRNumber: 7, Labels: []string{"preview"}}
+	noSHA := pr
+	noSHA.SHA = ""
+	unlabelled := pr
+	unlabelled.Labels = nil
+	for _, tc := range []struct {
+		name   string
+		e      Event
+		onMain bool
+		want   string
+	}{
+		{"push to main", push, true, "main-0123456"},
+		{"push to another default branch", trunk, true, "main-0123456"}, // like its :main tag
+		{"push to main, on-main false", push, false, ""},
+		{"labelled PR", pr, true, "pr-7-0123456"},
+		{"labelled PR without a SHA", noSHA, true, "pr-7"},
+		{"unlabelled PR", unlabelled, true, ""},
+		{"release", Event{Name: "release", SHA: sha}, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PreviewVersion(tc.e, tc.onMain); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReleaseVersion(t *testing.T) {
+	for _, tc := range []struct{ tag, prefix, want, err string }{
+		{"v1.2.3", "v", "1.2.3", ""},
+		{"v1.2.3-rc1", "v", "1.2.3-rc1", ""},
+		{"mock-chart-v0.2.0", "mock-chart-v", "0.2.0", ""},
+		{"1.2.3", "v", "", "not vX.Y.Z"},
+		{"v1.2", "v", "", "not vX.Y.Z"},
+		{"v1.2.3+build", "v", "", "not vX.Y.Z"},
+		{"", "v", "", "not vX.Y.Z"},
+	} {
+		t.Run(tc.tag, func(t *testing.T) {
+			got, err := ReleaseVersion(tc.tag, tc.prefix)
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Fatalf("err = %v, want %q", err, tc.err)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestReleaseTags(t *testing.T) {
 	for _, tc := range []struct {
 		tag, prefix, style string

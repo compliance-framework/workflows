@@ -1,7 +1,8 @@
 # Publishes a release's container images (kind go-service; agent has three) when the caller's
 # release is published: for the tag vX.Y.Z, ghcr.io/<owner>/<name>:X.Y.Z, :X.Y, :X and :latest;
 # a pre-release (vX.Y.Z-rcN) gets :X.Y.Z-rcN only. Each image is built natively for amd64 and
-# arm64 (publish-image.yml), then release-finished.yml reports the result. Call it on
+# arm64 (publish-image.yml) with the build arg VERSION=X.Y.Z[-rcN], the tag without its prefix,
+# then release-finished.yml reports the result. Call it on
 # `release: published` with `secrets: inherit`; see README. Tag rules: internal/release.
 name: release-go-image
 
@@ -35,6 +36,7 @@ jobs:
       contents: read
     outputs:
       tags: ${{ steps.tags.outputs.tags }}
+      version: ${{ steps.tags.outputs.version }}
     steps:
       - name: Check the tools ref
         env:
@@ -69,6 +71,7 @@ jobs:
     with:
       images: ${{ inputs.images }}
       tags: ${{ needs.tags.outputs.tags }}
+      version: ${{ needs.tags.outputs.version }}
     permissions:
       contents: read
       packages: write
