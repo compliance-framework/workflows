@@ -5,3 +5,7 @@ lisa-design:
 - The first tag from cmd/release is the most specific (vX.Y.Z / main / pr-N); upload goes there only. Single-tag runs (rc, pr-N) still run the verification (no crane tag calls).
 - "Tag the rest" is one identical step in all four gooci-upload jobs (preview plugin/policies, release plugin/policies); TestUploadOnceTagTheRest enforces single upload + that step, so a new gooci upload job must adopt it.
 - Left alone: plugin-release.yml (legacy, README says unchanged until removed; excluded from these tests like the existing ones), publish-image.yml (one imagetools create with every --tag -> one index already), release-helm.yml (one helm push per release).
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- [should-fix] CORE-DUP-001 516b0457933c .github/workflows/release-go-plugin.yml "Install crane": crane@v0.20.7 pin repeated in four jobs; only the policies pair is pinned equal by TestReleaseCopies. Fix: require an identical "Install crane" step in every gooci-upload job in TestUploadOnceTagTheRest.
