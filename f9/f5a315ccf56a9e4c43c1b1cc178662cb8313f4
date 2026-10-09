@@ -5,3 +5,8 @@ lisa-design:
 - Preview VERSION = main-<sha7> (push to default branch, matching the literal :main tag even if the default branch has another name) or pr-<number>-<sha7>; sha7 is GITHUB_SHA, the commit the image is built from and its revision label (for a PR that is the merge commit). No 0.0.0-<kind>.<id> convention existed in the repo, so the spec's fallback was used; non-semver on purpose so a preview never looks like a release.
 - The tags job is one copy across release-go-image/-go-plugin/-policies (TestReleaseCopies), so the version output was added to all three, unused in the OCI ones.
 - release-ui.yml is unchanged: it calls release-go-image.yml, which computes VERSION.
+
+lisa-selfreview:
+pass 1 (core,go packs): approve, no findings.
+- checked CORE-XREPO-001/CORE-REL-001: publish-image.yml's new `version` input is required; no org repo's workflows call publish-image.yml directly (scanned every repo's .github/workflows on the default branch), only preview.yml and release-go-image.yml in this repo, both updated. Not breaking.
+- nit, deferred: cmd/release release-tags parses the tag twice (ReleaseTags, then ReleaseVersion); kept so ReleaseTags' signature, used by three workflows' outputs, stays unchanged.
