@@ -5,3 +5,10 @@ lisa-design:
 - Helm reason wins over MajorReason for a helm app major, since its advice (check values/templates) is the useful one there.
 - internal/bump now imports internal/manifest (for Kind); manifest imports nothing internal, so no cycle.
 - The reason goes in the PR body ("Not auto-merged, a human merges this PR:") and in the output ("auto-merge: off (<reasons>)", and in the dry-run lines).
+
+lisa-selfreview:
+pass 1 (strict):
+- CORE-DOC-001 docs/attention.md:17: the needs-human row for ccf-bump lists only "a major update or a pin that was not a version"; it omits the helm app minor rule.
+- CORE-DOC-001 docs/ccf-bump.md:73: "Merged by ccf-bump when every change stays within its major version" now reads as the whole rule; add the helm minor qualifier.
+- CORE-NAME-001 internal/bump/plan.go Change.AppVersion(): an exported bool method named like a getter of a version; make it unexported movesAppVersion().
+- CORE-TEST-001 cmd/ccf-bump/main_test.go TestHelmAppMinor: the dry-run "auto-merge off (<reason>)" line is not asserted.
