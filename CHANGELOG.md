@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/compliance-framework/workflows/compare/v1.3.0...v1.3.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **release:** publish plugin and policy artifacts once, tag the rest to the same digest ([#85](https://github.com/compliance-framework/workflows/issues/85)) ([ce2ecaa](https://github.com/compliance-framework/workflows/commit/ce2ecaa55dadb940670aa3ff8482ec7fe462ce20))
+* **renovate:** security updates are fix(deps), so they release ([#83](https://github.com/compliance-framework/workflows/issues/83)) ([43a4a30](https://github.com/compliance-framework/workflows/commit/43a4a30e2aa21f300ba2d6b95271d0b27cf90ddf))
+
 ## [1.3.0](https://github.com/compliance-framework/workflows/compare/v1.2.0...v1.3.0) (2026-10-08)
 
 
