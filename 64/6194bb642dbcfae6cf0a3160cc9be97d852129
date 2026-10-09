@@ -5,3 +5,7 @@ pass 1:
 - internal/bump/plan.go: Change.AppVersion() -> unexported movesAppVersion().
 - cmd/ccf-bump: dry-run line now "dry run: auto-merge: off (<reasons>)", asserted in TestHelmAppMinor (and absent for patches).
 - Mutation check: with the helm branch disabled, TestHelmAppMinor (4 held cases) and TestNeedsHuman fail.
+
+lisa-selfreview:
+pass 2 (strict):
+- CORE-TEST-002 internal/bump/bump_test.go TestNeedsHuman: the non-helm refs use made-up updater names ("workflow", "gomod"), so the cases don't model real refs; use workflowRef{}.Name(), goMod{}.Name(), helm{}.Name().
