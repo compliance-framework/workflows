@@ -1,0 +1,2 @@
+lisa-addressed:
+- [CORE-DOC-001 9b86df096732] Commits row now says security fixes are always fix(deps); the Indirect Go modules row and the indirect packageRule description point at vulnerabilityAlerts for security fixes.
