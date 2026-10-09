@@ -1,0 +1,5 @@
+lisa-design:
+- ExpectsCheck matches every "status check(s) ... is/are <state>" in the 405 body and returns true only when at least one matched and ALL named states are pending (expected, queued, in progress, pending). A body naming any non-pending state (failing, or one queued + one failing) is a real refusal. Chosen over a single substring match per word so a mixed body never counts as pending.
+- Regex is tolerant (case-insensitive, no dependence on the quoted check name or JSON escaping) per the spec, which allows a tolerant match on the state word.
+- The helper is duplicated in internal/bump and internal/train (as the original was) rather than shared: the preamble asks not to refactor shared code in parallel stage-3 PRs.
+- Callers (cmd/ccf-bump/merge.go, internal/train/phases.go) are unchanged: pending keeps the existing wait/poll path and wording ("GitHub still expects ...").
