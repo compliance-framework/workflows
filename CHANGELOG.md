@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/compliance-framework/workflows/compare/v1.4.0...v1.5.0) (2026-10-09)
+
+
+### Features
+
+* **release:** pass the release VERSION to image builds ([#90](https://github.com/compliance-framework/workflows/issues/90)) ([1b6e7c6](https://github.com/compliance-framework/workflows/commit/1b6e7c6f6b521701ce5f83c13169eb8f62406361))
+
 ## [1.4.0](https://github.com/compliance-framework/workflows/compare/v1.3.2...v1.4.0) (2026-10-09)
 
 
