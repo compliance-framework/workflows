@@ -1,0 +1,2 @@
+lisa-addressed:
+- selfreview pass 1: ExpectsCheck now requires one matched state per "status check" mention in the 405 body (both packages), so a failing check phrased without is/are can't ride along with a queued one. Test "405 failed, then queued" pins it.
