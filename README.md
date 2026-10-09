@@ -409,8 +409,8 @@ It never publishes `latest`, which only final releases move. What it publishes d
 | `kind` | Kinds | Publishes |
 | --- | --- | --- |
 | `image` | `go-service`, `ui`, `action` | Container images, `linux/amd64` and `linux/arm64` (`publish-image.yml`). |
-| `go-plugin` | `go-plugin` | `goreleaser release --snapshot --clean` (nothing is released), then `gooci upload` of `dist/` with the `org.ccf.plugin.protocol.version` annotation. |
-| `policies` | `policies` | `opa build` of `directory`, then `gooci upload-single` of the bundle. |
+| `go-plugin` | `go-plugin` | `goreleaser release --snapshot --clean` (nothing is released), then `gooci upload` of `dist/` with the `org.ccf.plugin.protocol.version` annotation, once; `crane tag` points the other tags at it. |
+| `policies` | `policies` | `opa build` of `directory`, then `gooci upload-single` of the bundle, once; `crane tag` points the other tags at it. |
 
 A plugin or policy repo that wants PR previews only sets `on-main: false`.
 
@@ -506,9 +506,9 @@ from the caller's `release` environment (release tags may use it); callers keep 
 | --- | --- | --- |
 | `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`. |
 | `release-ui.yml` | `ui` | The same as `release-go-image.yml` (it calls it), with the ui's single image. |
-| `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release; the config needs `release.prerelease: auto`), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`. |
+| `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release; the config needs `release.prerelease: auto`), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`, once; `crane tag` points `latest` at it. |
 | `release-go-lib.yml` | `go-lib` | `goreleaser release --clean` of the release tag: the binaries and archives go on the GitHub release (the config needs `release.prerelease: auto`). |
-| `release-policies.yml` | `policies` | `opa build` of `directory` at `opa-version`, then `gooci upload-single` of the bundle. |
+| `release-policies.yml` | `policies` | `opa build` of `directory` at `opa-version`, then `gooci upload-single` of the bundle, once; `crane tag` points `latest` at it. |
 | `release-helm.yml` | `helm` | `helm package` of the released chart at the tag's version, then `helm push` to `registry`. |
 | `release-action.yml` | `action` | Nothing: it moves the major tag (`v0` today) to the release commit. |
 
@@ -522,6 +522,16 @@ Plugin and policy (gooci) tags keep the `v`, as the agent configs reference them
 pre-release. gooci is built from source at the pinned version (`go install
 github.com/compliance-framework/gooci@v0.0.7`) and reads the registry login from
 `docker/login-action`.
+
+All of a build's plugin or policy tags name one manifest, as the agent records the digest it
+pulled (`_plugin_digest`, `_policy_digest`): each gooci upload makes a new manifest, so the
+artifact is uploaded once, to the first tag (`v1.2.3`, or `main` / `pr-<number>` for a preview),
+and the "Tag the rest" step points the others (`latest`, `sha-<7>`) at that digest with `crane
+tag`, a registry-side tag with no re-upload, then fails unless every tag resolves to it. crane
+(`go install github.com/google/go-containerregistry/cmd/crane@v0.20.7`) is from
+go-containerregistry, the library gooci is built on, reads the same Docker login, and v0.20.7
+needs no newer Go than gooci (1.24). `internal/ciworkflows` pins that every gooci upload is
+single and followed by the one "Tag the rest" step.
 
 | Input | Default | What |
 | --- | --- | --- |
