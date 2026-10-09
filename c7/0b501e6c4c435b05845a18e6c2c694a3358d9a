@@ -1,2 +1,5 @@
 lisa-addressed:
 - [should-fix] CORE-DUP-001 516b0457933c: TestUploadOnceTagTheRest now requires an identical, pinned "Install crane" step in every gooci-upload job (mutation-checked: bumping one pin fails it).
+
+lisa-selfreview:
+pass 2 (strict): approve, no findings. Gate: go test -race ./... (golang:1.26, bash 5, jq, yq), go vet, gofmt, actionlint v1.7.12, cmd/manifest on both manifests all clean.
