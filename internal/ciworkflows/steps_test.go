@@ -228,6 +228,48 @@ func TestSharedCopies(t *testing.T) {
 	}
 }
 
+// TestLintTimeout: each Go kind workflow takes a lint-timeout-minutes input (number, default
+// 15, the job's former fixed limit) and its golangci-lint job runs for that long. The lint job
+// sets no --timeout of its own (golangci-lint v2 has none by default), so the job's limit is
+// the only one.
+func TestLintTimeout(t *testing.T) {
+	const timeout = "${{ inputs.lint-timeout-minutes }}"
+	for _, file := range []string{goPlugin, goService, goLib} {
+		var wf struct {
+			On struct {
+				Call struct {
+					Inputs map[string]struct {
+						Type    string `yaml:"type"`
+						Default any    `yaml:"default"`
+					} `yaml:"inputs"`
+				} `yaml:"workflow_call"`
+			} `yaml:"on"`
+			Jobs map[string]struct {
+				TimeoutMinutes string `yaml:"timeout-minutes"`
+				Steps          []struct {
+					With map[string]string `yaml:"with"`
+				} `yaml:"steps"`
+			} `yaml:"jobs"`
+		}
+		read(t, file, &wf)
+		in, ok := wf.On.Call.Inputs["lint-timeout-minutes"]
+		if !ok || in.Type != "number" || in.Default != 15 {
+			t.Errorf("%s: lint-timeout-minutes input = %+v (present %v), want type number default 15", file, in, ok)
+		}
+		lint := wf.Jobs["lint"]
+		if lint.TimeoutMinutes != timeout {
+			t.Errorf("%s: lint job timeout-minutes = %q, want %q", file, lint.TimeoutMinutes, timeout)
+		}
+		args := script(t, file, "lint", "Choose the lint arguments")
+		for _, s := range lint.Steps {
+			args += "\n" + s.With["args"]
+		}
+		if strings.Contains(args, "--timeout") {
+			t.Errorf("%s: the golangci-lint arguments set a --timeout; it must then follow lint-timeout-minutes too", file)
+		}
+	}
+}
+
 func TestMakeTargets(t *testing.T) {
 	src := script(t, goService, "make", "make")
 	bin := t.TempDir()

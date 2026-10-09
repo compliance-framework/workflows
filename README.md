@@ -182,6 +182,7 @@ Go comes from the caller's `go.mod`.
 | Input | Default | What |
 | --- | --- | --- |
 | `lint-new-from-merge-base` | `true` | Report only issues the change adds: `--new-from-merge-base=origin/<base>` on PRs, `--new-from-rev=<before>` on pushes (everything when there is no such commit). `false` lints everything. |
+| `lint-timeout-minutes` | `15` | The `golangci-lint` job's `timeout-minutes`. golangci-lint itself sets no `--timeout` (v2 has none by default), so this is the one limit. |
 
 #### `ci-policies.yml` (kind `policies`)
 
@@ -216,7 +217,7 @@ The snippets below show only the `uses:` and `with:` keys of that `ci` job.
 
 | Job | Checks |
 | --- | --- |
-| `golangci-lint` | As in `ci-go-plugin.yml` (same job and `lint-new-from-merge-base` input). |
+| `golangci-lint` | As in `ci-go-plugin.yml` (same job, with the `lint-new-from-merge-base` and `lint-timeout-minutes` inputs). |
 | `go` | `gofmt -l .`, then the prepare command, `go vet ./...`, `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test -race ./...`, `go build ./...`. |
 | `make` | The prepare command, then each of `make-targets` (all run even if one fails). With no targets it does nothing and succeeds. |
 
@@ -236,7 +237,7 @@ The snippets below show only the `uses:` and `with:` keys of that `ci` job.
 
 | Job | Checks |
 | --- | --- |
-| `golangci-lint` | As in `ci-go-plugin.yml` (same job and `lint-new-from-merge-base` input). |
+| `golangci-lint` | As in `ci-go-plugin.yml` (same job, with the `lint-new-from-merge-base` and `lint-timeout-minutes` inputs). |
 | `go` | `gofmt -l .`, `go test ./...`. |
 | `goreleaser` | `goreleaser check` (deprecated properties only warn). |
 
