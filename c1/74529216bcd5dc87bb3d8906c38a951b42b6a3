@@ -3,3 +3,8 @@ lisa-design:
 - Regex is tolerant (case-insensitive, no dependence on the quoted check name or JSON escaping) per the spec, which allows a tolerant match on the state word.
 - The helper is duplicated in internal/bump and internal/train (as the original was) rather than shared: the preamble asks not to refactor shared code in parallel stage-3 PRs.
 - Callers (cmd/ccf-bump/merge.go, internal/train/phases.go) are unchanged: pending keeps the existing wait/poll path and wording ("GitHub still expects ...").
+
+lisa-selfreview:
+pass 1 (strict):
+- should-fix internal/{bump,train}/github.go ExpectsCheck: the non-greedy `status checks?.*?(is|are) <state>` match can span two violations. A body like `Required status check "a" has failed. Required status check "b" is queued.` yields one match ("queued") and counts as pending, so a failing check is mistaken for a pending one if GitHub ever phrases a state without is/are. Fix: require one pending state per "status check" mention.
+- deferred (nit, no regression): a 405 that combines a pending check with another rule violation (e.g. review required) counts as pending; the old "is expected" match behaved the same, and the next pass reports it.
