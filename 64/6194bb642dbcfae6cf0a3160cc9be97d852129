@@ -1,0 +1,7 @@
+lisa-addressed:
+pass 1:
+- docs/attention.md: the ccf-bump needs-human row names the helm app minor rule.
+- docs/ccf-bump.md: "Merged by ccf-bump" bullet qualifies the helm minor rule.
+- internal/bump/plan.go: Change.AppVersion() -> unexported movesAppVersion().
+- cmd/ccf-bump: dry-run line now "dry run: auto-merge: off (<reasons>)", asserted in TestHelmAppMinor (and absent for patches).
+- Mutation check: with the helm branch disabled, TestHelmAppMinor (4 held cases) and TestNeedsHuman fail.
