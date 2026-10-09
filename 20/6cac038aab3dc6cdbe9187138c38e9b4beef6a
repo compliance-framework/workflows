@@ -2,3 +2,6 @@ lisa-design:
 - semanticCommitType "fix" lives in vulnerabilityAlerts, not in a packageRule: Renovate (44.145.1, lib/workers/repository/init/vulnerability.ts and process/vulnerabilities.ts) copies the vulnerabilityAlerts object into the `force` block of the packageRule it generates per alert (GitHub alerts and OSV), and force'd settings win over every other packageRule. There is no documented packageRules matcher for vulnerability updates (isVulnerabilityAlert is internal), so this is the documented way.
 - The indirect-gomod fix rule is kept: it still covers non-security indirect updates and documents intent; the vulnerabilityAlerts setting is the guarantee for security PRs.
 - Covered by the existing TestSharedPreset (internal/renovate/config_test.go), no new tooling.
+
+lisa-selfreview:
+pass 1 (strict): [should-fix CORE-DOC-001 9b86df096732] docs/renovate.md Commits and Indirect Go modules rows (and the indirect packageRule description in renovate/default.json) still credit the depType rules for security fixes being fix(deps); point them at vulnerabilityAlerts.semanticCommitType.
