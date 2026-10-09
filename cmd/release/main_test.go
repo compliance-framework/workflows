@@ -76,9 +76,9 @@ func TestPreviewTags(t *testing.T) {
 	for _, tc := range []struct {
 		name, eventName, ref, event, want string
 	}{
-		{"push to main", "push", "refs/heads/main", write(t, dir, "push.json", `{`+repo+`}`), "tags=main sha-0123456"},
-		{"labelled PR", "pull_request", "refs/pull/12/merge", pr("compliance-framework/mock-api"), "tags=pr-12"},
-		{"fork PR", "pull_request", "refs/pull/12/merge", pr("someone/mock-api"), "tags="},
+		{"push to main", "push", "refs/heads/main", write(t, dir, "push.json", `{`+repo+`}`), "tags=main sha-0123456\nversion=main-0123456"},
+		{"labelled PR", "pull_request", "refs/pull/12/merge", pr("compliance-framework/mock-api"), "tags=pr-12\nversion=pr-12-0123456"},
+		{"fork PR", "pull_request", "refs/pull/12/merge", pr("someone/mock-api"), "tags=\nversion="},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ghOut := filepath.Join(t.TempDir(), "out")
@@ -101,9 +101,9 @@ func TestReleaseTags(t *testing.T) {
 		want string
 		fail bool
 	}{
-		{[]string{"--tag", "v1.2.3"}, "tags=1.2.3 1.2 1 latest\nfinal=true\nmajor=v1", false},
-		{[]string{"--tag", "v1.2.3-rc1", "--style", "artifact"}, "tags=v1.2.3-rc1\nfinal=false\nmajor=v1", false},
-		{[]string{"--tag", "chart-v0.2.0", "--prefix", "chart-v", "--style", "artifact"}, "tags=v0.2.0 latest\nfinal=true\nmajor=v0", false},
+		{[]string{"--tag", "v1.2.3"}, "tags=1.2.3 1.2 1 latest\nfinal=true\nmajor=v1\nversion=1.2.3", false},
+		{[]string{"--tag", "v1.2.3-rc1", "--style", "artifact"}, "tags=v1.2.3-rc1\nfinal=false\nmajor=v1\nversion=1.2.3-rc1", false},
+		{[]string{"--tag", "chart-v0.2.0", "--prefix", "chart-v", "--style", "artifact"}, "tags=v0.2.0 latest\nfinal=true\nmajor=v0\nversion=0.2.0", false},
 		{[]string{"--tag", ""}, "", true},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {

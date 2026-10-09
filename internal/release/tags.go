@@ -76,6 +76,39 @@ func PreviewTags(e Event, onMain bool) ([]string, string) {
 	return nil, "event " + e.Name + " publishes no preview"
 }
 
+// PreviewVersion returns the VERSION build arg preview.yml passes to the image builds of an
+// event that publishes a preview (PreviewTags returns tags): main-<sha7> on a push to the
+// default branch, pr-<number>-<sha7> on a PR, where sha7 is GITHUB_SHA's (the commit the
+// image is built from, also its org.opencontainers.image.revision label). It is "" when the
+// event publishes no preview. It is not a semantic version on purpose: a preview never
+// claims to be a release.
+func PreviewVersion(e Event, onMain bool) string {
+	if tags, _ := PreviewTags(e, onMain); len(tags) == 0 {
+		return ""
+	}
+	sha := e.SHA
+	if len(sha) > 7 {
+		sha = sha[:7]
+	}
+	if e.Name == "pull_request" {
+		if sha == "" {
+			return "pr-" + strconv.Itoa(e.PRNumber)
+		}
+		return "pr-" + strconv.Itoa(e.PRNumber) + "-" + sha
+	}
+	return "main-" + sha
+}
+
+// ReleaseVersion returns the version a release's git tag names: the tag without prefix, which
+// must be X.Y.Z or X.Y.Z-<pre-release> (v1.2.3 -> 1.2.3, v1.2.3-rc1 -> 1.2.3-rc1).
+func ReleaseVersion(tag, prefix string) (string, error) {
+	version, ok := strings.CutPrefix(tag, prefix)
+	if !ok || !valid(version) {
+		return "", fmt.Errorf("tag %q is not %sX.Y.Z or %sX.Y.Z-<pre-release>", tag, prefix, prefix)
+	}
+	return version, nil
+}
+
 // Registry tag styles for ReleaseTags.
 const (
 	// ImageTags is for container images: X.Y.Z, plus X.Y, X and latest for a final release.
@@ -91,11 +124,11 @@ const (
 // release's prerelease flag. Only a final release gets latest and the floating X.Y and X: a
 // release candidate publishes its own version tag and nothing that other users follow.
 func ReleaseTags(tag, prefix, style string) (tags []string, final bool, err error) {
-	version, ok := strings.CutPrefix(tag, prefix)
-	v := "v" + version
-	if !ok || !valid(version) {
-		return nil, false, fmt.Errorf("tag %q is not %sX.Y.Z or %sX.Y.Z-<pre-release>", tag, prefix, prefix)
+	version, err := ReleaseVersion(tag, prefix)
+	if err != nil {
+		return nil, false, err
 	}
+	v := "v" + version
 	final = semver.Prerelease(v) == ""
 	switch style {
 	case ImageTags:

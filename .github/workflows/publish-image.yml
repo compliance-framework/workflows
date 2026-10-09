@@ -1,7 +1,8 @@
 # Builds the caller's images natively for linux/amd64 (ubuntu-latest) and linux/arm64
 # (ubuntu-24.04-arm), pushes each by digest, then merges each image's two into one manifest
-# list at ghcr.io/<owner>/<name>:<tag> for each given tag, with GITHUB_TOKEN. Called by
-# preview.yml and the release workflows; callers grant contents: read and packages: write.
+# list at ghcr.io/<owner>/<name>:<tag> for each given tag, with GITHUB_TOKEN. Each build gets
+# exactly one build arg, VERSION=<version>, and no caller-supplied others. Called by preview.yml
+# and the release workflows; callers grant contents: read and packages: write.
 name: publish-image
 
 on:
@@ -13,6 +14,10 @@ on:
         default: '[{}]'
       tags:
         description: "Space-separated tags without the repository, e.g. 'main sha-0123456'"
+        type: string
+        required: true
+      version:
+        description: "The VERSION build arg, chosen by the caller workflow (cmd/release): X.Y.Z[-pre-release], main-<sha7> or pr-<number>-<sha7>"
         type: string
         required: true
 
@@ -35,6 +40,17 @@ jobs:
           - { arch: amd64, runner: ubuntu-latest }
           - { arch: arm64, runner: ubuntu-24.04-arm }
     steps:
+      # The only build arg: it lands in the image's history and provenance, so it must be a
+      # plain version, never anything to interpret.
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! [[ "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::the version input is not X.Y.Z[-pre-release], main-<sha7> or pr-<number>-<sha7>"
+            exit 1
+          fi
+          echo "Building with VERSION=$VERSION"
       # Two entries with one name would overwrite each other's digest and tags.
       - name: Check the image names
         env:
@@ -68,6 +84,8 @@ jobs:
           context: ${{ matrix.image.context || '.' }}
           file: ${{ matrix.image.dockerfile || 'Dockerfile' }}
           platforms: linux/${{ matrix.platform.arch }}
+          # Data, not shell: checked above. A Dockerfile without ARG VERSION ignores it (docker warns).
+          build-args: VERSION=${{ inputs.version }}
           # Pushed by digest only: the merge job tags the manifest list.
           outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
           labels: |
