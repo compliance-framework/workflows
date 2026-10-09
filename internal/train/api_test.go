@@ -91,19 +91,20 @@ func TestExpectsCheck(t *testing.T) {
 		err  error
 		want bool
 	}{
-		"405 check expected":     {&StatusError{Status: http.StatusMethodNotAllowed, Body: expected}, true},
-		"405 check queued":       {refused(`Required status check \"ci / required\" is queued.`), true},
-		"405 check in progress":  {refused(`Required status check \"ci / required\" is in progress.`), true},
-		"405 check pending":      {refused(`Required status check \"ci / required\" is pending.`), true},
-		"405 checks expected":    {refused(`2 of 2 required status checks are expected.`), true},
-		"405 check failing":      {refused(`Required status check \"ci / required\" is failing.`), false},
-		"405 one of two failing": {refused(`Required status check \"a\" is queued.\n\nRequired status check \"b\" is failing.`), false},
-		"405 review required":    {refused(`At least 1 approving review is required by reviewers with write access.`), false},
-		"405 other":              {&StatusError{Status: http.StatusMethodNotAllowed, Body: `{"message":"Pull Request is not mergeable"}`}, false},
-		"wrapped":                {fmt.Errorf("merge: %w", &StatusError{Status: http.StatusMethodNotAllowed, Body: expected}), true},
-		"409 head moved":         {&StatusError{Status: http.StatusConflict, Body: expected}, false},
-		"not a StatusError":      {errors.New("Required status check is expected"), false},
-		"nil":                    {nil, false},
+		"405 check expected":      {&StatusError{Status: http.StatusMethodNotAllowed, Body: expected}, true},
+		"405 check queued":        {refused(`Required status check \"ci / required\" is queued.`), true},
+		"405 check in progress":   {refused(`Required status check \"ci / required\" is in progress.`), true},
+		"405 check pending":       {refused(`Required status check \"ci / required\" is pending.`), true},
+		"405 checks expected":     {refused(`2 of 2 required status checks are expected.`), true},
+		"405 check failing":       {refused(`Required status check \"ci / required\" is failing.`), false},
+		"405 one of two failing":  {refused(`Required status check \"a\" is queued.\n\nRequired status check \"b\" is failing.`), false},
+		"405 failed, then queued": {refused(`Required status check \"a\" has failed.\n\nRequired status check \"b\" is queued.`), false},
+		"405 review required":     {refused(`At least 1 approving review is required by reviewers with write access.`), false},
+		"405 other":               {&StatusError{Status: http.StatusMethodNotAllowed, Body: `{"message":"Pull Request is not mergeable"}`}, false},
+		"wrapped":                 {fmt.Errorf("merge: %w", &StatusError{Status: http.StatusMethodNotAllowed, Body: expected}), true},
+		"409 head moved":          {&StatusError{Status: http.StatusConflict, Body: expected}, false},
+		"not a StatusError":       {errors.New("Required status check is expected"), false},
+		"nil":                     {nil, false},
 	} {
 		if got := ExpectsCheck(tc.err); got != tc.want {
 			t.Errorf("%s: ExpectsCheck = %v, want %v", name, got, tc.want)

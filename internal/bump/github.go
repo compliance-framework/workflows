@@ -329,29 +329,36 @@ func RequiredCheck(runs []CheckRun) (running, newest *CheckRun) {
 	return nil, newest
 }
 
-// checkState matches each "Required status check \"<name>\" is <state>" (or "status checks ...
-// are <state>") in a 405 body, capturing the state.
-var checkState = regexp.MustCompile(`(?i)status checks?\b.*?\b(?:is|are) (in progress|[a-z]+)`)
+// checkMention matches each required status check a 405 body names; checkState matches each
+// "Required status check \"<name>\" is <state>" (or "status checks ... are <state>"), capturing
+// the state.
+var (
+	checkMention = regexp.MustCompile(`(?i)status checks?\b`)
+	checkState   = regexp.MustCompile(`(?i)status checks?\b.*?\b(?:is|are) (in progress|[a-z]+)`)
+)
 
 // pendingStates are the states GitHub reports for a required check that hasn't concluded yet.
 var pendingStates = map[string]bool{"expected": true, "queued": true, "in progress": true, "pending": true}
 
 // ExpectsCheck reports whether err is GitHub refusing a merge because a required status check is
 // still pending: expected (it hasn't reported on the head yet), queued, in progress or pending
-// (a new run of it started). Every check state the body names must be pending, so a failing
-// check is never mistaken for one.
+// (a new run of it started). Every check the body names must have a pending state, so a failing
+// check, or one phrased in a way the match doesn't know, is never mistaken for a pending one.
 func ExpectsCheck(err error) bool {
 	var se *StatusError
 	if !errors.As(err, &se) || se.Code != http.StatusMethodNotAllowed {
 		return false
 	}
 	states := checkState.FindAllSubmatch(se.Body, -1)
+	if len(states) == 0 || len(states) != len(checkMention.FindAllIndex(se.Body, -1)) {
+		return false
+	}
 	for _, m := range states {
 		if !pendingStates[string(bytes.ToLower(m[1]))] {
 			return false
 		}
 	}
-	return len(states) > 0
+	return true
 }
 
 // Merge squash-merges the PR if its head is still sha, with title as the commit title.
