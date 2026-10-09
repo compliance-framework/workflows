@@ -1,0 +1,2 @@
+lisa-addressed:
+- [should-fix] CORE-DUP-001 516b0457933c: TestUploadOnceTagTheRest now requires an identical, pinned "Install crane" step in every gooci-upload job (mutation-checked: bumping one pin fails it).
