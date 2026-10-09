@@ -18,7 +18,7 @@ train bumps its internal dependencies to what the earlier stages released, with
 | `released` | Done. |
 | `skipped` | An org owner commented `/skip <repo>`. The next stage doesn't wait for it, and its version isn't bumped anywhere. |
 | `blocked` | Something failed: the PR's required checks, ccf-bump, release-please, a merge or a release workflow. |
-| `needs-human` | A decision: a major version, a bump PR without the `ccf-bump:automerge` label (ccf-bump leaves it off for a major update or an unversioned pin), or a closed bump PR. |
+| `needs-human` | A decision: a major version, a bump PR without the `ccf-bump:automerge` label (ccf-bump leaves it off for a major update, an unversioned pin, or an app update of a minor or more in a helm repo), or a closed bump PR. |
 
 Every run reads GitHub's current state, so running it again is always safe, and `blocked` and
 `needs-human` clear themselves once the cause is gone: a fixed release PR whose checks pass merges

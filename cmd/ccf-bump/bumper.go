@@ -314,13 +314,15 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	if !b.o.pr {
 		return false, nil
 	}
-	title, body := prText(b.o, plan)
+	held := plan.HoldReasons(r.Kind)
+	title, body := prText(b.o, plan, held)
 	branch := "ccf-bump/" + b.o.mode + "-" + b.e.now().UTC().Format("2006-01-02")
 	if b.o.dryRun {
 		fmt.Fprintf(out, "  dry run: would push %s and open %q\n%s", branch, title, indent(body))
 		label := bump.AutomergeLabel
-		if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
+		if len(held) > 0 {
 			label = bump.NeedsHumanLabel
+			fmt.Fprintf(out, "  dry run: auto-merge: off (%s)\n", strings.Join(held, "; "))
 		}
 		fmt.Fprintf(out, "  dry run: would add label %s\n", label)
 		// Nothing was opened to tell who ccf-bump runs as, so any bot's ccf-bump PR is listed.
@@ -342,10 +344,12 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	if _, err := b.git(ctx, dir, "push", "--quiet", "--force", b.e.remote(b.o.owner, name), "HEAD:refs/heads/"+branch); err != nil {
 		return false, err
 	}
-	return true, b.openPR(ctx, name, branch, title, body, plan)
+	return true, b.openPR(ctx, name, branch, title, body, held)
 }
 
-func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, plan bump.Plan) error {
+// openPR opens or updates the bump PR and labels it: needs-human when held lists why it must not
+// be auto-merged, else ccf-bump:automerge.
+func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, held []string) error {
 	pr, err := b.e.gh.OpenPR(ctx, repo, branch)
 	if err != nil {
 		return err
@@ -371,8 +375,8 @@ func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, p
 	}
 	fmt.Fprintf(b.e.stdout, "  PR: %s\n", pr.URL)
 	b.closeSuperseded(ctx, repo, branch, pr)
-	if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
-		fmt.Fprintln(b.e.stdout, "  auto-merge: off (a major update, or a pin that was not a version)")
+	if len(held) > 0 {
+		fmt.Fprintf(b.e.stdout, "  auto-merge: off (%s)\n", strings.Join(held, "; "))
 		if pr.HasLabel(bump.AutomergeLabel) { // an earlier run the same day was eligible
 			if err := b.e.gh.RemoveLabel(ctx, repo, pr.Number, bump.AutomergeLabel); err != nil {
 				b.warn("%s#%d: remove label %s: %v", repo, pr.Number, bump.AutomergeLabel, err)
@@ -485,7 +489,8 @@ func commitType(plan bump.Plan) string {
 	return "fix"
 }
 
-func prText(o options, plan bump.Plan) (string, string) {
+// prText returns the PR's title and body; held lists why it is not auto-merged (Plan.HoldReasons).
+func prText(o options, plan bump.Plan, held []string) (string, string) {
 	title := commitType(plan) + "(deps): bump " + strings.Join(targetsOf(plan), ", ")
 	var b strings.Builder
 	fmt.Fprintf(&b, "Bumps internal dependencies (ccf-bump, %s mode).\n\n| Dependency | From | To | Where |\n| --- | --- | --- | --- |\n", o.mode)
@@ -500,6 +505,12 @@ func prText(o options, plan bump.Plan) (string, string) {
 		b.WriteString("\nNot changed (conflicts):\n\n")
 		for _, c := range plan.Conflicts {
 			fmt.Fprintf(&b, "- `%s` %s: %s\n", c.File, c.Key, c.Reason)
+		}
+	}
+	if len(held) > 0 {
+		b.WriteString("\nNot auto-merged, a human merges this PR:\n\n")
+		for _, h := range held {
+			fmt.Fprintf(&b, "- %s.\n", h)
 		}
 	}
 	return title, b.String()
