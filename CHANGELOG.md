@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/compliance-framework/workflows/compare/v1.5.0...v1.5.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **ccf-bump:** helm app updates of a minor or more need a human ([#92](https://github.com/compliance-framework/workflows/issues/92)) ([5ca9b77](https://github.com/compliance-framework/workflows/commit/5ca9b770fd7dcfd4d667bc508daf228fcefaca5d))
+
 ## [1.5.0](https://github.com/compliance-framework/workflows/compare/v1.4.0...v1.5.0) (2026-10-09)
 
 
