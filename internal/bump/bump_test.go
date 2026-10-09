@@ -372,26 +372,26 @@ func TestNeedsHuman(t *testing.T) {
 		return Change{Ref: Ref{Updater: workflowRef{}.Name(), Dep: DepWorkflows, Current: from, Version: version}, To: to}
 	}
 	gomod := Change{Ref: Ref{Updater: goMod{}.Name(), Dep: "api", Current: "v0.21.0"}, To: "v0.22.0"}
-	const helm, service = manifest.KindHelm, manifest.KindGoService
+	const helmRepo, serviceRepo = manifest.KindHelm, manifest.KindGoService
 	for name, tc := range map[string]struct {
 		c    Change
 		kind manifest.Kind
 		want string
 	}{
-		"helm 0.x minor tag":            {tag("0.21.0", "v0.22.0"), helm, HelmAppReason},
-		"helm 0.x minor appVersion":     {appVersion("0.21.0", "v0.22.0"), helm, HelmAppReason},
-		"helm 0.x patch tag":            {tag("0.21.0", "v0.21.1"), helm, ""},
-		"helm 0.x patch appVersion":     {appVersion("0.21.0", "v0.21.1"), helm, ""},
-		"helm 1.x+ minor":               {tag("2.12.1", "v2.13.0"), helm, HelmAppReason},
-		"helm 1.x+ patch":               {appVersion("2.12.1", "v2.12.2"), helm, ""},
-		"helm major":                    {tag("2.12.1", "v3.0.0"), helm, HelmAppReason},
-		"helm 0.x to 1.0":               {appVersion("0.21.0", "v1.0.0"), helm, HelmAppReason},
-		"helm tag not a version":        {tag("latest", "v0.22.0"), helm, HelmAppReason},
-		"helm workflows pin same major": {wf(sha10, "v1.0.0", WorkflowsPin(sha11, "v1.1.0")), helm, ""},
-		"helm workflows pin major":      {wf("v1.0.0", "", WorkflowsPin(sha20, "v2.0.0")), helm, MajorReason},
-		"go-service minor":              {gomod, service, ""},
-		"go-service app minor":          {tag("0.21.0", "v0.22.0"), service, ""}, // helm refs outside a helm repo
-		"go-service major":              {Change{Ref: Ref{Updater: goMod{}.Name(), Current: "v1.9.0"}, To: "v2.0.0"}, service, MajorReason},
+		"helm 0.x minor tag":            {tag("0.21.0", "v0.22.0"), helmRepo, HelmAppReason},
+		"helm 0.x minor appVersion":     {appVersion("0.21.0", "v0.22.0"), helmRepo, HelmAppReason},
+		"helm 0.x patch tag":            {tag("0.21.0", "v0.21.1"), helmRepo, ""},
+		"helm 0.x patch appVersion":     {appVersion("0.21.0", "v0.21.1"), helmRepo, ""},
+		"helm 1.x+ minor":               {tag("2.12.1", "v2.13.0"), helmRepo, HelmAppReason},
+		"helm 1.x+ patch":               {appVersion("2.12.1", "v2.12.2"), helmRepo, ""},
+		"helm major":                    {tag("2.12.1", "v3.0.0"), helmRepo, HelmAppReason},
+		"helm 0.x to 1.0":               {appVersion("0.21.0", "v1.0.0"), helmRepo, HelmAppReason},
+		"helm tag not a version":        {tag("latest", "v0.22.0"), helmRepo, HelmAppReason},
+		"helm workflows pin same major": {wf(sha10, "v1.0.0", WorkflowsPin(sha11, "v1.1.0")), helmRepo, ""},
+		"helm workflows pin major":      {wf("v1.0.0", "", WorkflowsPin(sha20, "v2.0.0")), helmRepo, MajorReason},
+		"go-service minor":              {gomod, serviceRepo, ""},
+		"go-service app minor":          {tag("0.21.0", "v0.22.0"), serviceRepo, ""}, // helm refs outside a helm repo
+		"go-service major":              {Change{Ref: Ref{Updater: goMod{}.Name(), Current: "v1.9.0"}, To: "v2.0.0"}, serviceRepo, MajorReason},
 	} {
 		if got := tc.c.HoldReason(tc.kind); got != tc.want {
 			t.Errorf("%s: HoldReason(%s) = %q, want %q", name, tc.kind, got, tc.want)
@@ -402,10 +402,10 @@ func TestNeedsHuman(t *testing.T) {
 	}
 	p := Plan{Changes: []Change{tag("0.21.0", "v0.21.1"), gomod, appVersion("0.21.0", "v0.22.0"), tag("0.21.0", "v0.22.0"),
 		wf("v1.0.0", "", WorkflowsPin(sha20, "v2.0.0"))}}
-	if got, want := p.HoldReasons(helm), []string{HelmAppReason, MajorReason}; !slices.Equal(got, want) {
+	if got, want := p.HoldReasons(helmRepo), []string{HelmAppReason, MajorReason}; !slices.Equal(got, want) {
 		t.Errorf("HoldReasons(helm) = %q, want %q", got, want)
 	}
-	if got := (Plan{Changes: []Change{tag("0.21.0", "v0.21.1"), gomod}}).HoldReasons(helm); got != nil {
+	if got := (Plan{Changes: []Change{tag("0.21.0", "v0.21.1"), gomod}}).HoldReasons(helmRepo); got != nil {
 		t.Errorf("HoldReasons(helm) of patches = %q, want none", got)
 	}
 }
