@@ -1,2 +1,6 @@
 lisa-addressed:
 - pass 1 CORE-STYLE-001 (README placement): sentence moved to the manifest paragraph near the top of README.md.
+
+lisa-selfreview:
+pass 2 (strict): 1 finding
+- [nit] CORE-STYLE-001 docs/ccf-bump.md, docs/renovate.md: edited paragraphs left lines far over the docs' ~100-column wrap. -> fix (reflowed)
