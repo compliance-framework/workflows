@@ -158,20 +158,18 @@ them first is harmless.
 ## The `ccf-bump-sync` workflow
 
 `ccf-bump-sync.yml` runs `ccf-bump sync --batch 10 --pr` on the 8th and 22nd at 04:00 UTC, and on
-`workflow_dispatch` with inputs `manifest` (default `repos.mock.yaml`, or `repos.yaml`) and `dry_run`
-(default `true`). Scheduled runs read `repos.mock.yaml` until go-live (W1-S4-T03), like renovate,
-train and attention-digest (the fallback equals the input's default), and are dry runs until the repo variable
-`CCF_BUMP_SYNC_LIVE` is `true`. It lists the repos, then mints a `ccf-release-bot` token scoped to
-exactly those (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`, this repo's `release` environment secrets; main only): read-only for dry runs; contents,
+`workflow_dispatch` with inputs `manifest` (default `repos.yaml`, or `repos.mock.yaml`) and `dry_run`
+(default `true`). Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the
+mocks. They are dry runs until the repo variable `CCF_BUMP_SYNC_LIVE` is `true`. It lists the
+repos, then mints a `ccf-release-bot` token scoped to exactly those (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`, this repo's `release` environment secrets; main only): read-only for dry runs; contents,
 pull requests and workflows write otherwise (bumps edit workflow files), and checks read. Commits
 are authored by the bot. A live run then runs `ccf-bump merge --wait 20m` over the same repos.
 
 `ccf-bump-merge.yml` runs the merge pass alone (`--wait 0`) daily at 05:41 UTC, for PRs whose CI
-finished later, and on `workflow_dispatch` with inputs `manifest` (default `repos.mock.yaml`) and
-`dry_run` (default `true`). A scheduled run uses `repos.mock.yaml` (the fallback equals the input's
-default: change both to move to `repos.yaml`) and is a dry run until `CCF_BUMP_SYNC_LIVE` is
-`true`. Its token has the same permissions as the sync's (merging a PR that edits workflow files
-needs workflows write).
+finished later, and on `workflow_dispatch` with inputs `manifest` (default `repos.yaml`) and
+`dry_run` (default `true`). Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml`
+for the mocks. A scheduled run is a dry run until `CCF_BUMP_SYNC_LIVE` is `true`. Its token has the
+same permissions as the sync's (merging a PR that edits workflow files needs workflows write).
 
 ```sh
 # Dry run against local clones of the mocks (DIR/mock-*):

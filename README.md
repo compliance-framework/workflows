@@ -72,7 +72,9 @@ stage 4: helm-charts
 that is neither a weekend nor a manifest holiday (2027-01-01 becomes 2027-01-04).
 
 Every tool takes `--manifest` (default `repos.yaml`), and every workflow takes a `manifest`
-input, so the same code runs against `repos.mock.yaml`.
+input, so the same code runs against `repos.mock.yaml`. The scheduled tools (Renovate, ccf-bump,
+the train, the attention digest and the vulnerability summary) read `repos.yaml`; dispatch with
+`manifest=repos.mock.yaml` for the mocks.
 
 ## How repos consume the workflows
 
@@ -695,7 +697,8 @@ This repo releases itself with release-please (`simple`; `release-please-config.
 `release-please.yml` on every push to `main`, as ccf-release-bot with a token scoped to this
 repo. Merging the release PR tags `vX.Y.Z` on the merge commit and publishes the GitHub
 release. It is in both manifests as `kind: workflows` with `release: false`: the train doesn't
-release it, and Renovate and vuln-summary leave it out unless it is named.
+release it, and vuln-summary leaves it out unless it is named. Renovate covers it like every
+other manifest repo.
 
 - **Tags never move.** There is no floating `v1`: callers pin a release's commit SHA, and
   `ccf-bump sync` moves the pins to the latest final release (`@<sha> # vX.Y.Z`) within a

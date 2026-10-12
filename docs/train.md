@@ -121,11 +121,11 @@ that needs the planned tag to exist (a pseudo-version, an OPA version); the plan
 
 | Trigger | Runs |
 | --- | --- |
-| `schedule` `0 8 1-7 * *` | `start --scheduled`: starts a train only on `NextWorkingWeekday` of the 1st (holidays from the manifest), once per month, over `repos.mock.yaml` for now. A dry run unless the repo variable `TRAIN_LIVE` is `true`. |
+| `schedule` `0 8 1-7 * *` | `start --scheduled`: starts a train only on `NextWorkingWeekday` of the 1st (holidays from the manifest), once per month, over `repos.yaml` (dispatch with `manifest=repos.mock.yaml` for the mocks). A dry run unless the repo variable `TRAIN_LIVE` is `true`. |
 | `schedule` `17 * * * *` | `reconcile`; nothing to do when no train is open. |
 | `repository_dispatch` `release-finished`, `bump-merged` | `reconcile`. `release-finished.yml` sends `release-finished` at the end of every release. |
 | `issue_comment` | `reconcile`, for a comment starting with `/` on an open train's issue. |
-| `workflow_dispatch` | `action` (`start` or `reconcile`), `manifest` (`repos.mock.yaml` or `repos.yaml`), `repos` and `dry_run` (default `true`). |
+| `workflow_dispatch` | `action` (`start` or `reconcile`), `manifest` (default `repos.yaml`, or `repos.mock.yaml`), `repos` and `dry_run` (default `true`). |
 
 Runs share one concurrency group (at the job level, so comments that aren't commands don't
 queue). A run with an open train keeps reconciling every minute for up

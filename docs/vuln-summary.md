@@ -19,13 +19,13 @@ Severity is the advisory's (`critical`, `high`, `medium`, `low`); anything else 
 
 ## When it runs
 
-- **Schedule**: Mondays at 08:00 UTC, on the default manifest.
+- **Schedule**: Mondays at 08:00 UTC, on `repos.yaml`.
 - **`workflow_dispatch`**: Actions, `vuln-summary`, Run workflow, or
   `gh workflow run vuln-summary.yml -f manifest=repos.mock.yaml`.
 
 | Input | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.mock.yaml` | The repos to summarise: every repo in the manifest. `repos.yaml` for the product repos, once the summary is proven on the mocks: then change both the input's default and the `MANIFEST` fallback in `vuln-summary.yml` (a scheduled run has no inputs and uses the fallback). |
+| `manifest` | `repos.yaml` | The repos to summarise: every repo in the manifest. Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the mocks. |
 
 ## Secrets and variables
 

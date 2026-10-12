@@ -17,11 +17,11 @@ func TestSelectRepos(t *testing.T) {
 		want []string
 		err  string
 	}{
-		{list: "", want: []string{"a", "b", "c"}},
+		{list: "", want: []string{"a", "b", "c", "w"}}, // the workflows repo too
 		{list: " c, a\n", want: []string{"a", "c"}},
 		{list: "c c", want: []string{"c"}},
 		{list: "b", want: []string{"b"}},
-		{list: "w", want: []string{"w"}}, // the workflows repo only when named
+		{list: "w", want: []string{"w"}},
 		{list: "a,x", err: "x"},
 	} {
 		got, err := SelectRepos(m, tc.list)
