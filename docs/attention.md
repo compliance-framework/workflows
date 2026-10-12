@@ -71,7 +71,7 @@ PR it could not read is listed under "Could not read" and fails the run, after p
 
 | Input (`workflow_dispatch`) | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.mock.yaml` | The repos to read. A scheduled run has no inputs and uses the `MANIFEST` fallback in the workflow, which equals this default: change both to move to `repos.yaml`. |
+| `manifest` | `repos.yaml` | The repos to read. Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the mocks. |
 | `dry_run` | `true` | Print the digest instead of posting it. Scheduled runs are dry runs until the repo variable `ATTENTION_DIGEST_LIVE` is `true` (the `RENOVATE_LIVE` pattern). |
 
 The job lists the manifest's repos, then mints a `ccf-release-bot` token scoped to exactly those

@@ -695,7 +695,8 @@ This repo releases itself with release-please (`simple`; `release-please-config.
 `release-please.yml` on every push to `main`, as ccf-release-bot with a token scoped to this
 repo. Merging the release PR tags `vX.Y.Z` on the merge commit and publishes the GitHub
 release. It is in both manifests as `kind: workflows` with `release: false`: the train doesn't
-release it, and Renovate and vuln-summary leave it out unless it is named.
+release it, and vuln-summary leaves it out unless it is named. Renovate covers it like every
+other manifest repo.
 
 - **Tags never move.** There is no floating `v1`: callers pin a release's commit SHA, and
   `ccf-bump sync` moves the pins to the latest final release (`@<sha> # vX.Y.Z`) within a
@@ -874,6 +875,9 @@ go run ./cmd/repo-settings sync --manifest repos.mock.yaml --repos mock-api --by
 non-majors grouped and merged by Renovate as `ccf-release-bot` once the required check passes).
 Scheduled runs are dry runs until the repo variable `RENOVATE_LIVE` is `true`. See
 [docs/renovate.md](docs/renovate.md).
+
+The scheduled tools (Renovate, ccf-bump, the train, the attention digest and the vulnerability
+summary) read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the mocks.
 
 ## Vulnerability summary
 

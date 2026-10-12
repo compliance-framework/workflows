@@ -1,8 +1,8 @@
 // Command attention-digest posts the open PRs of the manifest's repos that wait for a person to
 // Slack, once a week, for the attention-digest workflow:
 //
-//	attention-digest list [--manifest repos.mock.yaml] [--repos a,b]
-//	attention-digest post [--manifest repos.mock.yaml] [--repos a,b] [--owner org] [--dry-run] [flags]
+//	attention-digest list [--manifest repos.yaml] [--repos a,b]
+//	attention-digest post [--manifest repos.yaml] [--repos a,b] [--owner org] [--dry-run] [flags]
 //
 // list prints the selected repo names, comma-separated, to scope the token: every repo in the
 // manifest (the workflows repo included) unless --repos names a subset. post reads the open PRs
@@ -29,10 +29,6 @@ import (
 	"github.com/compliance-framework/workflows/internal/slackkit"
 )
 
-// defaultManifest is the mocks until the digest is proven on them; the workflow passes the
-// manifest explicitly.
-const defaultManifest = "repos.mock.yaml"
-
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Getenv, os.Stdout, time.Now); err != nil {
 		fmt.Fprintln(os.Stderr, "::error::attention-digest: "+err.Error())
@@ -47,7 +43,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return errors.New(usage)
 	}
 	fs := flag.NewFlagSet("attention-digest "+args[0], flag.ContinueOnError)
-	path := fs.String("manifest", defaultManifest, "path to the repo manifest")
+	path := fs.String("manifest", manifest.DefaultPath, "path to the repo manifest")
 	repos := fs.String("repos", "", "comma-separated repo names (default: every repo in the manifest)")
 	owner := fs.String("owner", "compliance-framework", "the repos' owner")
 	bot := fs.String("bot", notify.ReleaseBotLogin, "login of the release bot, which opens Renovate, ccf-bump and release PRs")

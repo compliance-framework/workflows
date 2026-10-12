@@ -1,8 +1,8 @@
 // Command vuln-summary posts a summary of the open Dependabot alerts, per repo and severity, to
 // Slack, for the vuln-summary workflow:
 //
-//	vuln-summary list [--manifest repos.mock.yaml] [--repos a,b]
-//	vuln-summary post [--manifest repos.mock.yaml] [--repos a,b] [--owner org]
+//	vuln-summary list [--manifest repos.yaml] [--repos a,b]
+//	vuln-summary post [--manifest repos.yaml] [--repos a,b] [--owner org]
 //
 // list prints the selected repo names, comma-separated, to scope the token. post reads the open
 // alerts with the token in GH_TOKEN, prints the summary, and posts it to SLACK_CHANNEL with
@@ -27,10 +27,6 @@ import (
 	"github.com/compliance-framework/workflows/internal/vulnsummary"
 )
 
-// defaultManifest is the mocks until the summary is proven on them; the workflow passes the
-// manifest explicitly.
-const defaultManifest = "repos.mock.yaml"
-
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Getenv, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "::error::vuln-summary: "+err.Error())
@@ -45,7 +41,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return errors.New(usage)
 	}
 	fs := flag.NewFlagSet("vuln-summary "+args[0], flag.ContinueOnError)
-	path := fs.String("manifest", defaultManifest, "path to the repo manifest")
+	path := fs.String("manifest", manifest.DefaultPath, "path to the repo manifest")
 	repos := fs.String("repos", "", "comma- or space-separated repo names (default: every repo in the manifest)")
 	owner := fs.String("owner", "compliance-framework", "the repos' owner")
 	if err := fs.Parse(args[1:]); err != nil {

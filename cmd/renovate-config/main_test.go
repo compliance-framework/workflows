@@ -13,7 +13,7 @@ func TestRunList(t *testing.T) {
 	if err := run([]string{"list", "--manifest", "../../repos.mock.yaml"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	want := "mock-api,mock-gooci,mock-agent,mock-ui,mock-agent-action,mock-plugin-1,mock-plugin-2,mock-plugin-policies-1,mock-plugin-policies-2,mock-helm-charts\n"
+	want := "mock-api,mock-gooci,mock-agent,mock-ui,mock-agent-action,mock-plugin-1,mock-plugin-2,mock-plugin-policies-1,mock-plugin-policies-2,mock-helm-charts,workflows\n"
 	if got := out.String(); got != want {
 		t.Errorf("list = %q, want %q", got, want)
 	}
@@ -22,7 +22,7 @@ func TestRunList(t *testing.T) {
 	if err := run([]string{"list", "--manifest", "../../repos.yaml"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "api,gooci,agent,ui,agent-action,helm-charts\n" {
+	if got := out.String(); got != "api,gooci,agent,ui,agent-action,helm-charts,workflows\n" {
 		t.Errorf("list repos.yaml = %q", got)
 	}
 }

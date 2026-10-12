@@ -14,7 +14,7 @@ on:
         description: Manifest to read the repos from
         type: choice
         options: [repos.mock.yaml, repos.yaml]
-        default: repos.mock.yaml
+        default: repos.yaml
       dry_run:
         description: Print what it would merge instead of merging
         type: boolean
@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 15
     env:
       # A scheduled run has no inputs: keep this fallback equal to the input's default.
-      MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+      MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
       DRY_RUN: ${{ github.event_name == 'schedule' && vars.CCF_BUMP_SYNC_LIVE != 'true' || github.event_name != 'schedule' && inputs.dry_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

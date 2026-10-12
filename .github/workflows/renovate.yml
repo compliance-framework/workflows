@@ -14,9 +14,9 @@ on:
         description: Manifest to read the repos from
         type: choice
         options: [repos.mock.yaml, repos.yaml]
-        default: repos.mock.yaml
+        default: repos.yaml
       repos:
-        description: Comma-separated subset of repos (default every repo in the manifest but workflows)
+        description: Comma-separated subset of repos (default every repo in the manifest)
         type: string
         default: ""
       dry_run:
@@ -47,7 +47,7 @@ jobs:
     timeout-minutes: 60
     env:
       # A scheduled run has no inputs: keep these fallbacks equal to the dispatch defaults.
-      MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+      MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
       REPOS: ${{ inputs.repos }}
       # Scheduled runs are full dry runs until RENOVATE_LIVE is "true"; manual ones follow the input.
       DRY_RUN: ${{ github.event_name == 'schedule' && vars.RENOVATE_LIVE == 'true' && 'off' || inputs.dry_run || 'full' }}

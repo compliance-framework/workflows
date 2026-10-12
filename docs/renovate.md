@@ -76,8 +76,8 @@ npx --yes --package renovate -- renovate-config-validator --strict renovate/defa
 
 Runs daily at 06:17 UTC and on `workflow_dispatch`, as one job:
 
-1. `go run ./cmd/renovate-config list` selects the repos from the manifest (every repo in it, or the
-   `repos` subset) and fails on an empty selection.
+1. `go run ./cmd/renovate-config list` selects the repos from the manifest (every repo in it, this
+   `workflows` repo included, or the `repos` subset) and fails on an empty selection.
 2. `go run ./cmd/renovate-config config` writes the Renovate global config: the preset's settings
    plus `platform: github`, `autodiscover: false`, `repositories` (the selection, as
    `compliance-framework/<name>`), `onboarding: false`, `requireConfig: "optional"` and `dryRun`.
@@ -88,19 +88,20 @@ Runs daily at 06:17 UTC and on `workflow_dispatch`, as one job:
    and Issues write, Workflows write (to update actions in `.github/workflows`), and Checks and
    Dependabot alerts read.
 4. `renovatebot/github-action` runs Renovate, pinned with its `renovate-version` input, with that config and token.
-   This repo is not in Renovate's list, so bump `renovate-version` and the action by hand.
+   This repo is in Renovate's list, so Renovate updates the action's SHA pin like any third-party
+   action; check that `renovate-version` moves with it, and bump it by hand if it doesn't.
 
 | Input | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.mock.yaml` | The repos to run on. `repos.yaml` once Renovate goes live on the product repos (W1-S4-T03). |
+| `manifest` | `repos.yaml` | The repos to run on: the product repos and this one. `repos.mock.yaml` for the mocks. |
 | `repos` | every repo in the manifest | Comma-separated subset; each must be in the manifest. |
 | `dry_run` | `full` | Renovate's `dryRun`: `full` logs every branch and PR it would create, `lookup` stops after finding updates, `extract` after reading the package files. `off` runs live. |
 | `log_level` | `info` | `debug` for a full trace. |
 
 A scheduled run has no inputs and uses these defaults, except `dry_run`: it is `off` (live) when the
-repo variable `RENOVATE_LIVE` is `"true"`, and `full` otherwise. So by default a scheduled run is a
-daily `full` dry run on the mocks, and setting `RENOVATE_LIVE` makes it live on the mocks, the same
-switch as `CCF_BUMP_SYNC_LIVE` and `TRAIN_LIVE`. A dispatch always follows its `dry_run` input.
+repo variable `RENOVATE_LIVE` is `"true"`, and `full` otherwise. Scheduled runs read `repos.yaml`;
+dispatch with `manifest=repos.mock.yaml` for the mocks. With `RENOVATE_LIVE` set, a scheduled run is
+live on the product repos and this one, the same switch as `CCF_BUMP_SYNC_LIVE` and `TRAIN_LIVE`. A dispatch always follows its `dry_run` input.
 A live scheduled run is also what merges Renovate's green PRs (see above), so leave it on once
 Renovate is live. Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, from this repo's `release` environment (main only). Variable:
 `RENOVATE_LIVE`.
@@ -121,17 +122,18 @@ posts it to `#ccf-ci-failures` (rule (a)), and the failed check keeps Renovate f
 
 ## Running it
 
-- **Dry run**: Actions, `renovate`, Run workflow, or
+- **Dry run on the mocks**: Actions, `renovate`, Run workflow, or
   `gh workflow run renovate.yml -f manifest=repos.mock.yaml -f dry_run=full`. The log lists each
   `DRY-RUN: Would create PR` per repo; expect about one grouped PR per repo plus its majors.
 - **Live on the mocks**: the same with `-f dry_run=off`. Renovate opens the grouped PRs; a later
-  live run (another dispatch with `dry_run=off`, or a scheduled run with `RENOVATE_LIVE` set)
-  merges the ones whose checks have passed.
+  dispatch with `dry_run=off` merges the ones whose checks have passed. `repos.mock.yaml` lists this
+  `workflows` repo too, so name the mocks with `-f repos=...` to leave it out.
 - **Scheduled runs live**: set the repo variable `RENOVATE_LIVE` to `true`
   (`gh variable set RENOVATE_LIVE --body true --repo compliance-framework/workflows`); unset it to go
   back to dry runs.
-- **Live on the product repos** (W1-S4-T03, a human): change the `manifest` default and the
-  scheduled-run fallback in `renovate.yml` to `repos.yaml`, with `RENOVATE_LIVE` set.
+- **Live on the product repos**: done (W1-S4-T03). Scheduled runs read `repos.yaml`, the product
+  repos and this one, and run live while `RENOVATE_LIVE` is set. A Go-module update here is
+  `fix(deps)` and makes a workflows release; `ccf-bump` moves the callers' pins on its next sync.
 
 Locally, `go run ./cmd/renovate-config config --manifest repos.mock.yaml` prints the config the
 workflow would use (the preset path defaults to `renovate/default.json`, run from the repo root).
