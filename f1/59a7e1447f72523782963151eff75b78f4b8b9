@@ -4,3 +4,8 @@ lisa-design:
 - repos.mock.yaml also lists the workflows repo, so a default-repos mock dispatch of Renovate now reaches workflows too; docs/renovate.md says to pass -f repos=... to keep a mock run on the mocks only. Chosen over special-casing the mock manifest, which the spec did not ask for.
 - vuln-summary and attention-digest CLIs now default --manifest to manifest.DefaultPath (repos.yaml), matching every other tool and the DefaultPath doc comment; the workflows always pass --manifest, so this changes no scheduled behaviour. vuln-summary's own SelectRepos still leaves workflows out by default (out of scope).
 - No workflow is dispatched by this PR; it's a ci: change, so no workflows release.
+
+lisa-selfreview:
+pass 1 (strict): 1 finding
+- [nit] CORE-STYLE-001 README.md (Renovate section): go-live sentence naming all scheduled tools sits under ## Renovate; move it to the manifest paragraph near the top. -> fix
+- correction to design note: OPA in the workflows repo is disabled for Renovate by the preset's non-api rule; it follows the agent module (bumped by ccf-bump) through Go's minimum version selection, not a ccf-bump opa pin (those exist only in policies repos).
