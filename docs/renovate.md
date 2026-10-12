@@ -101,8 +101,8 @@ Runs daily at 06:17 UTC and on `workflow_dispatch`, as one job:
 A scheduled run has no inputs and uses these defaults, except `dry_run`: it is `off` (live) when the
 repo variable `RENOVATE_LIVE` is `"true"`, and `full` otherwise. Scheduled runs read `repos.yaml`;
 dispatch with `manifest=repos.mock.yaml` for the mocks. With `RENOVATE_LIVE` set, a scheduled run is
-live on the product repos and this one, the same switch as `CCF_BUMP_SYNC_LIVE` and `TRAIN_LIVE`. A dispatch always follows its `dry_run` input.
-A live scheduled run is also what merges Renovate's green PRs (see above), so leave it on once
+live on the product repos and this one, the same switch as `CCF_BUMP_SYNC_LIVE` and `TRAIN_LIVE`.
+A dispatch always follows its `dry_run` input. A live scheduled run is also what merges Renovate's green PRs (see above), so leave it on once
 Renovate is live. Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, from this repo's `release` environment (main only). Variable:
 `RENOVATE_LIVE`.
 
