@@ -1,2 +1,5 @@
 lisa-addressed:
 - pass 2 CORE-STYLE-001 (long lines): reflowed the edited paragraphs in docs/ccf-bump.md and docs/renovate.md.
+
+lisa-selfreview:
+pass 3 (strict): no findings; approve.
