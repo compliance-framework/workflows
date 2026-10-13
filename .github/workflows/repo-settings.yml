@@ -16,7 +16,7 @@ on:
         options: [repos.yaml, repos.mock.yaml]
         default: repos.yaml
       repos:
-        description: Comma-separated subset of repos (default every repo in the manifest)
+        description: Comma-separated subset of repos (default every active repo in the manifest; may name inactive batches)
         type: string
         default: ""
       apply:

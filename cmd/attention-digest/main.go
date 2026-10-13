@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -125,24 +124,17 @@ func post(ctx context.Context, getenv func(string) string, stdout io.Writer, car
 	return nil
 }
 
-// selectRepos returns the repos named in list, or every repo in the manifest if list is empty,
-// in manifest order. Named repos must be in the manifest.
+// selectRepos returns the repos named in list, or every active repo in the manifest
+// (manifest.ActiveRepos) if list is empty, in manifest order. Named repos must be in the manifest
+// and active.
 func selectRepos(m *manifest.Manifest, list string) ([]string, error) {
-	names := splitList(list)
-	var unknown []string
-	for _, n := range names {
-		if !slices.ContainsFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n }) {
-			unknown = append(unknown, n)
-		}
-	}
-	if len(unknown) > 0 {
-		return nil, fmt.Errorf("not in the manifest: %s", strings.Join(unknown, ", "))
+	repos, err := m.Select(splitList(list), false)
+	if err != nil {
+		return nil, err
 	}
 	var out []string
-	for _, r := range m.Repos {
-		if len(names) == 0 || slices.Contains(names, r.Name) {
-			out = append(out, r.Name)
-		}
+	for _, r := range repos {
+		out = append(out, r.Name)
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no repos selected")

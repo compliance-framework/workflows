@@ -52,7 +52,7 @@ func (e *Engine) logf(format string, args ...any) {
 // StartOptions selects the repos of a new train.
 type StartOptions struct {
 	Manifest  string
-	Repos     []string // default: every repo with release: true
+	Repos     []string // default: every active repo with release: true (manifest.Stages)
 	DryRun    bool
 	Scheduled bool // only start on the month's first working weekday, once
 }
@@ -64,8 +64,12 @@ func (e *Engine) newState(ctx context.Context, m *manifest.Manifest, month strin
 		return nil, err
 	}
 	for _, name := range o.Repos {
-		if i := slices.IndexFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == name }); i < 0 || !m.Repos[i].Release {
+		r := m.Repo(name)
+		if r == nil || !r.Release {
 			return nil, fmt.Errorf("repo %q is not in %s with release: true", name, o.Manifest)
+		}
+		if !m.Active(*r) {
+			return nil, fmt.Errorf("repo %q is in batch %d, which is not active in %s", name, r.Batch, o.Manifest)
 		}
 	}
 	st := &State{Month: month, Manifest: o.Manifest, DryRun: o.DryRun, Status: StatusOpen, Channel: e.Channel}

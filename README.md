@@ -37,13 +37,14 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 
 ```yaml
 holidays: ["2026-12-25", "2027-01-01"]   # ISO dates that are not working days
+active_batches: []                       # plugin/policy batches the tools act on (docs/manifest.md)
 include_patterns: []                     # repo name globs, used from workstream 3
 exclude: []                              # repo names the globs must not pick up
 repos:
   - name: agent
     kind: go-service          # go-service | go-plugin | go-lib | policies | ui | helm | action | workflows
     depends_on: [api, gooci]  # repos that release before this one
-    release: true             # required; whether the release tooling acts on it (repo-settings manages every repo)
+    release: true             # required; whether the release tooling acts on it (repo-settings manages every active repo)
   - name: helm-charts
     kind: helm
     depends_on: [api, ui, agent]
@@ -56,7 +57,10 @@ dependencies on unknown repos, cycles, and a non-helm repo depending on a helm r
 repo is of kind `workflows` (this repo, the source of the shared-workflow pins ccf-bump moves); it
 needs `release: false`, has no `depends_on`, and no repo depends on it.
 
-`Stages()` groups the repos with `release: true` into release stages. Every repo's dependencies are in earlier stages,
+Plugin and policy repos carry a `batch` (1 or more); the tools act on them only once their batch
+is in `active_batches`. Batches and how to switch one on: [docs/manifest.md](docs/manifest.md).
+
+`Stages()` groups the active repos with `release: true` into release stages. Every repo's dependencies are in earlier stages,
 and each stage is sorted by name. Repos of kind `helm` always release last, after every
 non-helm repo, because the charts pin the versions of everything else. For `repos.yaml`:
 
@@ -750,7 +754,7 @@ desired state, defined in `internal/reposettings`:
   secrets are written (encrypted with the environment's public key); present ones are left alone
   unless `rotate-secrets` is on. Its other protection rules (reviewers, wait timer) aren't managed.
 
-Every repo in the manifest gets these settings, the `workflows` repo (`release: false`) too: every
+Every active repo in the manifest (and every repo named in `repos`) gets these settings, the `workflows` repo (`release: false`) too: every
 caller's CI and releases run its code. Rulesets are matched by name; other rulesets are left alone.
 Settings outside this list are not read or changed. A repo's required check exists once it calls
 the shared CI with a `required` job (the caller job is named `ci`, so the check is `ci / required`,
@@ -762,7 +766,7 @@ Inputs:
 | Input | Default | What |
 | --- | --- | --- |
 | `manifest` | `repos.yaml` | `repos.mock.yaml` for the mocks. |
-| `repos` | every repo in the manifest | Comma-separated subset; each must be in the manifest. |
+| `repos` | every active repo in the manifest | Comma-separated subset; each must be in the manifest, and may be in a batch that is not active yet ([docs/manifest.md](docs/manifest.md)). |
 | `apply` | `false` | `false` prints the diff and writes nothing; `true` writes it (from `main` only). |
 | `release-bot-app-id` | org variable `RELEASE_BOT_APP_ID` | `ccf-release-bot`'s app ID, the `ccf-review` bypass actor. Set the org variable (Settings, Secrets and variables, Actions, Variables) to the app's ID from its settings page, or pass the input; the run fails if both are empty. |
 | `required-check` | `ci / required` | The status check context `ccf-required` requires. |

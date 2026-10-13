@@ -1,0 +1,42 @@
+package main
+
+import (
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/compliance-framework/workflows/internal/manifest"
+)
+
+// TestSelectReposByBatch: ccf-bump (list, sync, merge) acts on today's repos (the core repos with release:
+// true) until a batch is active; then that batch's released repos join in stage 3, before helm-charts.
+func TestSelectReposByBatch(t *testing.T) {
+	for _, tc := range []struct {
+		active []int
+		list   string
+		want   []string
+		err    string
+	}{
+		{nil, "", []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts"}, ""},
+		{[]int{1}, "", []string{"api", "gooci", "agent", "ui", "agent-action", "plugin-one", "plugin-one-policies", "helm-charts"}, ""},
+		{nil, "plugin-one", nil, "not active"},
+		{[]int{1}, "plugin-two", nil, "not active"},
+		{[]int{1}, "plugin-template", nil, "with release: true"},
+	} {
+		m, err := manifest.Load("../../internal/manifest/testdata/batches.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.ActiveBatches = tc.active
+		got, err := selectRepos(m, tc.list)
+		if tc.err != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.err) {
+				t.Errorf("active_batches %v, %q: err = %v, want one containing %q", tc.active, tc.list, err, tc.err)
+			}
+			continue
+		}
+		if err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("active_batches %v, %q: got %v, %v; want %v", tc.active, tc.list, got, err, tc.want)
+		}
+	}
+}

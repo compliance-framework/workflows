@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/compliance-framework/workflows/internal/manifest"
@@ -109,23 +108,18 @@ func post(ctx context.Context, getenv func(string) string, stdout io.Writer, msg
 	return nil
 }
 
-// selectRepos returns the repos named in list (comma- or space-separated), or every repo in the
-// manifest but the workflows repo (kind workflows) if list is empty, in manifest order. Named
-// repos must be in the manifest.
+// selectRepos returns the repos named in list (comma- or space-separated), or every active repo in
+// the manifest (manifest.ActiveRepos) but the workflows repo (kind workflows) if list is empty, in
+// manifest order. Named repos must be in the manifest and active.
 func selectRepos(m *manifest.Manifest, list string) ([]string, error) {
 	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
-	var unknown []string
-	for _, n := range names {
-		if !slices.ContainsFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n }) {
-			unknown = append(unknown, n)
-		}
-	}
-	if len(unknown) > 0 {
-		return nil, fmt.Errorf("not in the manifest: %s", strings.Join(unknown, ", "))
+	repos, err := m.Select(names, false)
+	if err != nil {
+		return nil, err
 	}
 	var out []string
-	for _, r := range m.Repos {
-		if len(names) == 0 && r.Kind != manifest.KindWorkflows || slices.Contains(names, r.Name) {
+	for _, r := range repos {
+		if len(names) > 0 || r.Kind != manifest.KindWorkflows {
 			out = append(out, r.Name)
 		}
 	}

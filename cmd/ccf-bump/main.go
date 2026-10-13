@@ -197,24 +197,23 @@ func run(ctx context.Context, args []string, e env) error {
 	return errors.Join(failed...)
 }
 
-// selectRepos returns the named repos (default every repo with release: true) in stage order.
+// selectRepos returns the named repos (default every active repo with release: true;
+// manifest.ActiveRepos) in stage order. Named repos must have release: true and be active.
 func selectRepos(m *manifest.Manifest, list string) ([]string, error) {
-	var out []string
-	if strings.TrimSpace(list) == "" {
-		for _, r := range m.Repos {
-			if r.Release {
-				out = append(out, r.Name)
-			}
-		}
-		return stageOrder(m, out)
-	}
-	for _, n := range strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' }) {
-		i := slices.IndexFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n })
-		if i < 0 || !m.Repos[i].Release {
+	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' })
+	for _, n := range names {
+		if r := m.Repo(n); r == nil || !r.Release {
 			return nil, fmt.Errorf("repo %q is not in the manifest with release: true", n)
 		}
-		if !slices.Contains(out, n) {
-			out = append(out, n)
+	}
+	repos, err := m.Select(names, false)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, r := range repos {
+		if r.Release {
+			out = append(out, r.Name)
 		}
 	}
 	return stageOrder(m, out)

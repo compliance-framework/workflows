@@ -1,0 +1,19 @@
+# repos.yaml's core repos plus plugin and policy repos in three batches, none active: the tools'
+# tests check that their selection is the core repos' (today's) until a batch is switched on.
+active_batches: []
+include_patterns: ["plugin-*"]
+exclude: [plugin-old]
+
+repos:
+  - {name: api, kind: go-service, release: true}
+  - {name: gooci, kind: go-lib, release: true}
+  - {name: agent, kind: go-service, depends_on: [api, gooci], release: true}
+  - {name: ui, kind: ui, depends_on: [api], release: true}
+  - {name: agent-action, kind: action, depends_on: [agent], release: true}
+  - {name: helm-charts, kind: helm, depends_on: [api, ui, agent], release: true, charts: [ccf-agent, ccf-app]}
+  - {name: workflows, kind: workflows, release: false}
+  - {name: plugin-one, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-one-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-template, kind: go-plugin, depends_on: [agent], release: false, batch: 1}
+  - {name: plugin-two, kind: go-plugin, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-three-policies, kind: policies, depends_on: [agent], release: true, batch: 3}

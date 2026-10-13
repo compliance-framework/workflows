@@ -38,7 +38,7 @@ ccf-bump list [--repos a,b]
   run, are never touched. A failure to close one is a warning. `--dry-run` only lists the PRs it
   would close; with nothing opened to tell who it runs as, it lists any bot's.
 - `--manifest` (default `repos.yaml`; `repos.mock.yaml` for the mocks) gives the repos, their kinds
-  and the dependency edges. `sync --all` takes every repo with `release: true`, in stage order.
+  and the dependency edges. `sync --all` takes every active repo with `release: true` ([manifest.md](manifest.md)), in stage order.
 - `--clones DIR` reads `DIR/<repo>` (its committed `HEAD`) instead of cloning from GitHub, for dry
   runs against local clones.
 - `list` prints the selected repos comma-separated, to scope the token.
