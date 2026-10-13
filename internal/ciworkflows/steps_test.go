@@ -462,8 +462,8 @@ func TestLintArgs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := run(t, dir, src, append(tc.env, "SHARED=false")...)
-			if got := strings.Join(strings.Fields(r.outputs["args"]), " "); r.failed || got != tc.want {
-				t.Fatalf("args %q, want %q (failed=%v):\n%s", got, tc.want, r.failed, r.out)
+			if got := strings.Join(strings.Fields(r.outputs["args"]), " "); r.failed || got != tc.want || r.outputs["config"] != "" {
+				t.Fatalf("args %q config %q, want %q and no config (failed=%v):\n%s", got, r.outputs["config"], tc.want, r.failed, r.out)
 			}
 		})
 	}
@@ -479,8 +479,8 @@ func TestLintArgs(t *testing.T) {
 		r := run(t, dir, src, "SHARED=true", "NEW_ONLY=true", "BASE_REF=main", "BEFORE=")
 		cfg := filepath.Join(r.temp, "ccf-golangci.yml")
 		want := "--config=" + cfg + " --new-from-merge-base=origin/main"
-		if got := strings.Join(strings.Fields(r.outputs["args"]), " "); r.failed || got != want {
-			t.Fatalf("args %q, want %q (failed=%v):\n%s", got, want, r.failed, r.out)
+		if got := strings.Join(strings.Fields(r.outputs["args"]), " "); r.failed || got != want || r.outputs["config"] != cfg {
+			t.Fatalf("args %q config %q, want %q and config %q (failed=%v):\n%s", got, r.outputs["config"], want, cfg, r.failed, r.out)
 		}
 		if _, err := os.Stat(cfg); err != nil {
 			t.Fatalf("shared config not moved: %v", err)
