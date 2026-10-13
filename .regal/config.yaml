@@ -1,6 +1,8 @@
 # Shared Regal base config for CCF policy repos. ci-policies.yml uses it when the calling repo
 # has no Regal config of its own. Bugs, imports and testing findings fail CI; idiomatic,
 # performance and style findings are warnings, so existing policies don't block.
+# Regal reads no data files, so ci-policies.yml adds the top-level keys of the bundle's data
+# files (data.json, data.yaml) to imports/unresolved-reference's except-paths at run time.
 rules:
   idiomatic:
     default:
@@ -10,6 +12,12 @@ rules:
       level: ignore
     # The agent evaluates every package it finds; policies have no entrypoint.
     no-defined-entrypoint:
+      level: ignore
+    # Its fix, a $"..." template string, isn't equivalent to sprintf: an undefined argument makes
+    # sprintf undefined (so no violation) but renders as <undefined> in a template string, and
+    # %q/%v format differently. Agents in the field may also embed an OPA that can't parse
+    # template strings. Policy behaviour must not change, so the warning is only noise.
+    prefer-string-interpolation:
       level: ignore
   performance:
     default:
