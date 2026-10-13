@@ -66,8 +66,15 @@ compose() {
     docker compose -p "$PROJECT" -f "$SMOKE_DIR/compose.yaml" "$@"
 }
 
+# down_command: the command that tears a stack left up down later. Compose needs every
+# variable smoke/compose.yaml requires, including the rendered agent config.
+down_command() {
+    printf 'SMOKE_API_TAG=%s SMOKE_UI_TAG=%s SMOKE_AGENT_TAG=%s SMOKE_AGENT_CONFIG=%q docker compose -p %s -f %q down -v' \
+        "$SMOKE_API_TAG" "$SMOKE_UI_TAG" "$SMOKE_AGENT_TAG" "$SMOKE_AGENT_CONFIG" "$PROJECT" "$SMOKE_DIR/compose.yaml"
+}
+
 cleanup() {
-    local status=$?
+    local status=$? left_up=""
     trap - EXIT
     if [ -n "$started" ]; then
         if [ "$status" -ne 0 ]; then
@@ -78,15 +85,19 @@ cleanup() {
             echo "---- end of container logs ----" >&2
         fi
         if [ "${SMOKE_KEEP:-}" = "1" ]; then
-            log "SMOKE_KEEP=1: leaving the stack up (docker compose -p $PROJECT -f $SMOKE_DIR/compose.yaml down -v)"
+            left_up=1
+            log "SMOKE_KEEP=1: leaving the stack up ($(down_command))"
         else
             log "Tearing the stack down"
             # A failed teardown does not change the result, but say what is left behind.
-            compose down -v --remove-orphans >/dev/null 2>&1 ||
-                echo "WARNING: could not tear the stack down; run: docker compose -p $PROJECT -f $SMOKE_DIR/compose.yaml down -v" >&2
+            if ! compose down -v --remove-orphans >/dev/null 2>&1; then
+                left_up=1
+                echo "WARNING: could not tear the stack down; run: $(down_command)" >&2
+            fi
         fi
     fi
-    if [ -n "$rendered" ]; then
+    # A stack left up still mounts the rendered agent config; the down command above needs it.
+    if [ -n "$rendered" ] && [ -z "$left_up" ]; then
         rm -rf "$rendered"
     fi
     if [ "$status" -eq 0 ]; then

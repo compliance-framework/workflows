@@ -350,10 +350,21 @@ func TestSmokeRunFailure(t *testing.T) {
 		t.Errorf("compose calls %q, want %q", got, want)
 	}
 
-	// SMOKE_KEEP=1 still dumps the logs but leaves the stack up.
-	_, calls, _ = runSmoke(t, false, "SMOKE_KEEP=1")
+	// SMOKE_KEEP=1 still dumps the logs but leaves the stack up, keeps the agent config it
+	// mounts, and prints a down command with every variable smoke/compose.yaml requires.
+	out, calls, _ = runSmoke(t, false, "SMOKE_KEEP=1")
 	if got := composeCalls(calls); !slices.Contains(got, "logs --no-color --timestamps") || slices.Contains(got, "down -v --remove-orphans") {
 		t.Errorf("SMOKE_KEEP=1: compose calls %q", got)
+	}
+	_, hint, _ := strings.Cut(out, "SMOKE_KEEP=1: leaving the stack up (")
+	hint, _, _ = strings.Cut(hint, "\n")
+	_, cfg, _ := strings.Cut(hint, "SMOKE_AGENT_CONFIG=")
+	cfg, _, _ = strings.Cut(cfg, " ")
+	if !strings.HasPrefix(hint, "SMOKE_API_TAG=0.21.0 SMOKE_UI_TAG=2.12.1 SMOKE_AGENT_TAG=0.9.0 SMOKE_AGENT_CONFIG=") ||
+		!strings.Contains(hint, " docker compose -p ccf-smoke -f ") || !strings.HasSuffix(hint, " down -v)") {
+		t.Errorf("SMOKE_KEEP=1: down command %q; output:\n%s", hint, out)
+	} else if _, err := os.Stat(cfg); err != nil {
+		t.Errorf("SMOKE_KEEP=1: the rendered config %q is gone: %v", cfg, err)
 	}
 }
 

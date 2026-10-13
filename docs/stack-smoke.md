@@ -103,8 +103,9 @@ SMOKE_API_TAG=0.21.0 SMOKE_UI_TAG=2.12.1 SMOKE_AGENT_TAG=0.9.0 \
 | `SMOKE_API_PORT`, `SMOKE_UI_PORT` | `18080`, `18000` | Host ports, on `127.0.0.1`. |
 | `SMOKE_PROJECT` | `ccf-smoke` | Compose project name. |
 | `SMOKE_TIMEOUT` | `180` | Seconds each check waits. The plugin runs at the start of each minute, so keep it above 60. |
-| `SMOKE_KEEP` | (unset) | `1` leaves the stack up after the run, to debug. |
+| `SMOKE_KEEP` | (unset) | `1` leaves the stack up after the run, to debug, and prints the command that tears it down. |
 
 `docker compose up` on `smoke/compose.yaml` alone needs the three tags and
 `SMOKE_AGENT_CONFIG` (the rendered agent config, which `smoke/run.sh` writes to a temporary
-directory and removes afterwards), and its agent runs without a key. Use `smoke/run.sh`.
+directory and removes afterwards unless the stack is left up), and its agent runs without a
+key. Use `smoke/run.sh`.
