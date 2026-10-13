@@ -104,6 +104,12 @@ Archived repos are never required, so archiving a repo only needs its entry remo
 be both listed and excluded (loading the manifest fails). Unit tests run the check against a
 fixture (`internal/manifest/testdata/batches.yaml` and fake API pages).
 
-CI (`ci.yml`, "Validate manifests") runs it on `repos.yaml` with the workflow's own token, which
-sees the organisation's public repos: a private repo matching a pattern isn't required until it is
-made public, and a listed repo must be public.
+CI runs it in its own job, `manifest-coverage` in `ci.yml`, on `repos.yaml` with the workflow's
+own token, which sees the organisation's public repos: a private repo matching a pattern isn't
+required until it is made public, and a listed repo must be public.
+
+The coverage job is advisory: it isn't in the `ci / required` job's `needs`, so it doesn't gate
+merges. A new, renamed or archived `plugin-*` repo (or a GitHub API error) turns it red on every PR
+and on `main` without blocking unrelated changes; fix it by editing `repos.yaml`. The `go` job
+still validates both manifests offline (`go run ./cmd/manifest --manifest repos.yaml` and
+`--manifest repos.mock.yaml`), and that part is required.

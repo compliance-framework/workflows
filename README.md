@@ -59,8 +59,8 @@ needs `release: false`, has no `depends_on`, and no repo depends on it.
 
 Plugin and policy repos carry a `batch` (1 or more); the tools act on them only once their batch
 is in `active_batches`, and `go run ./cmd/manifest --org compliance-framework` checks the manifest
-against the organisation's repos (in CI). Batches, activation and the coverage check:
-[docs/manifest.md](docs/manifest.md).
+against the organisation's repos (in an advisory CI job that doesn't gate merges). Batches,
+activation and the coverage check: [docs/manifest.md](docs/manifest.md).
 
 `Stages()` groups the active repos with `release: true` into release stages. Every repo's dependencies are in earlier stages,
 and each stage is sorted by name. Repos of kind `helm` always release last, after every

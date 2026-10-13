@@ -13,10 +13,10 @@ holidays:
 active_batches: []
 
 # Repo name globs and explicit exclusions. They select nothing for the tools: they feed the
-# coverage check (`go run ./cmd/manifest --org compliance-framework`, in CI), which fails when an
+# coverage check (`go run ./cmd/manifest --org compliance-framework`), which fails when an
 # unarchived org repo matching a pattern is neither listed below nor excluded here, or a listed
 # repo is missing or archived. Archived repos are skipped, so archiving one needs only its entry
-# removed. See docs/manifest.md.
+# removed. CI runs it as an advisory job that doesn't gate merges. See docs/manifest.md.
 include_patterns: ["plugin-*"]
 exclude:
   # Archived in workstream 2 (W2-S0-T03).

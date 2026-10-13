@@ -519,8 +519,8 @@ func TestGoreleaserCheck(t *testing.T) {
 }
 
 // TestSelfRequired: this repo's own ci.yml reports `ci / required` (what ccf-required requires)
-// after every other job: anything but success fails, except release-checks skipped (every PR but
-// a release-please one, and every push).
+// after every other job but the advisory ones: anything but success fails, except release-checks
+// skipped (every PR but a release-please one, and every push).
 func TestSelfRequired(t *testing.T) {
 	var wf struct {
 		Jobs map[string]struct {
@@ -531,10 +531,18 @@ func TestSelfRequired(t *testing.T) {
 	}
 	read(t, "ci.yml", &wf)
 	req := wf.Jobs["required"]
+	// manifest-coverage lists the organisation's repos: an org change or an API error must not
+	// block merges (docs/manifest.md).
+	advisory := []string{"manifest-coverage"}
 	var others []string
 	for name := range wf.Jobs {
-		if name != "required" {
+		if name != "required" && !slices.Contains(advisory, name) {
 			others = append(others, name)
+		}
+	}
+	for _, name := range advisory {
+		if _, ok := wf.Jobs[name]; !ok {
+			t.Errorf("ci.yml has no advisory job %s", name)
 		}
 	}
 	slices.Sort(others)

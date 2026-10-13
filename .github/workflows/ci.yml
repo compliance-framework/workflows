@@ -41,12 +41,31 @@ jobs:
       - name: go test
         run: go test -race ./...
       - name: Validate manifests
-        env:
-          # Read-only: lists the organisation's repos for the coverage check (docs/manifest.md).
-          GH_TOKEN: ${{ github.token }}
         run: |
-          go run ./cmd/manifest --manifest repos.yaml --org compliance-framework
+          go run ./cmd/manifest --manifest repos.yaml
           go run ./cmd/manifest --manifest repos.mock.yaml
+
+  # Advisory: checks repos.yaml against the organisation's repos (docs/manifest.md). Not in
+  # `required`'s needs, so a new or archived plugin-* repo, or a GitHub API error, doesn't block
+  # merges here; fix repos.yaml when it fails.
+  manifest-coverage:
+    name: manifest-coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check org coverage
+        env:
+          # Read-only: lists the organisation's repos for the coverage check.
+          GH_TOKEN: ${{ github.token }}
+        run: go run ./cmd/manifest --manifest repos.yaml --org compliance-framework
 
   actionlint:
     name: actionlint
@@ -74,8 +93,9 @@ jobs:
 
   # The ccf-required ruleset (repo-settings) requires the check `ci / required`, which a caller's
   # `ci` job gets from the kind workflows' `required` job. This repo calls no kind workflow, so the
-  # job carries that name itself. Anything but success fails, except release-checks being skipped:
-  # it only runs on release-please PRs, and a called workflow whose jobs all skip reports skipped.
+  # job carries that name itself. It needs every job but manifest-coverage (advisory). Anything but
+  # success fails, except release-checks being skipped: it only runs on release-please PRs, and a
+  # called workflow whose jobs all skip reports skipped.
   required:
     name: ci / required
     needs: [go, actionlint, release-checks]
