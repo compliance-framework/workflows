@@ -1,0 +1,4 @@
+lisa-design:
+- With batch 3 active no batch of repos.yaml is inactive, so every inactive-batch test case runs on the fixture internal/manifest/testdata/batches.yaml (no batch active) instead of a real repos.yaml repo; renovate-config TestRunErrors/TestRunDryRunInactive now use plugin-two / plugin-three-policies there.
+- The repos.yaml state tests derive their expected repo lists from the manifest (r.Batch != 0, r.Release) and guard "every batch active" with len(ActiveRepos()) == len(Repos), keeping the counts (74/73/70/65) as sanity pins; only internal/manifest TestReposYAMLBatches pins active_batches [1 2 3] literally, as the manifest's own test.
+- No docs change: docs/renovate.md already lists the 1,2,3 shard sizes (15,15,15,15,14), which match the local list output.
