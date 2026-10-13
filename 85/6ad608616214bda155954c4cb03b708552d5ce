@@ -4,3 +4,7 @@ lisa-design:
 - The app token is read-only (contents, pull-requests, checks) and scoped to the agent + plugins plan lists; GHCR is read anonymously; the issue is written with GITHUB_TOKEN (issues: write).
 - repos.mock.yaml dispatches write a separate "Plugin health (repos.mock.yaml)" issue so mock runs never overwrite the real one.
 - report fails after publishing when any read failed (like vuln-summary).
+
+lisa-selfreview:
+Self-review (2 passes, whole stack). Pass 1 fixed: cancelled/stale CI counted as "failed" (now pending, like train/ccf-bump merge); pluginprobe import pulled OPA/go-plugin into plan's build (constant duplicated + equality test); misleading RequiredCheck const name (now CICheck); unused BumpPR fields; Plugins() untested.
+Deferred (nit): Registry.Annotations' non-404 error path has no unit test (covered by Collect's fake imageErrs path); LatestBumpPR looks only at the 100 newest PRs (documented).
