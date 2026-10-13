@@ -1,0 +1,6 @@
+lisa-design:
+- The issue is written with the workflow's GITHUB_TOKEN; only open issues opened by github-actions[bot] with the exact title are trusted (a same-titled issue or state line from anyone else is ignored).
+- State (candidates + last closed train number) lives in a hidden first line of the issue body; no other storage.
+- Pinning happens once, on create, via GraphQL pinIssue; a failure is only a warning (GITHUB_TOKEN may lack the right; a maintainer pins by hand).
+- A previous candidate whose reads failed this run stays a candidate in the state, so a flaky read doesn't post a change to Slack.
+- Due(): every run except a train workflow_run is due; a train run is due only when the newest closed train issue differs from the one recorded in the state (the train runs hourly).
