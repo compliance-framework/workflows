@@ -1,2 +1,5 @@
 lisa-addressed:
 Pass 1 fixes: renovate-config rejects --max-repos < 0 (test added); ccf-bump-sync pauses unless the Bump step was skipped or reported prs=0; docs/ccf-bump.md says the chunks (not the jobs) are in stage order.
+
+lisa-selfreview:
+Pass 2 (strict): nit CORE-STYLE-001 Shard's parameter max shadows the builtin; nit CORE-DOC-001 renovate-config --repos help still said "every repo in the manifest". Both fixed.
