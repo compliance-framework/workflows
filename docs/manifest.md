@@ -33,8 +33,8 @@ from it:
 
 | Tool | Default selection | Named repos (`repos` input) |
 | --- | --- | --- |
-| Renovate (`renovate.yml`) | active repos | must be active |
-| `ccf-bump` (sync, merge, list) | active repos with `release: true`, in stage order | must be active, `release: true` |
+| Renovate (`renovate.yml`) | active repos | must be active; a dry run may name inactive ones |
+| `ccf-bump` (sync, merge, list) | active repos with `release: true`, in stage order | must be active, `release: true`; a dry run may name inactive ones |
 | Train (`train.yml`) | active repos with `release: true` (`Stages()`) | must be active, `release: true` |
 | Attention digest | active repos | must be active |
 | Vulnerability summary | active repos but `workflows` | must be active |
@@ -43,6 +43,10 @@ from it:
 `repo-settings` is the one exception because a batch's settings (rulesets, the `release`
 environment and its secrets) are applied before the batch is switched on: dispatch it with the
 batch's repos in one `repos=` list. A name that isn't in the manifest is still an error.
+
+Renovate and `ccf-bump` take a named repo of an inactive batch in a **dry run** only (Renovate
+`dry_run` other than `off`; `ccf-bump` `dry_run: true`), so a batch can be checked before it is
+switched on. Their live runs still reject it, and their default selection is always the active repos.
 
 ### Stages
 
@@ -65,7 +69,13 @@ Order for each batch (workstream 3, "Rules for every batch"):
 2. Legacy rulesets or classic branch protection are removed.
 3. `repo-settings` dry run (`apply: false`) with the batch's repos in `repos=`, then the apply.
 4. The release workflow PRs are merged.
-5. One PR to this repo adds the batch number to `active_batches`. From the next scheduled run,
+5. Dry runs with the batch's repos named, and read their plans:
+   - `gh workflow run renovate.yml -f repos=<the batch's repos> -f dry_run=full` (in groups of
+     about 15 repos: a dry run isn't sharded and its token lasts an hour). Expect one
+     `DRY-RUN: Would create PR` for the non-major group per repo with updates, plus its majors.
+   - `gh workflow run ccf-bump-sync.yml -f repos=<the batch's repos with release: true> -f dry_run=true`.
+     Expect one `dry run: would push ... and open` per repo whose internal pins are behind.
+6. One PR to this repo adds the batch number to `active_batches`. From the next scheduled run,
    Renovate, `ccf-bump`, the train, the attention digest and the vulnerability summary act on the
    batch's repos.
 

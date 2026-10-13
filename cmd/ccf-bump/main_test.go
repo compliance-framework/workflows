@@ -260,6 +260,8 @@ func TestSyncAllPR(t *testing.T) {
 	root, e, gh, out := setup(t)
 	var slept []time.Duration
 	e.sleep = func(d time.Duration) { slept = append(slept, d) }
+	output := filepath.Join(root, "github-output")
+	e.getenv = func(k string) string { return map[string]string{"GITHUB_OUTPUT": output}[k] }
 	args := []string{"sync", "--all", "--manifest", filepath.Join(root, "repos.yaml"), "--pr", "--batch", "2"}
 	if err := run(context.Background(), args, e); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -279,6 +281,10 @@ func TestSyncAllPR(t *testing.T) {
 	}
 	if len(slept) != 1 || slept[0] != time.Hour {
 		t.Errorf("slept %v, want one hour after the first batch of 2", slept)
+	}
+	// ccf-bump-sync.yml pauses before the next chunk only when this chunk pushed PRs.
+	if got, err := os.ReadFile(output); err != nil || string(got) != "prs=4\n" {
+		t.Errorf("GITHUB_OUTPUT = %q, %v; want prs=4", got, err)
 	}
 	for repo, line := range map[string]string{
 		"mock-agent-action:Dockerfile":                         "FROM ghcr.io/compliance-framework/mock-agent:0.2.0 AS source",
@@ -306,6 +312,9 @@ func TestSyncAllPR(t *testing.T) {
 	}
 	if want := []string{`update mock-ui#1 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#1 ccf-bump:automerge"}; !slices.Equal(gh.calls, want) {
 		t.Errorf("rerun calls %q, want %q", gh.calls, want)
+	}
+	if got, err := os.ReadFile(output); err != nil || string(got) != "prs=4\nprs=1\n" {
+		t.Errorf("GITHUB_OUTPUT = %q, %v; want prs=1 appended", got, err)
 	}
 }
 
@@ -424,6 +433,20 @@ func TestListAndErrors(t *testing.T) {
 	if got := out.String(); got != "mock-api,mock-agent,mock-ui,mock-agent-action,mock-plugin-1,mock-plugin-policies-1\n" {
 		t.Errorf("list = %q", got)
 	}
+	// One ccf-bump-sync.yml job per chunk, in stage order.
+	for size, want := range map[string]string{
+		"4":  `[{"index":1,"of":2,"repos":"mock-api,mock-agent,mock-ui,mock-agent-action"},{"index":2,"of":2,"repos":"mock-plugin-1,mock-plugin-policies-1"}]`,
+		"6":  `[{"index":1,"of":1,"repos":"mock-api,mock-agent,mock-ui,mock-agent-action,mock-plugin-1,mock-plugin-policies-1"}]`,
+		"10": `[{"index":1,"of":1,"repos":"mock-api,mock-agent,mock-ui,mock-agent-action,mock-plugin-1,mock-plugin-policies-1"}]`,
+	} {
+		out.Reset()
+		if err := run(context.Background(), []string{"list", "--manifest", m, "--chunk", size}, e); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSpace(out.String()); got != want {
+			t.Errorf("list --chunk %s = %s, want %s", size, got, want)
+		}
+	}
 	for args, want := range map[string]string{
 		"sync":                               "one of --all or --repos",
 		"sync --all --repos mock-ui":         "one of --all or --repos",
@@ -434,6 +457,8 @@ func TestListAndErrors(t *testing.T) {
 		"--set mock-api=main --repo mock-ui": "want a version",
 		"--batch 5 --repo mock-ui":           "go with sync",
 		"sync --all --mode train":            "sync runs in sync mode",
+		"sync --all --chunk 2":               "goes with list",
+		"list --chunk -1":                    "goes with list",
 	} {
 		err := run(context.Background(), append(strings.Fields(args), "--manifest", m), e)
 		if err == nil || !strings.Contains(err.Error(), want) {
