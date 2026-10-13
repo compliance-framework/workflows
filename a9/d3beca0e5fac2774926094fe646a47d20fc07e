@@ -1,0 +1,2 @@
+lisa-addressed:
+Thread PRRT_kwDOKQL6as6r9Nkf (#107 batches.go:86, Nit): dropped the unreachable r.Batch < 0 branch in validateBatches; Parse owns the 'batches are numbered from 1' rule and TestParseBatchErrors/negative_batch covers it. No test built a Manifest by hand with a negative batch.
