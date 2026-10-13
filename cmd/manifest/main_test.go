@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,6 +21,24 @@ func TestRun(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("repos:\n  - {name: a, kind: go-lib, release: true, depends_on: [a]}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Stage 3 of repos.yaml: agent-action and every batch's released repos (every batch is active), sorted.
+	m, err := manifest.Load("../../repos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.ActiveRepos()) != len(m.Repos) {
+		t.Fatalf("active_batches %v: want every batch of repos.yaml active", m.ActiveBatches)
+	}
+	third := []string{"agent-action"}
+	for _, r := range m.Repos {
+		if r.Batch != 0 && r.Release {
+			third = append(third, r.Name)
+		}
+	}
+	slices.Sort(third)
+	if len(third) != 65 {
+		t.Fatalf("stage 3 of repos.yaml has %d repos, want agent-action and 64 released plugin and policy repos", len(third))
+	}
 	tests := []struct {
 		name    string
 		args    []string
@@ -29,24 +48,8 @@ func TestRun(t *testing.T) {
 		{
 			name: "text",
 			args: []string{"--manifest", "../../repos.yaml"},
-			// Batches 1 and 2 are active: their released plugin and policy repos join agent-action in stage 3.
-			want: "stage 1: api gooci\nstage 2: agent ui\nstage 3: agent-action " +
-				"plugin-apt-versions plugin-apt-versions-policies " +
-				"plugin-aws-acm plugin-aws-acm-certificate-policies plugin-aws-ec2 plugin-aws-ec2-policies " +
-				"plugin-aws-ecr plugin-aws-ecr-image-policies plugin-aws-ecr-registry-policies plugin-aws-ecr-repository-policies " +
-				"plugin-aws-eks plugin-aws-eks-addon-policies plugin-aws-eks-nodegroup-policies plugin-aws-eks-policies " +
-				"plugin-aws-elb plugin-aws-elb-listener-policies plugin-aws-elb-loadbalancer-policies " +
-				"plugin-aws-elb-targetgroup-policies plugin-aws-elb-targethealth-policies " +
-				"plugin-aws-rds-aurora-psql plugin-aws-rds-aurora-psql-policies plugin-aws-s3 plugin-aws-s3-policies " +
-				"plugin-aws-secretsmanager plugin-aws-secretsmanager-policies " +
-				"plugin-cloud-custodian plugin-cloud-custodian-policies " +
-				"plugin-dependabot plugin-dependabot-granular-policies plugin-dependabot-policies " +
-				"plugin-file-attestation plugin-file-attestation-ctrf-policies plugin-file-attestation-policies plugin-file-attestation-sarif-policies " +
-				"plugin-github-repositories plugin-github-repositories-custom-policies plugin-github-repositories-dependency-policies " +
-				"plugin-github-repositories-policies plugin-github-repositories-pr-policies plugin-github-settings plugin-github-settings-policies " +
-				"plugin-gitlab-repositories plugin-gitlab-repositories-policies plugin-http-collector plugin-http-collector-policies " +
-				"plugin-intruder plugin-intruder-policies plugin-jira plugin-jira-custom-policies plugin-jira-policies " +
-				"plugin-k8s plugin-k8s-opres-policies plugin-local-ssh plugin-local-ssh-policies\nstage 4: helm-charts\n",
+			// Every batch is active: the released plugin and policy repos join agent-action in stage 3.
+			want: "stage 1: api gooci\nstage 2: agent ui\nstage 3: " + strings.Join(third, " ") + "\nstage 4: helm-charts\n",
 		},
 		{
 			name: "json mock manifest",

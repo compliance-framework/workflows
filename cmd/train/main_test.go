@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/compliance-framework/workflows/internal/manifest"
 	"github.com/compliance-framework/workflows/internal/train"
 )
 
@@ -46,6 +47,18 @@ func openTrain(t *testing.T, repos ...string) string {
 
 func TestSelect(t *testing.T) {
 	t.Chdir("../..")
+	// Every batch of repos.yaml is active (TestTrainReposByBatchReposYAML), so a train takes every repo with
+	// release: true, in manifest order.
+	m, err := manifest.Load("repos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var released []string
+	for _, r := range m.Repos {
+		if r.Release {
+			released = append(released, r.Name)
+		}
+	}
 	tests := []struct {
 		name, issues string
 		args         []string
@@ -53,20 +66,7 @@ func TestSelect(t *testing.T) {
 	}{
 		{"start, no open train", `[]`, []string{"--for", "start", "--manifest", "repos.mock.yaml", "--repos", "mock-ui,mock-api"},
 			"open=false\nmanifest=repos.mock.yaml\nrepos=mock-api,mock-ui\n", ""},
-		{"start, every release repo", `[]`, []string{"--for", "start"}, "open=false\nmanifest=repos.yaml\nrepos=api,gooci,agent,ui,agent-action,helm-charts," +
-			"plugin-file-attestation,plugin-file-attestation-policies,plugin-file-attestation-ctrf-policies,plugin-file-attestation-sarif-policies," +
-			"plugin-github-settings,plugin-github-settings-policies,plugin-github-repositories,plugin-github-repositories-policies," +
-			"plugin-github-repositories-custom-policies,plugin-github-repositories-dependency-policies,plugin-github-repositories-pr-policies," +
-			"plugin-dependabot,plugin-dependabot-policies,plugin-dependabot-granular-policies,plugin-apt-versions,plugin-apt-versions-policies," +
-			"plugin-local-ssh,plugin-local-ssh-policies,plugin-jira,plugin-jira-policies,plugin-jira-custom-policies," +
-			"plugin-gitlab-repositories,plugin-gitlab-repositories-policies,plugin-k8s,plugin-k8s-opres-policies," +
-			"plugin-cloud-custodian,plugin-cloud-custodian-policies," +
-			"plugin-aws-rds-aurora-psql,plugin-aws-rds-aurora-psql-policies,plugin-http-collector,plugin-http-collector-policies," +
-			"plugin-intruder,plugin-intruder-policies,plugin-aws-acm,plugin-aws-acm-certificate-policies," +
-			"plugin-aws-ecr,plugin-aws-ecr-image-policies,plugin-aws-ecr-registry-policies,plugin-aws-ecr-repository-policies," +
-			"plugin-aws-ec2,plugin-aws-ec2-policies,plugin-aws-eks,plugin-aws-eks-policies,plugin-aws-eks-addon-policies,plugin-aws-eks-nodegroup-policies," +
-			"plugin-aws-elb,plugin-aws-elb-listener-policies,plugin-aws-elb-loadbalancer-policies,plugin-aws-elb-targetgroup-policies," +
-			"plugin-aws-elb-targethealth-policies,plugin-aws-s3,plugin-aws-s3-policies,plugin-aws-secretsmanager,plugin-aws-secretsmanager-policies\n", ""}, // batches 1 and 2 are active
+		{"start, every release repo", `[]`, []string{"--for", "start"}, "open=false\nmanifest=repos.yaml\nrepos=" + strings.Join(released, ",") + "\n", ""},
 		{"reconcile, no open train", `[]`, []string{"--for", "reconcile"}, "open=false\nmanifest=\nrepos=\n", ""},
 		{"the open train's repos win", openTrain(t, "mock-gooci", "mock-api"), []string{"--for", "start", "--repos", "mock-ui"},
 			"open=true\nmanifest=repos.mock.yaml\nrepos=mock-api,mock-gooci\n", ""},
