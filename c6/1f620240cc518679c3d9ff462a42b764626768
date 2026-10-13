@@ -1,0 +1,5 @@
+lisa-selfreview:
+Pass 1 (final, lenient): approve, no blocker/must-fix.
+- Scope: repos.yaml active_batches [1] -> [1, 2]; the 12 tests that pin the repos.yaml selection (same set as #111) now pin batches 1 and 2 active, batch 3 inactive.
+- renovate-config TestRunErrors/TestRunDryRunInactive moved their inactive example from plugin-http-collector (batch 2, now active) to plugin-aws-vpc(-policies) (batch 3). When batch 3 goes live there is no inactive batch left in repos.yaml; those two cases will need a synthetic manifest then (deferred, out of scope).
+- docs/renovate.md "37 repos active after batch 1" is historical reasoning, left as is (scope: repos.yaml + selection tests only).
