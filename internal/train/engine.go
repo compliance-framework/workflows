@@ -30,6 +30,7 @@ type Engine struct {
 	Members Members      // nil: commands are refused, since no one's role can be checked
 	Slack   slackkit.API // nil: messages are only logged
 	Bumper  Bumper
+	Gate    Gate // runs the gate's workflows (gate.go); nil: no gate
 	// Load reads a manifest; the train's own path is in its state.
 	Load func(path string) (*manifest.Manifest, error)
 
@@ -39,6 +40,7 @@ type Engine struct {
 	RequiredCheck         string // a check every merged PR must pass, e.g. "ci / required"
 	ReleasePleaseWorkflow string // file name of the repos' release-please workflow
 	RunURL                string // this workflow run, linked from failure messages
+	Registry              string // where the repos' OCI artifacts are, e.g. ghcr.io/compliance-framework
 	Now                   func() time.Time
 	Log                   io.Writer
 }
@@ -94,6 +96,7 @@ func (e *Engine) newState(ctx context.Context, m *manifest.Manifest, month strin
 	if len(st.Repos) == 0 {
 		return nil, errors.New("no repos selected")
 	}
+	st.GateStage = gateStage(m, st)
 	return st, nil
 }
 
@@ -136,8 +139,29 @@ func (e *Engine) run(ctx context.Context, is Issue) error {
 // step advances the open stages, finishes the train when every repo is done, posts the new
 // holds and saves the state.
 func (e *Engine) step(ctx context.Context, is Issue, st *State) error {
+	// The gate runs once every stage before GateStage is done, and holds that stage (helm) or the
+	// finish. A train started before the gate existed has none.
+	gs := st.GateStage
 	var errs []error
+	gated := func() bool {
+		m, err := e.Load(st.Manifest)
+		if err != nil {
+			errs = append(errs, err)
+			return false
+		}
+		passed, err := e.gate(ctx, st, m, gs)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		return passed
+	}
+	passed := gs == 0
 	for stage := 1; stage <= st.Stages() && st.StageOpen(stage); stage++ {
+		if stage == gs {
+			if passed = gated(); !passed {
+				break
+			}
+		}
 		for _, r := range st.Repos {
 			if r.Stage == stage {
 				if err := e.advance(ctx, st, r); err != nil {
@@ -146,11 +170,14 @@ func (e *Engine) step(ctx context.Context, is Issue, st *State) error {
 			}
 		}
 	}
-	if len(errs) == 0 && st.AllDone() {
+	if gs > st.Stages() && st.AllDone() {
+		passed = gated()
+	}
+	if len(errs) == 0 && st.AllDone() && passed {
 		errs = append(errs, e.finish(ctx, is, st))
 	}
 	for _, r := range st.Repos {
-		if r.Hold != NoHold {
+		if r.Hold != NoHold && !r.Phase.Done() { // the gate posts its own holds, with the output
 			e.notify(ctx, st, r.Name+"|"+string(r.Phase)+"|"+string(r.Hold)+"|"+r.Detail,
 				fmt.Sprintf(":warning: *%s* is %s (%s): %s <%s|tracking issue>", r.Name, r.Hold, r.Phase, SlackText(r.Detail), is.URL))
 		}
