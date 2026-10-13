@@ -1,2 +1,5 @@
 lisa-design:
 W3-S4-T02: repos.yaml changes only active_batches ([] -> [1]). Eleven tests in ten packages pinned repos.yaml's selections/stages with no batch active (asserting today's core-only selection); they now pin batch 1 active (37 active repos, 33 released, stage 3 = agent-action + 27). renovate-config's inactive-batch tests moved from plugin-file-attestation (now active) to plugin-http-collector (batch 2) to keep their meaning. internal/train's repos.yaml dry-run test registers batch 1's released repos in its fake world (renamed TestDryRunPlansReposYAMLStages).
+
+lisa-selfreview:
+Pass 1: no blocker/must-fix. Deferred nit: batch 1's repo list is spelled out in four pinning tests (cmd/manifest, internal/manifest, cmd/train TestSelect, cmd/renovate-config) by design: they pin the go-live selection explicitly; the per-tool selection tests derive it from batch: 1 with a count check.
