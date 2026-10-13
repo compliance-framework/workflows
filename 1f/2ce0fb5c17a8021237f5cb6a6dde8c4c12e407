@@ -1,0 +1,3 @@
+lisa-design:
+- stack-smoke gets plugin-tag / policy-tag (W3-S1-T05's input names on stack-smoke.yml) = v<train version> of plugin-file-attestation and plugin-file-attestation-policies when the train holds them; otherwise the workflow default (v0.2.0). The wiring PR depends on T05's inputs: dispatching unknown inputs fails with 422.
+- The gate reads versions only of the train's repos (the release-bot token is scoped to them): no agent in the train -> agent-ref "" (go.mod pin); stack-smoke only when the train holds api, ui and agent.

@@ -1,0 +1,6 @@
+lisa-selfreview:
+Pass 1 (strict): findings fixed in this commit
+- CORE-TEST-002 (gate_test): the pass test only checked helm released last, which holds without a gate; now asserts every gate run finished before helm's bump (mutation-checked: disabling the gate break fails the tests).
+- CORE-TEST-001: no test for a dispatch without a run ID or for the board's held pill on a released repo; added.
+- CORE-SEC-003 (gate.go failCheck): run-log tail (plugin output) went into Slack mrkdwn unescaped; now slackkit.Escape.
+- CORE-ERR-001 (gate.go runCheck): a log read error recorded the result without the protocol/tail; now the check stays running and the next run reads the log.

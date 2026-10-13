@@ -1,0 +1,5 @@
+lisa-addressed:
+- [9712adf80ba2] run.sh keeps the rendered agent config when the stack stays up (SMOKE_KEEP=1 or a failed teardown) and prints the down command with the tags and SMOKE_AGENT_CONFIG (down_command); TestSmokeRunFailure checks both; docs updated.
+
+lisa-selfreview:
+pass 2 (strict): approve, no findings. Local smoke (api 0.21.0, ui 2.12.1, agent 0.9.0, plugin/policies v0.2.0) passed on this head and tore everything down.
