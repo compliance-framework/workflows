@@ -1,0 +1,8 @@
+lisa-design:
+- Stack of 3 PRs (lisa 1000-line limit): rules+table (this), GitHub/registry clients + Publish/Due, cmd + workflow + docs.
+- Rows are the kept plugins only: active go-plugin repos with release: true (templates excluded; they never release).
+- Agent library is read from go.mod at the latest release tag (not the binary's build info): no download, no plugin execution; plugin-probe stays the authority on binaries.
+- "v2 Init" without running the plugin = main.go at the release tag serves runner.RunnerV2GRPCPlugin; only checked when the protocol annotation is 1 or unset.
+- Status rules: candidate = (protocol 1/unset AND no v2 Init) OR >=3 minors behind (or older major); unknown if inputs missing; behind >=2 minors; else healthy.
+- ProtocolAnnotation is duplicated from pluginprobe on purpose (keeps plan's build light); TestProtocolAnnotation keeps them equal.
+- Open ccf-bump PR is "failed" only on failure/timed_out/action_required/startup_failure; cancelled/stale count as pending, as train and ccf-bump merge read them.
