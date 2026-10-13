@@ -38,7 +38,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	fs := flag.NewFlagSet("renovate-config "+args[0], flag.ContinueOnError)
 	path := fs.String("manifest", manifest.DefaultPath, "path to the repo manifest")
-	repos := fs.String("repos", "", "comma- or space-separated repo names (default: every repo in the manifest)")
+	repos := fs.String("repos", "", "comma- or space-separated repo names (default: every active repo in the manifest)")
 	owner := fs.String("owner", "compliance-framework", "the repos' owner")
 	preset := fs.String("preset", "renovate/default.json", "the shared Renovate preset (config)")
 	dryRun := fs.String("dry-run", "full", "full, lookup, extract, or off to run live; only a dry run may name repos of an inactive batch")

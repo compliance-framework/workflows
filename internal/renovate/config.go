@@ -70,15 +70,15 @@ func SelectRepos(m *manifest.Manifest, list, dryRun string) ([]string, error) {
 	return out, nil
 }
 
-// Shard splits repos into the fewest shards of at most max repos (repo i goes to shard i mod n) and
+// Shard splits repos into the fewest shards of at most size repos (repo i goes to shard i mod n) and
 // returns shard slot mod n, its index and n. renovate.yml runs hourly with slot = hours since the
 // Unix epoch, so consecutive runs take the shards in turn and each repo is visited every n hours.
-// max <= 0 returns every repo as one shard.
-func Shard(repos []string, max int, slot int64) (shard []string, index, count int) {
-	if max <= 0 || len(repos) <= max {
+// size <= 0 returns every repo as one shard.
+func Shard(repos []string, size int, slot int64) (shard []string, index, count int) {
+	if size <= 0 || len(repos) <= size {
 		return repos, 0, 1
 	}
-	count = (len(repos) + max - 1) / max
+	count = (len(repos) + size - 1) / size
 	index = int(((slot % int64(count)) + int64(count)) % int64(count))
 	for i, r := range repos {
 		if i%count == index {
