@@ -21,7 +21,21 @@ func TestLoadRepoManifests(t *testing.T) {
 		path   string
 		stages [][]string
 	}{
-		{"../../repos.yaml", [][]string{{"api", "gooci"}, {"agent", "ui"}, {"agent-action"}, {"helm-charts"}}},
+		{"../../repos.yaml", [][]string{ // batch 1 is active
+			{"api", "gooci"},
+			{"agent", "ui"},
+			{
+				"agent-action",
+				"plugin-apt-versions", "plugin-apt-versions-policies", "plugin-cloud-custodian", "plugin-cloud-custodian-policies",
+				"plugin-dependabot", "plugin-dependabot-granular-policies", "plugin-dependabot-policies",
+				"plugin-file-attestation", "plugin-file-attestation-ctrf-policies", "plugin-file-attestation-policies", "plugin-file-attestation-sarif-policies",
+				"plugin-github-repositories", "plugin-github-repositories-custom-policies", "plugin-github-repositories-dependency-policies",
+				"plugin-github-repositories-policies", "plugin-github-repositories-pr-policies", "plugin-github-settings", "plugin-github-settings-policies",
+				"plugin-gitlab-repositories", "plugin-gitlab-repositories-policies", "plugin-jira", "plugin-jira-custom-policies", "plugin-jira-policies",
+				"plugin-k8s", "plugin-k8s-opres-policies", "plugin-local-ssh", "plugin-local-ssh-policies",
+			},
+			{"helm-charts"},
+		}},
 		{"../../repos.mock.yaml", [][]string{
 			{"mock-api", "mock-gooci"},
 			{"mock-agent", "mock-ui"},

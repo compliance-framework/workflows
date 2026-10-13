@@ -53,7 +53,14 @@ func TestSelect(t *testing.T) {
 	}{
 		{"start, no open train", `[]`, []string{"--for", "start", "--manifest", "repos.mock.yaml", "--repos", "mock-ui,mock-api"},
 			"open=false\nmanifest=repos.mock.yaml\nrepos=mock-api,mock-ui\n", ""},
-		{"start, every release repo", `[]`, []string{"--for", "start"}, "open=false\nmanifest=repos.yaml\nrepos=api,gooci,agent,ui,agent-action,helm-charts\n", ""},
+		{"start, every release repo", `[]`, []string{"--for", "start"}, "open=false\nmanifest=repos.yaml\nrepos=api,gooci,agent,ui,agent-action,helm-charts," +
+			"plugin-file-attestation,plugin-file-attestation-policies,plugin-file-attestation-ctrf-policies,plugin-file-attestation-sarif-policies," +
+			"plugin-github-settings,plugin-github-settings-policies,plugin-github-repositories,plugin-github-repositories-policies," +
+			"plugin-github-repositories-custom-policies,plugin-github-repositories-dependency-policies,plugin-github-repositories-pr-policies," +
+			"plugin-dependabot,plugin-dependabot-policies,plugin-dependabot-granular-policies,plugin-apt-versions,plugin-apt-versions-policies," +
+			"plugin-local-ssh,plugin-local-ssh-policies,plugin-jira,plugin-jira-policies,plugin-jira-custom-policies," +
+			"plugin-gitlab-repositories,plugin-gitlab-repositories-policies,plugin-k8s,plugin-k8s-opres-policies," +
+			"plugin-cloud-custodian,plugin-cloud-custodian-policies\n", ""}, // batch 1 is active
 		{"reconcile, no open train", `[]`, []string{"--for", "reconcile"}, "open=false\nmanifest=\nrepos=\n", ""},
 		{"the open train's repos win", openTrain(t, "mock-gooci", "mock-api"), []string{"--for", "start", "--repos", "mock-ui"},
 			"open=true\nmanifest=repos.mock.yaml\nrepos=mock-api,mock-gooci\n", ""},
