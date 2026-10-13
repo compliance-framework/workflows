@@ -1,0 +1,2 @@
+lisa-design:
+Renovate shard rotation is per run: renovate.yml passes github.run_number as --slot (user request 2026-10-13), not the clock hour, because GitHub delays/drops scheduled runs. Delayed/dropped runs slow the rotation but never skip a shard; a dry-run (or repos-subset) dispatch consumes a run number and leaves that shard for the next rotation. Worst case: ~15 PRs per run, ~30 when two runs start close together. The CLI --slot default stays hours-since-epoch for local use.
