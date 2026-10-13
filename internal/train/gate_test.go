@@ -158,6 +158,7 @@ repos:
   - {name: agent, kind: go-service, depends_on: [api], release: true}
   - {name: ui, kind: ui, depends_on: [api], release: true}
   - {name: plugin-file-attestation, kind: go-plugin, depends_on: [agent], release: true}
+  - {name: plugin-file-attestation-policies, kind: policies, depends_on: [agent], release: true}
   - {name: helm-charts, kind: helm, depends_on: [api, ui, agent], release: true}
 `))
 	if err != nil {
@@ -165,7 +166,7 @@ repos:
 	}
 	w := newWorld(t)
 	w.repo("api", "0.21.0").pending("0.22.0")
-	for _, n := range []string{"agent", "ui", "plugin-file-attestation", "helm-charts"} {
+	for _, n := range []string{"agent", "ui", "plugin-file-attestation", "plugin-file-attestation-policies", "helm-charts"} {
 		w.repo(n, "0.1.0").bumped = true
 	}
 	e := w.engine(trainDay)
@@ -174,7 +175,7 @@ repos:
 }
 
 // The probe follows the agent this train released, and stack-smoke runs with the train's api,
-// ui and agent; a smoke failure holds helm until /skip stack-smoke.
+// ui, agent and plugin-file-attestation; a smoke failure holds helm until /skip stack-smoke.
 func TestGateSmokeWithTheTrainVersions(t *testing.T) {
 	w, e := productWorld(t)
 	w.smokeFail = true
@@ -182,7 +183,8 @@ func TestGateSmokeWithTheTrainVersions(t *testing.T) {
 	drive(t, w, e, 30)
 	want := []string{
 		"plugin-probe.yml agent-ref=v0.1.1 plugins=ghcr.io/compliance-framework/plugin-file-attestation:v0.1.1",
-		"stack-smoke.yml agent-tag=0.1.1 api-tag=0.22.0 ui-tag=0.1.1",
+		"plugin-probe.yml agent-ref=v0.1.1 policies=ghcr.io/compliance-framework/plugin-file-attestation-policies:v0.1.1",
+		"stack-smoke.yml agent-tag=0.1.1 api-tag=0.22.0 plugin-tag=v0.1.1 policy-tag=v0.1.1 ui-tag=0.1.1",
 	}
 	if got := w.dispatched(); !slices.Equal(got, want) {
 		t.Errorf("dispatched:\n%s", strings.Join(got, "\n"))
@@ -209,11 +211,23 @@ func TestDryRunPlansTheGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := w.comments[1][0].Body
-	if !strings.Contains(plan, "Gate before stage 4 (not run in a dry run): plugin-probe ghcr.io/compliance-framework/plugin-file-attestation:v0.1.1 (agent v0.1.1); stack-smoke with api 0.22.0, ui 0.1.1, agent 0.1.1.") {
+	if !strings.Contains(plan, "Gate before stage 4 (not run in a dry run): plugin-probe ghcr.io/compliance-framework/plugin-file-attestation:v0.1.1 (agent v0.1.1); plugin-probe ghcr.io/compliance-framework/plugin-file-attestation-policies:v0.1.1 (agent v0.1.1); stack-smoke with api-tag 0.22.0, ui-tag 0.1.1, agent-tag 0.1.1, plugin-tag v0.1.1, policy-tag v0.1.1.") {
 		t.Errorf("plan:\n%s", plan)
 	}
 	if len(w.gateRuns) != 0 {
 		t.Errorf("dispatched %v", w.dispatched())
+	}
+}
+
+// A train without the agent probes with the go.mod pin and runs no stack-smoke: the release-bot
+// token reaches only the train's repos, so the gate reads nothing else.
+func TestGateInATrainWithoutTheStack(t *testing.T) {
+	w, e := productWorld(t)
+	open(t, w, e, StartOptions{Manifest: "repos.yaml", Repos: []string{"plugin-file-attestation", "helm-charts"}})
+	drive(t, w, e, 30)
+	want := []string{"plugin-probe.yml plugins=ghcr.io/compliance-framework/plugin-file-attestation:v0.1.0"}
+	if got := w.dispatched(); !slices.Equal(got, want) || w.issues[0].Open {
+		t.Errorf("open=%v, dispatched:\n%s", w.issues[0].Open, strings.Join(got, "\n"))
 	}
 }
 

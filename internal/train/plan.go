@@ -28,7 +28,7 @@ func (e *Engine) plan(ctx context.Context, is Issue, st *State) error {
 		}
 		fmt.Fprintf(&b, "%d. %s\n", stage, strings.Join(line, "; "))
 	}
-	errs = append(errs, e.planGate(ctx, st, &b))
+	errs = append(errs, e.planGate(st, &b))
 	charts, err := e.chartIssues(ctx, st, true)
 	errs = append(errs, err)
 	for _, c := range charts {
@@ -47,7 +47,7 @@ func (e *Engine) plan(ctx context.Context, is Issue, st *State) error {
 }
 
 // planGate writes what the gate would check, with the planned versions, and runs nothing.
-func (e *Engine) planGate(ctx context.Context, st *State, b *strings.Builder) error {
+func (e *Engine) planGate(st *State, b *strings.Builder) error {
 	if e.Gate == nil {
 		return nil
 	}
@@ -56,9 +56,9 @@ func (e *Engine) planGate(ctx context.Context, st *State, b *strings.Builder) er
 		return err
 	}
 	gs := st.GateStage
-	checks, err := e.gateChecks(ctx, m, st, gs)
-	if err != nil || len(checks) == 0 {
-		return err
+	checks := gateChecks(e.Registry, m, st, gs)
+	if len(checks) == 0 {
+		return nil
 	}
 	var lines []string
 	for _, g := range checks {

@@ -15,7 +15,7 @@ import (
 
 // The gate (docs/train.md, "The gate") runs before the first stage with a helm repo, or before the
 // train finishes when it has none: plugin-probe.yml on every go-plugin and policies repo of the
-// earlier stages, and stack-smoke.yml with the api, ui and agent versions. It runs both workflows
+// earlier stages, and stack-smoke.yml with the train's api, ui, agent and smoke plugin. It runs both workflows
 // in this repo with workflow_dispatch, one run per check, and reads their results on later runs.
 const (
 	ProbeWorkflow = "plugin-probe.yml"
@@ -29,9 +29,18 @@ const (
 	AgentRepo = "agent"
 )
 
-// smokeImages maps stack-smoke.yml's inputs to the repos whose images they tag
-// (ghcr.io/compliance-framework/<repo>, image tags without the v).
-var smokeImages = [][2]string{{"api-tag", "api"}, {"ui-tag", "ui"}, {"agent-tag", "agent"}}
+// SmokePlugin is the plugin stack-smoke.yml runs in the stack (with its "-policies" bundle).
+const SmokePlugin = "plugin-file-attestation"
+
+// smokeInputs maps stack-smoke.yml's inputs to the repos whose artifacts they tag, and the tag's
+// prefix: the images (ghcr.io/compliance-framework/<repo>) are tagged X.Y.Z, the plugin and policy
+// OCI artifacts vX.Y.Z. The first three are the stack: stack-smoke runs only in a train that holds
+// all three. The others are passed when the train holds the repo; else the workflow's default
+// applies (plugin-tag and policy-tag are W3-S1-T05's inputs).
+var smokeInputs = []struct{ input, repo, prefix string }{
+	{"api-tag", "api", ""}, {"ui-tag", "ui", ""}, {"agent-tag", "agent", ""},
+	{"plugin-tag", SmokePlugin, "v"}, {"policy-tag", SmokePlugin + "-policies", "v"},
+}
 
 // GateResult is where a gate check stands.
 type GateResult string
@@ -102,12 +111,13 @@ func trainVersion(r *RepoState) string {
 	return r.From[RootPackage]
 }
 
-// repoVersion is trainVersion for a repo of the train, else its version on the default branch.
-func (e *Engine) repoVersion(ctx context.Context, st *State, name string) (string, error) {
+// repoVersion is trainVersion for a repo of the train, else "": the release-bot token reaches
+// only the train's repos.
+func repoVersion(st *State, name string) string {
 	if r := st.Repo(name); r != nil {
-		return trainVersion(r), nil
+		return trainVersion(r)
 	}
-	return e.currentVersion(ctx, name)
+	return ""
 }
 
 // currentVersion is the root package's version in the release-please manifest on the default
@@ -122,18 +132,13 @@ func (e *Engine) currentVersion(ctx context.Context, repo string) (string, error
 }
 
 // gateChecks lists the gate's checks: a probe of each go-plugin and policies repo before stage
-// gs, at its train version, built against the train's agent; and stack-smoke when the manifest
-// has the api, ui and agent repos (the product images; the mocks have none).
-func (e *Engine) gateChecks(ctx context.Context, m *manifest.Manifest, st *State, gs int) ([]*GateCheck, error) {
+// gs, at its train version, built against the train's agent (the go.mod pin when the train has no
+// agent repo); and stack-smoke when the train has the api, ui and agent repos (the product images;
+// the mocks have none).
+func gateChecks(registry string, m *manifest.Manifest, st *State, gs int) []*GateCheck {
 	agentRef := "" // plugin-probe.yml's default: the agent in this repo's go.mod
-	if m.Repo(AgentRepo) != nil {
-		v, err := e.repoVersion(ctx, st, AgentRepo)
-		if err != nil {
-			return nil, err
-		}
-		if v != "" {
-			agentRef = "v" + v
-		}
+	if v := repoVersion(st, AgentRepo); v != "" {
+		agentRef = "v" + v
 	}
 	var out []*GateCheck
 	for _, r := range st.Repos {
@@ -152,26 +157,21 @@ func (e *Engine) gateChecks(ctx context.Context, m *manifest.Manifest, st *State
 			if mr.Kind == manifest.KindPolicies {
 				input = "policies"
 			}
-			g.Inputs[input] = strings.TrimRight(e.Registry, "/") + "/" + strings.ToLower(r.Name)
+			g.Inputs[input] = strings.TrimRight(registry, "/") + "/" + strings.ToLower(r.Name)
 			g.setVersion(v)
 		}
 		out = append(out, g)
 	}
 	smoke := &GateCheck{Name: SmokeCheck, Workflow: SmokeWorkflow, Inputs: map[string]string{}}
-	for _, si := range smokeImages {
-		if m.Repo(si[1]) == nil {
-			return out, nil
+	for i, si := range smokeInputs {
+		if i < 3 && st.Repo(si.repo) == nil {
+			return out
 		}
-		v, err := e.repoVersion(ctx, st, si[1])
-		if err != nil {
-			return nil, err
+		if v := repoVersion(st, si.repo); v != "" {
+			smoke.Inputs[si.input] = si.prefix + v
 		}
-		if v == "" {
-			smoke.Result, smoke.Detail = GateSkipped, "no release-please version of "+si[1]
-		}
-		smoke.Inputs[si[0]] = v
 	}
-	return append(out, smoke), nil
+	return append(out, smoke)
 }
 
 // setVersion points a probe's OCI tag at version.
@@ -190,7 +190,13 @@ func (g *GateCheck) describe() string {
 	case g.Result == GateSkipped:
 		return fmt.Sprintf("%s skipped (%s)", g.Name, g.Detail)
 	case g.Workflow == SmokeWorkflow:
-		return fmt.Sprintf("stack-smoke with api %s, ui %s, agent %s", g.Inputs["api-tag"], g.Inputs["ui-tag"], g.Inputs["agent-tag"])
+		var in []string
+		for _, si := range smokeInputs {
+			if v := g.Inputs[si.input]; v != "" {
+				in = append(in, si.input+" "+v)
+			}
+		}
+		return "stack-smoke with " + strings.Join(in, ", ")
 	}
 	agent := g.Inputs["agent-ref"]
 	if agent == "" {
@@ -206,10 +212,7 @@ func (e *Engine) gate(ctx context.Context, st *State, m *manifest.Manifest, gs i
 		return true, nil
 	}
 	if st.Gate == nil {
-		checks, err := e.gateChecks(ctx, m, st, gs)
-		if err != nil {
-			return false, err
-		}
+		checks := gateChecks(e.Registry, m, st, gs)
 		if len(checks) == 0 {
 			return true, nil
 		}
