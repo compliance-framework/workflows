@@ -1,0 +1,5 @@
+Fixture for the stack smoke test (docs/stack-smoke.md).
+
+plugin-file-attestation reads this file in the agent container (smoke/agent-config.yml,
+file_path) and its policies evaluate it. It has no attestation, so the policies that need one
+are not satisfied; the smoke test checks only that the plugin's evidence reaches the API.

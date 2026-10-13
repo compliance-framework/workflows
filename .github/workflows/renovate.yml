@@ -1,13 +1,17 @@
 name: renovate
 
 # Self-hosted Renovate for the manifest's repos, with the shared preset (renovate/default.json).
-# Runs daily: the preset limits normal updates to the 8th and 22nd and lets vulnerability fixes
-# through any day. A scheduled run uses the dispatch defaults below, except that it runs live when the
-# repo variable RENOVATE_LIVE is "true". See docs/renovate.md.
+# Runs hourly: the preset limits normal updates to the 8th and 22nd and lets vulnerability fixes
+# through any day. A live run works on one shard of at most 15 repos, picked by the run number, so
+# the shards take turns run by run: each repo is visited every n runs (n = shards). GitHub may delay
+# or drop scheduled runs, which slows the rotation but never skips a shard. The preset opens at most
+# one non-vulnerability PR per repo an hour, so one run opens at most about 15, and two runs close
+# together about 30 (docs/renovate.md#the-org-wide-throttle). A scheduled run uses the dispatch
+# defaults below, except that it runs live when the repo variable RENOVATE_LIVE is "true".
 
 on:
   schedule:
-    - cron: "17 6 * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       manifest:
@@ -16,11 +20,11 @@ on:
         options: [repos.mock.yaml, repos.yaml]
         default: repos.yaml
       repos:
-        description: Comma-separated subset of repos (default every repo in the manifest)
+        description: Comma-separated subset of repos (default every active repo in the manifest); a dry run may name repos of an inactive batch
         type: string
         default: ""
       dry_run:
-        description: Renovate dryRun (off runs live and opens PRs)
+        description: Renovate dryRun (off runs live and opens PRs, on one shard of at most 15 repos)
         type: choice
         options: [full, lookup, extract, "off"]
         default: full
@@ -44,6 +48,7 @@ jobs:
     # This repo's release environment holds the ccf-release-bot secrets; only main may use it
     # (repo-settings), so a workflow on another branch can't read them.
     environment: release
+    # The app token lasts an hour, which is why a live run takes at most 15 repos.
     timeout-minutes: 60
     env:
       # A scheduled run has no inputs: keep these fallbacks equal to the dispatch defaults.
@@ -60,19 +65,29 @@ jobs:
           go-version-file: go.mod
       - name: Select repos
         id: select
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          repos="$(go run ./cmd/renovate-config list --manifest "$MANIFEST" --repos "$REPOS")"
+          # The run number picks a live run's shard, so each run takes the next one (a re-run keeps
+          # its number and its shard); both commands below get the same slot.
+          slot="$RUN_NUMBER"
+          repos="$(go run ./cmd/renovate-config list --manifest "$MANIFEST" --repos "$REPOS" --dry-run "$DRY_RUN" --slot "$slot")"
           # An empty list would mint a token for every repo the app is installed on (all of them).
           if [ -z "$repos" ]; then
             echo "::error::no repos selected"
             exit 1
           fi
-          echo "repos=$repos" >> "$GITHUB_OUTPUT"
+          {
+            echo "repos=$repos"
+            echo "slot=$slot"
+          } >> "$GITHUB_OUTPUT"
       - name: Build the Renovate config
         id: config
+        env:
+          SLOT: ${{ steps.select.outputs.slot }}
         run: |
           config="$RUNNER_TEMP/renovate-config.json"
-          go run ./cmd/renovate-config config --manifest "$MANIFEST" --repos "$REPOS" --dry-run "$DRY_RUN" > "$config"
+          go run ./cmd/renovate-config config --manifest "$MANIFEST" --repos "$REPOS" --dry-run "$DRY_RUN" --slot "$SLOT" > "$config"
           echo "path=$config" >> "$GITHUB_OUTPUT"
           jq '{repositories, dryRun}' "$config"
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0

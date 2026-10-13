@@ -25,7 +25,7 @@ Severity is the advisory's (`critical`, `high`, `medium`, `low`); anything else 
 
 | Input | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.yaml` | The repos to summarise: every repo in the manifest. Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the mocks. |
+| `manifest` | `repos.yaml` | The repos to summarise: every active repo in the manifest ([manifest.md](manifest.md)). Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the mocks. |
 
 ## Secrets and variables
 

@@ -10,7 +10,7 @@ anything that ships (Go modules, images, helm, the action's Dockerfile, OPA) sta
 ccf-bump --repo NAME [--set dep=version]... [--mode sync|train] [--pr] [--dry-run] [flags]
 ccf-bump sync --all|--repos a,b [--batch 10] [--pr] [--dry-run] [flags]
 ccf-bump merge --all|--repos a,b [--wait 20m] [--author NAME] [--dry-run]
-ccf-bump list [--repos a,b]
+ccf-bump list [--repos a,b] [--chunk 10] [--dry-run]
 ```
 
 - **sync** mode (the default; `ccf-bump sync`) targets each dependency's latest **final** release:
@@ -25,7 +25,14 @@ ccf-bump list [--repos a,b]
 - Without `--pr`, ccf-bump prints the plan and the diff. `--pr` pushes branch
   `ccf-bump/<mode>-<YYYY-MM-DD>` (forced, so a rerun the same day updates it) and opens the PR, or
   updates the open one. `--pr --dry-run` prints the PR instead.
-- `--batch N` (sync): at most N PRs per hour; it waits for the hour to pass.
+- `--batch N` (sync): at most N PRs per hour; it waits for the hour to pass. The wait outlives
+  an app installation token (one hour), so `ccf-bump-sync.yml` doesn't rely on it: it runs chunks
+  of 10 repos as separate jobs, each with its own token ([The `ccf-bump-sync` workflow](#the-ccf-bump-sync-workflow)).
+- `--dry-run` may name repos of an inactive batch (`--repos`, `--repo`), to check a batch before it
+  is switched on ([manifest.md](manifest.md#switching-a-batch-on)). Without it, named repos must be
+  active. A dry run orders such repos by stage as if their batch were active.
+- In a workflow step (`$GITHUB_OUTPUT` set), `sync` writes `prs=<N>`, the number of branches it
+  pushed (PRs opened or updated).
 - A repo that fails is reported (`::error::`) and the others still run; the exit code is non-zero.
   Failures are a branch push, a PR create/update, or resolving the manifest or a version.
 - **Warnings** don't fail the run: they are printed as `::warning::` and repeated at the end of the
@@ -38,10 +45,12 @@ ccf-bump list [--repos a,b]
   run, are never touched. A failure to close one is a warning. `--dry-run` only lists the PRs it
   would close; with nothing opened to tell who it runs as, it lists any bot's.
 - `--manifest` (default `repos.yaml`; `repos.mock.yaml` for the mocks) gives the repos, their kinds
-  and the dependency edges. `sync --all` takes every repo with `release: true`, in stage order.
+  and the dependency edges. `sync --all` takes every active repo with `release: true` ([manifest.md](manifest.md)), in stage order.
 - `--clones DIR` reads `DIR/<repo>` (its committed `HEAD`) instead of cloning from GitHub, for dry
   runs against local clones.
-- `list` prints the selected repos comma-separated, to scope the token.
+- `list` prints the selected repos comma-separated, to scope the token. `list --chunk N` prints
+  them as JSON chunks of at most N repos, in stage order:
+  `[{"index":1,"of":4,"repos":"api,gooci,..."},...]`.
 - Environment: `GH_TOKEN` (API, clone and push), `GITHUB_API_URL`, and the git identity in
   `GIT_AUTHOR_*`/`GIT_COMMITTER_*`.
 
@@ -157,13 +166,35 @@ them first is harmless.
 
 ## The `ccf-bump-sync` workflow
 
-`ccf-bump-sync.yml` runs `ccf-bump sync --batch 10 --pr` on the 8th and 22nd at 04:00 UTC, and on
-`workflow_dispatch` with inputs `manifest` (default `repos.yaml`, or `repos.mock.yaml`) and `dry_run`
-(default `true`). Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the
-mocks. They are dry runs until the repo variable `CCF_BUMP_SYNC_LIVE` is `true`. It lists the
-repos, then mints a `ccf-release-bot` token scoped to exactly those (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`, this repo's `release` environment secrets; main only): read-only for dry runs; contents,
-pull requests and workflows write otherwise (bumps edit workflow files), and checks read. Commits
-are authored by the bot. A live run then runs `ccf-bump merge --wait 20m` over the same repos.
+`ccf-bump-sync.yml` runs `ccf-bump sync --pr` on the 8th and 22nd at 04:00 UTC, and on
+`workflow_dispatch` with inputs `manifest` (default `repos.yaml`, or `repos.mock.yaml`), `repos`
+(default every active repo with `release: true`; a dry run may name repos of an inactive batch) and
+`dry_run` (default `true`). Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the
+mocks. They are dry runs until the repo variable `CCF_BUMP_SYNC_LIVE` is `true`.
+
+The `select` job runs `ccf-bump list --chunk 10` and fails on an empty selection. The chunks are in
+stage order. One `sync` job per chunk runs, one at a time (`max-parallel: 1`), and a failed chunk
+doesn't stop the others. Each mints its own `ccf-release-bot` token scoped to exactly its chunk's repos
+(`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`, this repo's `release` environment secrets; main
+only): read-only for dry runs; contents, pull requests and workflows write otherwise (bumps edit
+workflow files), and checks read. Commits are authored by the bot. A live chunk then runs
+`ccf-bump merge --wait 20m` over its repos. Unless it is the last chunk, it then waits until an hour
+after it started before the next chunk begins. It skips the wait only when it knows it pushed
+nothing (`prs=0`); a Bump step that failed without reporting may have pushed PRs, so it waits.
+
+So the org gets at most 10 bump PRs an hour (one chunk's), and no token is used past its hour.
+Before, one job ran `sync --batch 10` over every repo: its wait after 10 PRs outlived the job's
+one-hour token, and with every batch active its waits outlived the 300-minute timeout.
+Worst case, with every repo getting a PR:
+
+| Active batches | Repos (`release: true`) | Chunks | PRs per hour | Run length (live) |
+| --- | --- | --- | --- | --- |
+| none (today) | 6 | 1 | 6 | under an hour |
+| 1 | 33 | 4 | 10 | about 3 to 4 hours |
+| 1, 2 | 60 | 6 | 10 | about 5 to 6 hours |
+| 1, 2, 3 | 70 | 7 | 10 | about 6 to 7 hours |
+
+A chunk that pushed nothing (every repo current) doesn't wait, and a dry run never does.
 
 `ccf-bump-merge.yml` runs the merge pass alone (`--wait 0`) daily at 05:41 UTC, for PRs whose CI
 finished later, and on `workflow_dispatch` with inputs `manifest` (default `repos.yaml`) and

@@ -62,6 +62,10 @@ func (e *Engine) apply(ctx context.Context, st *State, author string, c Command)
 		return nil
 	}
 	r := st.Repo(c.Repo)
+	if g := st.GateCheck(c.Repo); g != nil && (r == nil || r.Phase == Released) {
+		e.gateCommand(ctx, st, author, c, g)
+		return nil
+	}
 	switch {
 	case r == nil:
 		return fmt.Errorf("%s is not in this train", c.Repo)

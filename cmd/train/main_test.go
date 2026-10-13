@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/compliance-framework/workflows/internal/manifest"
 	"github.com/compliance-framework/workflows/internal/train"
 )
 
@@ -46,6 +47,18 @@ func openTrain(t *testing.T, repos ...string) string {
 
 func TestSelect(t *testing.T) {
 	t.Chdir("../..")
+	// Every batch of repos.yaml is active (TestTrainReposByBatchReposYAML), so a train takes every repo with
+	// release: true, in manifest order.
+	m, err := manifest.Load("repos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var released []string
+	for _, r := range m.Repos {
+		if r.Release {
+			released = append(released, r.Name)
+		}
+	}
 	tests := []struct {
 		name, issues string
 		args         []string
@@ -53,7 +66,7 @@ func TestSelect(t *testing.T) {
 	}{
 		{"start, no open train", `[]`, []string{"--for", "start", "--manifest", "repos.mock.yaml", "--repos", "mock-ui,mock-api"},
 			"open=false\nmanifest=repos.mock.yaml\nrepos=mock-api,mock-ui\n", ""},
-		{"start, every release repo", `[]`, []string{"--for", "start"}, "open=false\nmanifest=repos.yaml\nrepos=api,gooci,agent,ui,agent-action,helm-charts\n", ""},
+		{"start, every release repo", `[]`, []string{"--for", "start"}, "open=false\nmanifest=repos.yaml\nrepos=" + strings.Join(released, ",") + "\n", ""},
 		{"reconcile, no open train", `[]`, []string{"--for", "reconcile"}, "open=false\nmanifest=\nrepos=\n", ""},
 		{"the open train's repos win", openTrain(t, "mock-gooci", "mock-api"), []string{"--for", "start", "--repos", "mock-ui"},
 			"open=true\nmanifest=repos.mock.yaml\nrepos=mock-api,mock-gooci\n", ""},
@@ -172,6 +185,21 @@ func TestWatch(t *testing.T) {
 		err := run(context.Background(), []string{"reconcile", "--watch", "10m", "--interval", "3m"}, getenv, io.Discard, now)
 		if err != nil || sleeps != tt.sleeps || edits != tt.edits {
 			t.Errorf("%s: %v, sleeps %d, runs %d", tt.name, err, sleeps, edits)
+		}
+	}
+}
+
+func TestWaitingOnTheGate(t *testing.T) {
+	for result, want := range map[train.GateResult]bool{train.GateRunning: true, train.GatePending: true, train.GateFailed: false, train.GatePassed: false} {
+		st := &train.State{Month: "2026-12", Status: train.StatusOpen, GateStage: 2,
+			Repos: []*train.RepoState{{Name: "p", Stage: 1, Phase: train.Released}, {Name: "h", Stage: 2, Phase: train.Waiting, Hold: train.Blocked}},
+			Gate:  []*train.GateCheck{{Name: "p", Result: result}}}
+		body, err := train.Render(st, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := waiting(train.Issue{Open: true, Body: body}); got != want {
+			t.Errorf("%q: waiting = %v", result, got)
 		}
 	}
 }

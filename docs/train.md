@@ -15,7 +15,7 @@ train bumps its internal dependencies to what the earlier stages released, with
 | `release-pr` | Waits for release-please's run on the default branch's head (the workflow file `release-please.yml`), then takes its PR (`release-please--branches--<default branch>`, from a branch of the repo itself: a fork's PR named like it is never taken, since anyone can name a fork's branch that way). No PR means nothing to release: the repo is `released` with no new version. The run is the signal because release-please leaves its PR behind the branch for commits that release nothing (`ci:`, `chore:`). |
 | `merging` | Merges the release PR (squash, as ccf-release-bot, the `ccf-review` bypass actor) once its required checks pass (`ci / required` and `release-checks / release-checks`), and unless `version-guard` would flag it: a major increase without the `release:major-approved` label. |
 | `publishing` | Waits for release-please's tags on the merge commit and for every release workflow run of each tag (`event: release`) to succeed. Only release tags count (`vX.Y.Z[-pre]` or `<component>-vX.Y.Z[-pre]` with a version the release PR proposed); floating tags a release workflow moves there (`v0`, `latest`) are ignored. |
-| `released` | Done. |
+| `released` | Done. A released plugin or policies repo can still be `blocked` by the gate (see The gate). |
 | `skipped` | An org owner commented `/skip <repo>`. The next stage doesn't wait for it, and its version isn't bumped anywhere. |
 | `blocked` | Something failed: the PR's required checks, ccf-bump, release-please, a merge or a release workflow. |
 | `needs-human` | A decision: a major version, a bump PR without the `ccf-bump:automerge` label (ccf-bump leaves it off for a major update, an unversioned pin, or an app update of a minor or more in a helm repo), or a closed bump PR. |
@@ -24,6 +24,37 @@ Every run reads GitHub's current state, so running it again is always safe, and 
 `needs-human` clear themselves once the cause is gone: a fixed release PR whose checks pass merges
 on the next run. A failed `ccf-bump` stays blocked until `/retry`, because running it again would
 fail again. A blocked repo holds up the stages after it, never the other repos of its stage.
+
+### The gate
+
+Before the first stage with a helm repo (`helm-charts`, stage 4; before the train finishes when it
+has none), once every earlier stage is done, the train runs a **gate**. Each check is a run of a
+workflow of this repo, dispatched by the train (`workflow_dispatch` on the default branch, with
+`GITHUB_TOKEN`) and read on later runs (logic in `internal/train/gate.go`):
+
+| Check | Runs |
+| --- | --- |
+| each `go-plugin` and `policies` repo of the earlier stages | [`plugin-probe.yml`](plugin-probe.md) on `ghcr.io/compliance-framework/<repo>:v<version>` (a plugin in `plugins`, a bundle in `policies`), at the version this train released, or its version when the train started if it released nothing. `agent-ref` is the version of the `agent` repo this train released (or its version when the train started), so the probe loads plugins and compiles policies as that agent and its OPA would; a train without the `agent` repo (the mocks, or a `repos` selection) probes with the agent in this repo's `go.mod`. |
+| `stack-smoke` | [`stack-smoke.yml`](stack-smoke.md) with the train's versions of `api`, `ui` and `agent` (`api-tag`, `ui-tag`, `agent-tag`), and of `plugin-file-attestation` and `plugin-file-attestation-policies` (`plugin-tag`, `policy-tag`) when the train holds them, else the workflow's defaults. Only when the train holds `api`, `ui` and `agent`: a mock train has no smoke check. |
+
+The gate reads only the train's repos: the release-bot token reaches no others.
+
+The gate holds the helm stage until every check has passed or been skipped:
+
+- **A failed check** blocks its repo (`blocked`, though `released`; the board shows it red) and
+  posts in the Slack thread, once per run, the repo, the run and the tail of its output. The
+  stack-smoke check has no repo: only the message and the gate table say it failed.
+- **A fix** is picked up on its own: on every run, a failed probe whose repo's default branch has
+  a newer release-please version is dispatched again at that version (the version the train
+  released stays in the table and the digest). `/retry <repo>` (or `/retry stack-smoke`) runs the
+  check again as it is; `/skip <repo>` (or `/skip stack-smoke`) passes it.
+- **A protocol v1 plugin** (the probe report's `protocol: 1`, read from the run's log) is posted
+  once as a deprecation candidate. It never blocks.
+- A check that GitHub dispatched without returning a run ID fails rather than being dispatched
+  again; `/retry` it.
+
+The issue shows a gate table under the repos. A dry run plans the gate (each check with the planned
+versions) in its plan comment and runs nothing. A train started before the gate existed has none.
 
 ### What gates a merge
 
@@ -80,8 +111,8 @@ on an open train's issue:
 
 | Command | Effect |
 | --- | --- |
-| `/skip <repo>` | Skips the repo; the next stage can start without it. |
-| `/retry <repo>` | Clears the repo's hold and tries again: runs ccf-bump again (`bumping`), re-runs the failed jobs of a failed release workflow (`publishing`), or un-skips a skipped repo. |
+| `/skip <repo>` | Skips the repo; the next stage can start without it. For a released repo with a gate check, or `stack-smoke`: passes that check. |
+| `/retry <repo>` | Clears the repo's hold and tries again: runs ccf-bump again (`bumping`), re-runs the failed jobs of a failed release workflow (`publishing`), or un-skips a skipped repo. For a released repo with a gate check, or `stack-smoke`: runs that check again. |
 | `/abort` | Stops the train and closes the issue. Nothing is reverted. |
 
 The train replies to each command. Commands from anyone else are refused, and so is every command
@@ -129,17 +160,19 @@ that needs the planned tag to exist (a pseudo-version, an OPA version); the plan
 
 Runs share one concurrency group (at the job level, so comments that aren't commands don't
 queue). A run with an open train keeps reconciling every minute for up
-to 30 minutes while a repo waits on GitHub (release-please, CI, a release workflow), and stops
+to 30 minutes while a repo waits on GitHub (release-please, CI, a release workflow, a gate run), and stops
 early once every repo left is held for a human.
 
 A train started while another is open only moves the open one on: one train at a time.
 
 ### Tokens
 
-- `GITHUB_TOKEN` with `issues: write`: the tracking issue.
+- `GITHUB_TOKEN` with `issues: write`: the tracking issue; `actions: write`: the gate dispatches
+  `plugin-probe.yml` and `stack-smoke.yml` here and reads their logs. Those runs get only
+  `contents: read`, and no release-bot token, so the plugins the probe runs never see one.
 - ccf-release-bot (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`, this repo's `release` environment secrets; main only), scoped to exactly the train's
   repos (`train select` lists them; an open train's repos come from its state and must be in its
-  manifest with `release: true`). Read-only for a dry run; otherwise contents, pull requests,
+  manifest with `release: true`, in an active batch). Read-only for a dry run; otherwise contents, pull requests,
   issues (chart issues) and actions (`/retry`) write, workflows write (bumps edit workflow files),
   and checks and statuses read. Its commits are authored by the bot.
 - ccf-release-bot scoped to `workflows` with organization Members read, for comment commands. If

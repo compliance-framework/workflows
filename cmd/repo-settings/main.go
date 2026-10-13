@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -101,25 +100,20 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	}, stdout)
 }
 
-// selectRepos returns the repos named in list (comma- or space-separated), or every repo in the
-// manifest if list is empty, in manifest order. Every repo gets the same settings, including the
-// workflows repo (release: false): it holds the code every other repo's CI and releases run.
+// selectRepos returns the repos named in list (comma- or space-separated), or every active repo in
+// the manifest (manifest.ActiveRepos) if list is empty, in manifest order. A named repo may be in
+// a batch that is not active yet: a batch's settings are applied before it is switched on. Every
+// repo gets the same settings, including the workflows repo (release: false): it holds the code
+// every other repo's CI and releases run.
 func selectRepos(m *manifest.Manifest, list string) ([]string, error) {
 	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
-	var unknown []string
-	for _, n := range names {
-		if !slices.ContainsFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n }) {
-			unknown = append(unknown, n)
-		}
-	}
-	if len(unknown) > 0 {
-		return nil, fmt.Errorf("not in the manifest: %s", strings.Join(unknown, ", "))
+	repos, err := m.Select(names, true)
+	if err != nil {
+		return nil, err
 	}
 	var out []string
-	for _, r := range m.Repos {
-		if len(names) == 0 || slices.Contains(names, r.Name) {
-			out = append(out, r.Name)
-		}
+	for _, r := range repos {
+		out = append(out, r.Name)
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no repos selected")

@@ -107,6 +107,11 @@ type State struct {
 	// LastComment is the ID of the last issue comment read for commands.
 	LastComment int64  `json:"last_comment,omitempty"`
 	Digest      string `json:"digest,omitempty"` // URL of the digest draft comment
+	// GateStage is the stage the gate (gate.go) holds until it passes, Stages()+1 for the finish;
+	// 0 in a train started before the gate. Gate is its checks, listed once the stages before
+	// it are done.
+	GateStage int          `json:"gate_stage,omitempty"`
+	Gate      []*GateCheck `json:"gate,omitempty"`
 }
 
 // Repo returns the named repo's state, or nil.
@@ -220,6 +225,22 @@ func Render(s *State, reposURL, issueHelp string) (string, error) {
 		}
 		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s |\n", r.Stage, r.Name, r.Status(),
 			Versions(r.From), Versions(r.Versions), strings.Join(prs, ", "), cell(r.Detail))
+	}
+	if len(s.Gate) > 0 {
+		b.WriteString("\n| Gate | Version | Result | Detail |\n| --- | --- | --- | --- |\n")
+		for _, g := range s.Gate {
+			result := string(g.Result)
+			if g.Result == GatePending {
+				result = "pending"
+			}
+			if g.RunURL != "" {
+				result = fmt.Sprintf("[%s](%s)", result, g.RunURL)
+			}
+			if g.Candidate {
+				result += ", protocol v1: deprecation candidate"
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", g.Name, g.Version, result, cell(g.Detail))
+		}
 	}
 	b.WriteString("\n" + stateOpen + string(data) + stateClose + "\n")
 	return b.String(), nil

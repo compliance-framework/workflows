@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,11 +18,31 @@ func date(t *testing.T, s string) time.Time {
 }
 
 func TestLoadRepoManifests(t *testing.T) {
+	// Stage 3 of repos.yaml: agent-action and every batch's released plugin and policy repos, sorted.
+	reposYAML, err := Load("../../repos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	third := []string{"agent-action"}
+	for _, r := range reposYAML.Repos {
+		if r.Batch != 0 && r.Release {
+			third = append(third, r.Name)
+		}
+	}
+	slices.Sort(third)
+	if len(third) != 65 {
+		t.Fatalf("stage 3 of repos.yaml has %d repos, want agent-action and 64 released plugin and policy repos", len(third))
+	}
 	tests := []struct {
 		path   string
 		stages [][]string
 	}{
-		{"../../repos.yaml", [][]string{{"api", "gooci"}, {"agent", "ui"}, {"agent-action"}, {"helm-charts"}}},
+		{"../../repos.yaml", [][]string{ // every batch is active
+			{"api", "gooci"},
+			{"agent", "ui"},
+			third,
+			{"helm-charts"},
+		}},
 		{"../../repos.mock.yaml", [][]string{
 			{"mock-api", "mock-gooci"},
 			{"mock-agent", "mock-ui"},

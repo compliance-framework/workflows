@@ -1,6 +1,7 @@
 # Loads plugins through the agent's runner library and reports the protocol each speaks and the
 # agent library it was built with, and checks policy bundles with the agent's OPA version
 # (cmd/plugin-probe, docs/plugin-probe.md). Fails if any plugin fails to load or bundle fails its check.
+# The release train dispatches it as its gate (docs/train.md, "The gate").
 name: plugin-probe
 
 on:
@@ -9,7 +10,7 @@ on:
       plugins:
         description: Plugins to probe, comma- or newline-separated OCI tags (registry/repository:tag)
         type: string
-        required: true
+        default: ""
       agent-ref:
         description: Agent version, tag, branch or commit to probe with (default the version in this repo's go.mod)
         type: string
@@ -27,7 +28,7 @@ on:
       plugins:
         description: Plugins to probe, comma-separated OCI tags (registry/repository:tag)
         type: string
-        required: true
+        default: ""
       agent-ref:
         description: Agent version, tag, branch or commit to probe with (default the version in go.mod)
         type: string
@@ -108,7 +109,10 @@ jobs:
             --json "$RUNNER_TEMP/report.json" --markdown "$GITHUB_STEP_SUMMARY" || status=$?
           if [ -s "$RUNNER_TEMP/report.json" ]; then
             # Compact JSON is one line: newlines inside strings are escaped.
-            echo "report=$(jq -c . "$RUNNER_TEMP/report.json")" >> "$GITHUB_OUTPUT"
+            report="$(jq -c . "$RUNNER_TEMP/report.json")"
+            echo "report=$report" >> "$GITHUB_OUTPUT"
             cat "$RUNNER_TEMP/report.json"
+            # One line the release train's gate reads from this run's log (train.ProbeReportMarker).
+            echo "ccf-plugin-probe-report $report"
           fi
           exit "$status"
