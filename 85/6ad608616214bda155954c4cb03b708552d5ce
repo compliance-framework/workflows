@@ -1,0 +1,6 @@
+lisa-design:
+- Triggers are workflow_run on [ccf-bump-sync, train] (completed, main, not cancelled) + workflow_dispatch, not workflow_call: train.yml and ccf-bump-sync.yml stay untouched (W3-S1-T02 edits the train in parallel).
+- Two jobs: plan (GITHUB_TOKEN issues: read, no secrets, no environment) decides due + lists repos; report runs in the release environment only when due, so hourly train runs never mint a token or create a deployment.
+- The app token is read-only (contents, pull-requests, checks) and scoped to the agent + plugins plan lists; GHCR is read anonymously; the issue is written with GITHUB_TOKEN (issues: write).
+- repos.mock.yaml dispatches write a separate "Plugin health (repos.mock.yaml)" issue so mock runs never overwrite the real one.
+- report fails after publishing when any read failed (like vuln-summary).
