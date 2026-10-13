@@ -5,3 +5,8 @@ lisa-design:
 - The generated config is only built for the shared config (SHARED=true); repos with their own .regal config keep it untouched (spec rule 3). except-paths is appended (+=) so a future shared except-paths list isn't overwritten; level is not set so the provided default (error) stays.
 - Logic stays in the regal lint step (yq/jq, both preinstalled on ubuntu-latest) rather than a Go cmd: the job runs in the caller's checkout with no Go toolchain or workflows checkout beyond the sparse config; covered by internal/ciworkflows/regal_test.go step tests (fake regal).
 - prefer-string-interpolation is ignored (not warning) in the shared config: its fix changes policy behaviour (undefined sprintf arg vs "<undefined>", %q/%v) and older agents' OPA can't parse template strings.
+
+lisa-selfreview:
+pass 1 (strict), verdict request_changes:
+- [must-fix GO-NIL-001 481e50a44941] internal/ciworkflows/regal_test.go TestRegalDataPaths: unchecked type assertions on the parsed generated config panic instead of failing with a message.
+- [should-fix X:tests/test-forbids-shared-except-paths 995c0996822b] internal/ciworkflows/regal_test.go TestSharedRegalConfig: asserting the shared config has no imports rules contradicts the += design.
