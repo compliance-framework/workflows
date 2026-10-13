@@ -16,7 +16,7 @@ public repos.
 | Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain and the `golang` image are in it. Majors get their own PRs. |
 | Auto-merge | The non-major group (and every non-major vulnerability fix) auto-merges, but Renovate merges it itself (`platformAutomerge: false`, `automergeType: "pr"`, `automergeStrategy: "squash"`): on its next run after the checks pass, Renovate squash-merges the PR through the API as `ccf-release-bot`. Majors wait for a human. See [Why Renovate merges, not GitHub](#why-renovate-merges-not-github). |
 | Rebasing | `rebaseWhen: "conflicted"`: a branch is rebased only when it conflicts with `main`, not every time it falls behind. See [One run merges every green PR](#one-run-merges-every-green-pr). |
-| Limits | `prHourlyLimit: 4`, `prConcurrentLimit: 8` per repo. |
+| Limits | `prHourlyLimit: 1`, `prConcurrentLimit: 8` per repo. With a live run's shard of at most 15 repos, that bounds the PRs across the org; see [The org-wide throttle](#the-org-wide-throttle). |
 | Commits | Semantic: `fix(deps)` for runtime dependencies (Go `require`, npm `dependencies`, a Dockerfile's final stage, the Go `toolchain` directive), which release-please releases, and `chore(deps)` for everything else (dev, CI, actions). A group takes the highest type of its updates, so a group with any runtime update is `fix(deps)`. Security fixes are always `fix(deps)`, whatever their dependency type (see Vulnerability fixes). |
 | Go | `postUpdateOptions: ["gomodTidy"]`. Indirect modules are left to `go mod tidy` (Renovate's default). |
 | Indirect Go modules | When Renovate does update one, it is `fix(deps)`, not the `chore(deps)` that `depType: indirect` gets by default: indirect modules are linked into the binary, so the update must release (`matchManagers: ["gomod"], matchDepTypes: ["indirect"], semanticCommitType: "fix"`). A security fix to one is `fix(deps)` through `vulnerabilityAlerts` regardless of this rule. |
@@ -35,8 +35,9 @@ A merge through the API as the bot does use the bypass. The `ccf-required` rules
 so the required check still gates every merge.
 
 The cost is merge lag: GitHub would merge as soon as the check passes, while Renovate merges on
-its next run that finds the checks green. `renovate.yml` runs daily, so a PR merges up to about a
-day after its checks pass. The 8th/22nd `schedule` doesn't delay this: it only limits when new
+its next run that finds the checks green. `renovate.yml` runs hourly and visits each repo's shard in
+turn, so a PR merges up to one rotation (at most 5 hours with every batch active) after its checks
+pass. The 8th/22nd `schedule` doesn't delay this: it only limits when new
 branches are created, while Renovate keeps updating and merging existing PRs on the other days
 (its defaults `updateNotScheduled: true` and `automergeSchedule: ["at any time"]`, which the preset
 leaves alone). A PR whose checks fail stays open, and Renovate updates or recreates it
@@ -47,7 +48,7 @@ on later runs as usual. The repo's "allow auto-merge" setting is no longer used 
 With auto-merge on, Renovate's default `rebaseWhen: "auto"` acts as `behind-base-branch`. Once it
 merges one PR, every other PR of that repo is behind `main`, so it rebases them instead of merging
 them, and their CI starts again. A run then merges at most one PR per repo: a repo with three
-security PRs takes three daily runs, and every rebase costs a CI run (seen on `mock-plugin-1` in
+security PRs takes three runs, and every rebase costs a CI run (seen on `mock-plugin-1` in
 run 37758663162). The preset sets `rebaseWhen: "conflicted"`, so Renovate merges every PR whose
 checks are green in the same run and rebases a branch only when it really conflicts with `main`
 (`go.mod` and `go.sum` conflicts are textual, so they are caught). This works because the
@@ -72,12 +73,56 @@ npx --yes --package renovate -- renovate-config-validator --strict --no-global r
 npx --yes --package renovate -- renovate-config-validator --strict renovate/default.json
 ```
 
+## The org-wide throttle
+
+`prHourlyLimit` is per repo in Renovate (each repo counts the PRs it opened since the top of the
+hour), so on its own it can't hold the org to the plan's ~15 PRs an hour: with 37 repos active
+after batch 1, even `1` would allow 37. Renovate 44.145.1 (the pinned version) has one global
+limit, the self-hosted `prCommitsPerRunLimit`, but it counts commits per run rather than PRs per
+hour, counts vulnerability fixes and rebases, and when it is reached Renovate stops processing the
+remaining repos for that run. Those repos then get no vulnerability fixes and no auto-merges until a
+later run, and the same repos at the head of the list would always go first. So the workflow shards
+instead:
+
+- A **live** run works on one shard of at most 15 repos (`renovate.MaxLiveRepos`). The active repos,
+  in manifest order, are split into `n = ceil(repos / 15)` shards, with repo `i` in shard `i mod n`.
+  The run takes shard `slot mod n`, where `slot` is the number of hours since the Unix epoch. The
+  same slot scopes the token and builds the config.
+- `renovate.yml` runs **hourly** (`17 * * * *`), so consecutive runs take the shards in turn and
+  each repo is visited every `n` hours.
+- The preset's `prHourlyLimit: 1` lets each repo of the shard open at most one non-vulnerability
+  PR per visit. The non-major group comes first, then majors one per visit.
+- **Vulnerability fixes keep flowing.** Renovate exempts them from `prHourlyLimit` (and from
+  `schedule` and `prCommitsPerRunLimit`; docs: "vulnerability alerts skip the line"), so each
+  visit opens every fix a repo needs. They wait at most one rotation for their repo's shard.
+- Dry runs write nothing, so they aren't sharded and take every selected repo.
+
+Worst case for non-vulnerability PRs opened across the org in one hour, from `repos.yaml` (7 core
+repos, this one included; batch 1 has 30 repos, batch 2 27, batch 3 10):
+
+| Active batches | Active repos | Shards | Repos per run | Non-vulnerability PRs per hour | Each repo visited every |
+| --- | --- | --- | --- | --- | --- |
+| none (today) | 7 | 1 | 7 | 7 | 1 hour |
+| 1 | 37 | 3 | 13 | 13 | 3 hours |
+| 1, 2 | 64 | 5 | 13 | 13 | 5 hours |
+| 1, 2, 3 | 74 | 5 | 15 | 15 | 5 hours |
+
+Vulnerability PRs come on top of these and are deliberately not capped. A manual live dispatch in
+the same hour as a scheduled run can add one more shard's worth: a repo already visited that hour
+opens nothing more (its `prHourlyLimit` is spent), but a run that lands on another shard does. A
+run is late only when the previous one overruns (the `renovate` concurrency group queues it). A
+live run's shard also keeps it within the app token's one-hour life.
+
+On the 8th and 22nd (the preset's `schedule`), a repo gets its non-major group PR on its first visit
+that day and a major on each later one. With 5 shards, that is about five visits a day.
+
 ## The workflow: `renovate.yml`
 
-Runs daily at 06:17 UTC and on `workflow_dispatch`, as one job:
+Runs hourly at minute 17 and on `workflow_dispatch`, as one job:
 
-1. `go run ./cmd/renovate-config list` selects the repos from the manifest (every repo in it, this
-   `workflows` repo included, or the `repos` subset) and fails on an empty selection.
+1. `go run ./cmd/renovate-config list` selects the repos from the manifest (every active repo,
+   this `workflows` repo included, or the `repos` subset) and fails on an empty selection. A live
+   run then keeps only one shard of the selection ([The org-wide throttle](#the-org-wide-throttle)).
 2. `go run ./cmd/renovate-config config` writes the Renovate global config: the preset's settings
    plus `platform: github`, `autodiscover: false`, `repositories` (the selection, as
    `compliance-framework/<name>`), `onboarding: false`, `requireConfig: "optional"` and `dryRun`.
@@ -94,7 +139,7 @@ Runs daily at 06:17 UTC and on `workflow_dispatch`, as one job:
 | Input | Default | What |
 | --- | --- | --- |
 | `manifest` | `repos.yaml` | The repos to run on: the product repos and this one. `repos.mock.yaml` for the mocks. |
-| `repos` | every active repo in the manifest | Comma-separated subset; each must be in the manifest and active ([manifest.md](manifest.md)). |
+| `repos` | every active repo in the manifest | Comma-separated subset; each must be in the manifest. A live run takes only active repos, and one shard of at most 15 of them. A dry run may name repos of an inactive batch, to check the batch before it is switched on ([manifest.md](manifest.md#switching-a-batch-on)). |
 | `dry_run` | `full` | Renovate's `dryRun`: `full` logs every branch and PR it would create, `lookup` stops after finding updates, `extract` after reading the package files. `off` runs live. |
 | `log_level` | `info` | `debug` for a full trace. |
 
@@ -122,6 +167,10 @@ posts it to `#ccf-ci-failures` (rule (a)), and the failed check keeps Renovate f
 
 ## Running it
 
+- **Dry run of a batch before it is switched on**:
+  `gh workflow run renovate.yml -f repos=plugin-a,plugin-a-policies,... -f dry_run=full` with the
+  batch's repos. The log lists each `DRY-RUN: Would create PR` per repo. A dry run isn't sharded and
+  its read-only token lasts an hour, so dispatch a large batch in groups of about 15 repos.
 - **Dry run on the mocks**: Actions, `renovate`, Run workflow, or
   `gh workflow run renovate.yml -f manifest=repos.mock.yaml -f dry_run=full`. The log lists each
   `DRY-RUN: Would create PR` per repo; expect about one grouped PR per repo plus its majors.

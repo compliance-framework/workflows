@@ -4,7 +4,11 @@
 //	ccf-bump --repo NAME [--set dep=version]... [--mode train|sync] [--pr] [--dry-run] [flags]
 //	ccf-bump sync --all|--repos a,b [--batch 10] [--pr] [--dry-run] [flags]
 //	ccf-bump merge --all|--repos a,b [--wait 20m] [--dry-run]   merge its green ccf-bump:automerge PRs
-//	ccf-bump list [--repos a,b]       the selected repos, comma-separated (to scope the token)
+//	ccf-bump list [--repos a,b] [--chunk 10] [--dry-run]   the selected repos, comma-separated (to scope the token)
+//
+// A dry run (--dry-run) may name repos of an inactive batch, to check the batch before it is
+// switched on; otherwise named repos must be active. list --chunk N prints the selection as JSON
+// chunks of at most N repos, one ccf-bump-sync.yml job (and token) each.
 //
 // sync mode targets each dependency's latest final release; train mode only the --set versions.
 // Without --pr it prints the plan and the diff; --pr --dry-run also prints the PR it would open.
@@ -13,6 +17,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -110,13 +115,14 @@ func run(ctx context.Context, args []string, e env) error {
 	repo := fs.String("repo", "", "the repo to bump")
 	repos := fs.String("repos", "", "sync, merge, list: comma-separated repos (default with --all: every repo with release: true)")
 	all := fs.Bool("all", false, "sync, merge: every repo with release: true")
+	chunk := fs.Int("chunk", 0, "list: print JSON chunks of at most this many repos (0: one comma-separated line)")
 	fs.StringVar(&o.owner, "owner", "compliance-framework", "the repos' owner")
 	fs.StringVar(&o.mode, "mode", "sync", "sync (latest final releases) or train (only --set versions)")
 	fs.Var(o.set, "set", "dep=version target (repeatable); dep is a repo, a github.com/<owner>/ module path, opa or workflows")
 	fs.StringVar(&o.workflowsRef, "workflows-ref", "", "move compliance-framework/workflows pins to this release (vX.Y.Z, pinned by its commit SHA) or ref (same as --set workflows=REF)")
 	fs.StringVar(&o.clones, "clones", "", "directory of local clones (<dir>/<repo>) to read instead of cloning from GitHub")
 	fs.BoolVar(&o.pr, "pr", false, "push a branch and open or update a PR per repo")
-	fs.BoolVar(&o.dryRun, "dry-run", false, "with --pr: print the PR instead of pushing; merge: print what it would merge")
+	fs.BoolVar(&o.dryRun, "dry-run", false, "with --pr: print the PR instead of pushing; merge: print what it would merge; may name repos of an inactive batch")
 	fs.IntVar(&o.batch, "batch", 0, "sync: open at most this many PRs per hour (0: no limit)")
 	fs.DurationVar(&o.wait, "wait", 0, "merge: poll PRs whose required check is pending for up to this long")
 	fs.StringVar(&o.author, "author", "ccf-release-bot[bot]", "the release bot's login: merge merges only its PRs (the token's identity); workflows pins move only to its releases")
@@ -142,6 +148,9 @@ func run(ctx context.Context, args []string, e env) error {
 	if err != nil {
 		return err
 	}
+	if *chunk < 0 || (*chunk != 0 && cmd != "list") {
+		return errors.New("--chunk N (N > 0) goes with list")
+	}
 	var selected []string
 	switch {
 	case cmd == "" && (*all || *repos != "" || o.batch != 0):
@@ -149,14 +158,17 @@ func run(ctx context.Context, args []string, e env) error {
 	case cmd == "" && *repo == "":
 		return errors.New("--repo is required (or use: ccf-bump sync --all)")
 	case cmd == "":
-		selected, err = selectRepos(m, *repo)
+		selected, err = selectRepos(m, *repo, o.dryRun)
 	case *all == (*repos != "") && (cmd == "sync" || cmd == "merge"):
 		return errors.New(cmd + " takes one of --all or --repos")
 	default:
-		selected, err = selectRepos(m, *repos)
+		selected, err = selectRepos(m, *repos, o.dryRun)
 	}
 	if err != nil {
 		return err
+	}
+	if cmd == "list" && *chunk > 0 {
+		return printChunks(e.stdout, selected, *chunk)
 	}
 	if cmd == "list" {
 		_, err := fmt.Fprintln(e.stdout, strings.Join(selected, ","))
@@ -174,6 +186,7 @@ func run(ctx context.Context, args []string, e env) error {
 	b := &bumper{e: e, o: o, m: m, finals: map[string]string{}, commits: map[string]string{}, trust: map[string]error{}}
 	inWindow, windowStart := 0, e.now() // PRs opened in the current hour (--batch)
 	var failed []error
+	pushed := 0
 	for _, r := range selected {
 		if o.batch > 0 && inWindow >= o.batch {
 			if wait := time.Hour - e.now().Sub(windowStart); wait > 0 {
@@ -191,32 +204,87 @@ func run(ctx context.Context, args []string, e env) error {
 		}
 		if pr {
 			inWindow++
+			pushed++
 		}
 	}
 	b.summary()
+	if err := setOutput(e, "prs", fmt.Sprint(pushed)); err != nil {
+		failed = append(failed, err)
+	}
 	return errors.Join(failed...)
 }
 
+// chunk is one ccf-bump-sync.yml job: Repos (comma-separated) is the job's token scope and --repos.
+type chunk struct {
+	Index int    `json:"index"` // 1-based
+	Of    int    `json:"of"`
+	Repos string `json:"repos"`
+}
+
+// printChunks prints repos as a JSON array of chunks of at most size repos, in order.
+func printChunks(w io.Writer, repos []string, size int) error {
+	out := []chunk{}
+	for i := 0; i < len(repos); i += size {
+		out = append(out, chunk{Index: len(out) + 1, Repos: strings.Join(repos[i:min(i+size, len(repos))], ",")})
+	}
+	for i := range out {
+		out[i].Of = len(out)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(w, string(data))
+	return err
+}
+
+// setOutput appends name=value to $GITHUB_OUTPUT when it is set (in a workflow step).
+func setOutput(e env, name, value string) error {
+	p := e.getenv("GITHUB_OUTPUT")
+	if p == "" {
+		return nil
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("step output: %w", err)
+	}
+	_, err = fmt.Fprintf(f, "%s=%s\n", name, value)
+	if err = errors.Join(err, f.Close()); err != nil {
+		return fmt.Errorf("step output: %w", err)
+	}
+	return nil
+}
+
 // selectRepos returns the named repos (default every active repo with release: true;
-// manifest.ActiveRepos) in stage order. Named repos must have release: true and be active.
-func selectRepos(m *manifest.Manifest, list string) ([]string, error) {
+// manifest.ActiveRepos) in stage order. Named repos must have release: true, and be active unless
+// inactive is true (a dry run, which may check a batch before it is switched on).
+func selectRepos(m *manifest.Manifest, list string, inactive bool) ([]string, error) {
 	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' })
 	for _, n := range names {
 		if r := m.Repo(n); r == nil || !r.Release {
 			return nil, fmt.Errorf("repo %q is not in the manifest with release: true", n)
 		}
 	}
-	repos, err := m.Select(names, false)
+	repos, err := m.Select(names, inactive)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
+	order := m
 	for _, r := range repos {
-		if r.Release {
-			out = append(out, r.Name)
+		if !r.Release {
+			continue
+		}
+		out = append(out, r.Name)
+		if !m.Active(r) && !slices.Contains(order.ActiveBatches, r.Batch) {
+			// A dry run's inactive repo: Stages() orders active repos only, so order on a copy
+			// with its batch switched on.
+			c := *order
+			c.ActiveBatches = append(slices.Clone(order.ActiveBatches), r.Batch)
+			order = &c
 		}
 	}
-	return stageOrder(m, out)
+	return stageOrder(order, out)
 }
 
 // stageOrder sorts names by release stage, so dependencies are bumped first.

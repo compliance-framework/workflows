@@ -878,7 +878,7 @@ go run ./cmd/repo-settings sync --manifest repos.mock.yaml --repos mock-api --by
 
 ## Renovate
 
-`renovate.yml` runs self-hosted Renovate daily on the manifest's repos, with the shared preset
+`renovate.yml` runs self-hosted Renovate hourly on the manifest's repos (a live run on one shard of at most 15), with the shared preset
 `renovate/default.json` (third-party updates on the 8th and 22nd, vulnerability fixes any day,
 non-majors grouped and merged by Renovate as `ccf-release-bot` once the required check passes).
 Scheduled runs are dry runs until the repo variable `RENOVATE_LIVE` is `true`. See

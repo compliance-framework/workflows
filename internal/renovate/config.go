@@ -34,12 +34,29 @@ type Options struct {
 // repos the token reaches and whether anything is written.
 var runnerKeys = []string{"platform", "autodiscover", "repositories", "onboarding", "requireConfig", "dryRun", "statusCheckWhen"}
 
+// MaxLiveRepos is the most repos one live run works on (Shard). With the preset's prHourlyLimit of 1
+// and renovate.yml running hourly, it bounds the non-vulnerability PRs opened across the org in an
+// hour (docs/renovate.md#the-org-wide-throttle).
+const MaxLiveRepos = 15
+
+// CheckDryRun returns an error unless mode is one of Renovate's dryRun values or DryRunOff.
+func CheckDryRun(mode string) error {
+	if !slices.Contains(dryRunModes, mode) {
+		return fmt.Errorf("dry run %q: want one of %s", mode, strings.Join(dryRunModes, ", "))
+	}
+	return nil
+}
+
 // SelectRepos returns the repos named in list (comma- or space-separated), or every active repo in
 // the manifest (the workflows repo included; manifest.ActiveRepos) if list is empty, in manifest
-// order. Named repos must be in the manifest and active.
-func SelectRepos(m *manifest.Manifest, list string) ([]string, error) {
+// order. Named repos must be in the manifest. They must also be active unless dryRun is a dry run
+// (not DryRunOff): a batch is checked with a dry run before it is switched on.
+func SelectRepos(m *manifest.Manifest, list, dryRun string) ([]string, error) {
+	if err := CheckDryRun(dryRun); err != nil {
+		return nil, err
+	}
 	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
-	repos, err := m.Select(names, false)
+	repos, err := m.Select(names, dryRun != DryRunOff)
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +70,24 @@ func SelectRepos(m *manifest.Manifest, list string) ([]string, error) {
 	return out, nil
 }
 
+// Shard splits repos into the fewest shards of at most max repos (repo i goes to shard i mod n) and
+// returns shard slot mod n, its index and n. renovate.yml runs hourly with slot = hours since the
+// Unix epoch, so consecutive runs take the shards in turn and each repo is visited every n hours.
+// max <= 0 returns every repo as one shard.
+func Shard(repos []string, max int, slot int64) (shard []string, index, count int) {
+	if max <= 0 || len(repos) <= max {
+		return repos, 0, 1
+	}
+	count = (len(repos) + max - 1) / max
+	index = int(((slot % int64(count)) + int64(count)) % int64(count))
+	for i, r := range repos {
+		if i%count == index {
+			shard = append(shard, r)
+		}
+	}
+	return shard, index, count
+}
+
 // GlobalConfig returns the Renovate global config: every setting of preset (a JSON object), plus
 // the settings the runner owns. Renovate applies the global config to every listed repo as its
 // base; a repo's own renovate.json only overrides it.
@@ -63,8 +98,8 @@ func GlobalConfig(preset []byte, opts Options) ([]byte, error) {
 	if len(opts.Repos) == 0 {
 		return nil, errors.New("no repos")
 	}
-	if !slices.Contains(dryRunModes, opts.DryRun) {
-		return nil, fmt.Errorf("dry run %q: want one of %s", opts.DryRun, strings.Join(dryRunModes, ", "))
+	if err := CheckDryRun(opts.DryRun); err != nil {
+		return nil, err
 	}
 	dec := json.NewDecoder(bytes.NewReader(preset))
 	dec.UseNumber() // keep the preset's numbers as written
