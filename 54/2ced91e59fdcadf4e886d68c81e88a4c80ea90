@@ -1,0 +1,8 @@
+lisa-design:
+- One accessor, manifest.ActiveRepos() (core repos + active batches), plus manifest.Select(names, inactive) for named lists; every tool's selectRepos goes through them instead of iterating m.Repos.
+- Core = no batch. Only kinds go-plugin and policies may carry a batch; batches are numbered from 1 (batch: 0 is rejected via a *int in rawRepo).
+- Named repos in an inactive batch are an error for Renovate, ccf-bump, train, attention digest and vuln summary; repo-settings alone accepts them (settings are applied before a batch is activated). Unknown names error everywhere.
+- Stages() rule: filter to active repos (r.Release && m.Active(r)); no new ordering rule. Plugin/policy repos depend on agent so they land in stage 3 with agent-action; helm's existing implicit dependency on every non-helm repo keeps it in stage 4.
+- Validate: active_batches entries must have repos and be unique; no repo depends on a later batch (core on none); a repo can't be both listed and excluded.
+- The org coverage check (include_patterns/exclude vs the GitHub API) and the plugin entries are in the stacked PR above, to keep each PR under 1000 lines.
+- release: false behaviour is unchanged: ccf-bump and the train skip such repos; Renovate, the attention digest, vuln summary (except workflows) and repo-settings include them.
