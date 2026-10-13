@@ -1,0 +1,2 @@
+lisa-addressed:
+Rebased onto main (#116-#119). cmd/plugin-health TestPlan + TestReportBatch1 (renamed TestReportRepos) pinned batch 1's ten plugins and failed with batch 2 active; they now derive the kept plugins (active go-plugin, release: true) from repos.yaml, keeping the plugin-jira v1 candidate and plugin-k8s failed-read cases. No other test added by #116-#119 pins the repos.yaml selection (internal/pluginhealth uses synthetic manifests; internal/ciworkflows/smoke_test does not read it).
