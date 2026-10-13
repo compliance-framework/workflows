@@ -12,9 +12,34 @@ holidays:
 # once it is listed here. Repos without a batch are core and always active. See docs/manifest.md.
 active_batches: []
 
-# Repo name globs and explicit exclusions; used from workstream 3 (plugins).
-include_patterns: []
-exclude: []
+# Repo name globs and explicit exclusions. They select nothing for the tools: they feed the
+# coverage check (`go run ./cmd/manifest --org compliance-framework`, in CI), which fails when an
+# unarchived org repo matching a pattern is neither listed below nor excluded here, or a listed
+# repo is missing or archived. Archived repos are skipped, so archiving one needs only its entry
+# removed. See docs/manifest.md.
+include_patterns: ["plugin-*"]
+exclude:
+  # Archived in workstream 2 (W2-S0-T03).
+  - plugin-aws
+  - plugin-sdlc
+  - plugin-llm-evidence-assessor
+  - plugin-azure-tags
+  - plugin-kubernetes-cluster
+  - plugin-kubernetes-pod
+  - plugin-local-postgres
+  - plugin-azure-networking-security
+  - plugin-aws-budget
+  - plugin-azure-db-psql
+  - plugin-azure-vms
+  - plugin-aws-policies
+  - plugin-sdlc-policies
+  - plugin-azure-tags-policies
+  - plugin-kubernetes-cluster-policies
+  - plugin-kubernetes-pod-policies
+  - plugin-azure-networking-security-policies
+  - plugin-aws-budget-policies
+  - plugin-azure-db-psql-policies
+  - plugin-azure-vm-policies
 
 repos:
   - name: api
@@ -53,3 +78,82 @@ repos:
   - name: workflows
     kind: workflows
     release: false
+
+  # Plugins and their policy repos, by rollout batch (workstream 3). Plugins and policy repos
+  # depend on agent (its runner and OPA version), so they release in agent-action's stage. The
+  # tools act on a batch only once it is in active_batches (docs/manifest.md). Default branches
+  # are read from GitHub; the ones marked below are master.
+
+  # Batch 1.
+  - {name: plugin-file-attestation, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-file-attestation-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-file-attestation-ctrf-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-file-attestation-sarif-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-github-settings, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-github-settings-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-github-repositories, kind: go-plugin, depends_on: [agent], release: true, batch: 1}  # default branch master
+  - {name: plugin-github-repositories-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-github-repositories-custom-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-github-repositories-dependency-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-github-repositories-pr-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-dependabot, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-dependabot-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-dependabot-granular-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-apt-versions, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-apt-versions-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-local-ssh, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-local-ssh-policies, kind: policies, depends_on: [agent], release: true, batch: 1}  # default branch master
+  - {name: plugin-jira, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-jira-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-jira-custom-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-gitlab-repositories, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-gitlab-repositories-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-k8s, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-k8s-opres-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-cloud-custodian, kind: go-plugin, depends_on: [agent], release: true, batch: 1}
+  - {name: plugin-cloud-custodian-policies, kind: policies, depends_on: [agent], release: true, batch: 1}
+  # Templates: new plugin and policy repos copy their workflow files; they don't release.
+  - {name: plugin-template, kind: go-plugin, depends_on: [agent], release: false, batch: 1}
+  - {name: plugin-template-policies, kind: policies, depends_on: [agent], release: false, batch: 1}
+  - {name: policy-template, kind: policies, depends_on: [agent], release: false, batch: 1}
+
+  # Batch 2.
+  - {name: plugin-aws-rds-aurora-psql, kind: go-plugin, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-rds-aurora-psql-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-http-collector, kind: go-plugin, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-http-collector-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-intruder, kind: go-plugin, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-intruder-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-acm, kind: go-plugin, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-acm-certificate-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-ecr, kind: go-plugin, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-ecr-image-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-ecr-registry-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-ecr-repository-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-ec2, kind: go-plugin, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-ec2-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-eks, kind: go-plugin, depends_on: [agent], release: true, batch: 2}  # default branch master
+  - {name: plugin-aws-eks-policies, kind: policies, depends_on: [agent], release: true, batch: 2}  # default branch master
+  - {name: plugin-aws-eks-addon-policies, kind: policies, depends_on: [agent], release: true, batch: 2}  # default branch master
+  - {name: plugin-aws-eks-nodegroup-policies, kind: policies, depends_on: [agent], release: true, batch: 2}  # default branch master
+  - {name: plugin-aws-elb, kind: go-plugin, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-elb-listener-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-elb-loadbalancer-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-elb-targetgroup-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-elb-targethealth-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-s3, kind: go-plugin, depends_on: [agent], release: true, batch: 2}  # default branch master
+  - {name: plugin-aws-s3-policies, kind: policies, depends_on: [agent], release: true, batch: 2}  # default branch master
+  - {name: plugin-aws-secretsmanager, kind: go-plugin, depends_on: [agent], release: true, batch: 2}
+  - {name: plugin-aws-secretsmanager-policies, kind: policies, depends_on: [agent], release: true, batch: 2}
+
+  # Batch 3.
+  - {name: plugin-aws-vpc, kind: go-plugin, depends_on: [agent], release: true, batch: 3}
+  - {name: plugin-aws-vpc-policies, kind: policies, depends_on: [agent], release: true, batch: 3}  # default branch master
+  - {name: plugin-aws-vpc-nacl-policies, kind: policies, depends_on: [agent], release: true, batch: 3}  # default branch master
+  - {name: plugin-aws-vpc-rt-policies, kind: policies, depends_on: [agent], release: true, batch: 3}  # default branch master
+  - {name: plugin-aws-vpc-sg-policies, kind: policies, depends_on: [agent], release: true, batch: 3}
+  - {name: plugin-aws-vpc-subnet-policies, kind: policies, depends_on: [agent], release: true, batch: 3}  # default branch master
+  - {name: plugin-aws-apigateway, kind: go-plugin, depends_on: [agent], release: true, batch: 3}
+  - {name: plugin-aws-apigateway-policies, kind: policies, depends_on: [agent], release: true, batch: 3}
+  - {name: plugin-aws-cloudfront, kind: go-plugin, depends_on: [agent], release: true, batch: 3}
+  - {name: plugin-aws-cloudfront-policies, kind: policies, depends_on: [agent], release: true, batch: 3}

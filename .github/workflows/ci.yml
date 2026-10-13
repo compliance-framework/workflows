@@ -41,8 +41,11 @@ jobs:
       - name: go test
         run: go test -race ./...
       - name: Validate manifests
+        env:
+          # Read-only: lists the organisation's repos for the coverage check (docs/manifest.md).
+          GH_TOKEN: ${{ github.token }}
         run: |
-          go run ./cmd/manifest --manifest repos.yaml
+          go run ./cmd/manifest --manifest repos.yaml --org compliance-framework
           go run ./cmd/manifest --manifest repos.mock.yaml
 
   actionlint:

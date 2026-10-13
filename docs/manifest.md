@@ -1,8 +1,8 @@
 # The manifest: batches and coverage
 
 `repos.yaml` lists every repo the shared tools act on. The README ("The manifest") has the schema;
-this page covers the batches added for the plugins (workstream 3), which gate when the tools start
-acting on a repo.
+this page covers the two parts added for the plugins (workstream 3): batches, which gate when the
+tools start acting on a repo, and the coverage check, which keeps the list complete.
 
 ## Batches
 
@@ -84,3 +84,26 @@ is active:
 | Attention digest | Included. |
 | Vulnerability summary | Included, except `workflows`. |
 | `repo-settings` | Included, with the same settings as every repo, the `release` environment too. |
+
+## Coverage check
+
+`include_patterns` and `exclude` don't select repos for any tool; they feed one check:
+
+```sh
+go run ./cmd/manifest --manifest repos.yaml --org compliance-framework
+```
+
+It lists the organisation's repos from the GitHub API (read-only, public metadata; `GH_TOKEN` if
+set, for the rate limit) and fails when:
+
+- a listed repo doesn't exist, or is archived;
+- a repo that isn't archived matches an `include_patterns` glob (`path.Match`) but is neither
+  listed nor in `exclude`.
+
+Archived repos are never required, so archiving a repo only needs its entry removed. A repo can't
+be both listed and excluded (loading the manifest fails). Unit tests run the check against a
+fixture (`internal/manifest/testdata/batches.yaml` and fake API pages).
+
+CI (`ci.yml`, "Validate manifests") runs it on `repos.yaml` with the workflow's own token, which
+sees the organisation's public repos: a private repo matching a pattern isn't required until it is
+made public, and a listed repo must be public.

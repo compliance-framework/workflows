@@ -38,8 +38,8 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 ```yaml
 holidays: ["2026-12-25", "2027-01-01"]   # ISO dates that are not working days
 active_batches: []                       # plugin/policy batches the tools act on (docs/manifest.md)
-include_patterns: []                     # repo name globs, used from workstream 3
-exclude: []                              # repo names the globs must not pick up
+include_patterns: ["plugin-*"]           # repo name globs the org coverage check uses
+exclude: [plugin-aws]                    # repo names the globs must not pick up
 repos:
   - name: agent
     kind: go-service          # go-service | go-plugin | go-lib | policies | ui | helm | action | workflows
@@ -58,7 +58,9 @@ repo is of kind `workflows` (this repo, the source of the shared-workflow pins c
 needs `release: false`, has no `depends_on`, and no repo depends on it.
 
 Plugin and policy repos carry a `batch` (1 or more); the tools act on them only once their batch
-is in `active_batches`. Batches and how to switch one on: [docs/manifest.md](docs/manifest.md).
+is in `active_batches`, and `go run ./cmd/manifest --org compliance-framework` checks the manifest
+against the organisation's repos (in CI). Batches, activation and the coverage check:
+[docs/manifest.md](docs/manifest.md).
 
 `Stages()` groups the active repos with `release: true` into release stages. Every repo's dependencies are in earlier stages,
 and each stage is sorted by name. Repos of kind `helm` always release last, after every
