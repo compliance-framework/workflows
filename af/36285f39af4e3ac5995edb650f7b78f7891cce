@@ -1,0 +1,2 @@
+lisa-addressed:
+Pass 2 fixes: Shard(repos, size, slot); --repos help says every active repo.
