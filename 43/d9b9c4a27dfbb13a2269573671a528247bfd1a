@@ -1,2 +1,6 @@
 lisa-selfreview:
 Pass 1 (strict): must-fix CORE-INPUT-001 negative --max-repos disables the shard (cmd/renovate-config); must-fix CORE-ERR-001 ccf-bump-sync pause skipped when Bump dies without writing prs; should-fix CORE-DOC-001 docs promise matrix jobs run in stage order. All three to fix.
+
+lisa-design:
+Renovate throttle: shard live runs (<=15 repos, slot = hours since epoch, repo i in shard i mod n) + hourly cron + prHourlyLimit 1, not prCommitsPerRunLimit: in Renovate 44.145.1 that limit counts commits per run (vulnerability fixes and rebases included) and, once reached, breaks the repo loop (lib/workers/global/index.ts haveReachedLimits), so later repos get no vulnerability fixes or automerges that run. Dry runs are not sharded.
+ccf-bump-sync: --batch 10 alone is not acceptable with batches active: the wait after 10 PRs outlives the one-hour app token, and 70 repos outlive the 300-minute timeout. Chunks of 10 repos run as matrix jobs (max-parallel 1), each with its own token, pausing to fill the hour only after a chunk that pushed PRs.
