@@ -5,3 +5,6 @@ lisa-design:
 - No default-branch field: every tool reads the default branch from GitHub (12 repos are on master; marked in comments).
 - CI runs the check with github.token, which lists public org repos only; a listed repo must therefore be public (all 67 are).
 - Excluded names that no longer exist are not an error (a typo still shows up as an uncovered repo).
+
+lisa-selfreview:
+pass 1 (strict): no-rule should-fix (bounded resource usage): cmd/manifest orgRepos paged until a short page with no upper bound. Fixed with a 100-page cap (10,000 repos) that errors. No other findings: race tests, vet, gofmt, actionlint, both manifests and the live org coverage check pass; TestReposYAMLBatches and the per-tool *ReposYAML tests assert exact lists on the real repos.yaml.
