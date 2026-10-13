@@ -37,9 +37,10 @@ type world struct {
 	mergeErrs                []error // returned by the first merges
 	// The gate's runs: probeFail fails the probe of a repo, v1 makes its plugin speak protocol v1,
 	// smokeFail fails stack-smoke.
-	gateRuns      []*gateRun
-	probeFail, v1 map[string]bool
-	smokeFail     bool
+	gateRuns           []*gateRun
+	probeFail, v1      map[string]bool
+	smokeFail, noRunID bool     // noRunID: dispatches return no run ID
+	events             []string // "bump <repo>", "dispatch <workflow>", "done <run id>", in order
 }
 
 type gateRun struct {
@@ -258,6 +259,7 @@ func (w *world) Bump(_ context.Context, path, repo string, sets map[string]strin
 		s = append(s, k+"="+sets[k])
 	}
 	w.bumps = append(w.bumps, fmt.Sprintf("%s %s dry=%v", repo, strings.Join(s, ","), dryRun))
+	w.events = append(w.events, "bump "+repo)
 	r := w.get(repo)
 	if !r.bumped {
 		return BumpResult{Output: "nothing pinned"}, nil
@@ -381,6 +383,10 @@ func (w *world) Dispatch(_ context.Context, workflow string, inputs map[string]s
 	id := w.nextID()
 	g := &gateRun{workflow: workflow, inputs: maps.Clone(inputs), run: Run{ID: id, Path: ".github/workflows/" + workflow, Status: "queued", URL: fmt.Sprintf("https://run/%d", id)}}
 	w.gateRuns = append(w.gateRuns, g)
+	w.events = append(w.events, "dispatch "+workflow)
+	if w.noRunID {
+		return Run{}, nil
+	}
 	return g.run, nil
 }
 
@@ -408,6 +414,7 @@ func (w *world) finishGateRun(g *gateRun) {
 	} else if failed {
 		g.log += ts + "SMOKE FAILED: agent heartbeat\n"
 	}
+	w.events = append(w.events, fmt.Sprintf("done %d", g.run.ID))
 	g.run.Status, g.run.Conclusion = "completed", "success"
 	if failed {
 		g.run.Conclusion = "failure"

@@ -40,9 +40,15 @@ func TestGatePassesThenHelmReleases(t *testing.T) {
 		strings.Contains(text, "The gate failed") || !strings.Contains(text, "The gate passed (4 checks)") {
 		t.Errorf("slack:\n%s", text)
 	}
-	// helm's release PR merged after every probe ran.
-	if i := slices.Index(w.releases, "mock-helm-charts"); i != len(w.releases)-1 {
-		t.Errorf("releases %v", w.releases)
+	// helm starts (its bump) only after every probe run finished.
+	helm, done := slices.Index(w.events, "bump mock-helm-charts"), 0
+	for i, ev := range w.events {
+		if strings.HasPrefix(ev, "done ") && i < helm {
+			done++
+		}
+	}
+	if helm < 0 || done != 4 {
+		t.Errorf("%d gate runs finished before helm's bump: %v", done, w.events)
 	}
 	if !strings.Contains(w.issues[0].Body, "| mock-plugin-2 | 0.1.1 | [passed](https://run/") {
 		t.Errorf("issue:\n%s", w.issues[0].Body)
@@ -76,6 +82,9 @@ func TestGateFailureBlocksHelmUntilAFix(t *testing.T) {
 	}
 	if !strings.Contains(w.issues[0].Body, "| 3 | mock-plugin-1 | blocked |") {
 		t.Errorf("table:\n%s", w.issues[0].Body)
+	}
+	if u := w.updates[len(w.updates)-1]; !strings.HasSuffix(u, "Stage 4 of 4 · 1 held") {
+		t.Errorf("board %q", u)
 	}
 
 	// A fix: mock-plugin-1 v0.1.2 is released on its default branch.
@@ -124,6 +133,19 @@ func TestGateRetryAndSkip(t *testing.T) {
 				t.Errorf("skip: %+v, %d runs -> %d", g, runs, len(w.gateRuns))
 			}
 		}
+	}
+}
+
+// A dispatch GitHub answers without a run ID fails the check instead of dispatching again.
+func TestGateDispatchWithoutRunID(t *testing.T) {
+	w := mockWorld(t)
+	w.noRunID = true
+	e := w.engine(trainDay)
+	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml"})
+	drive(t, w, e, 30)
+	g := w.state(1).GateCheck("mock-plugin-1")
+	if len(w.gateRuns) != 4 || g.Result != GateFailed || !strings.Contains(g.Detail, "GitHub returned no run ID") || !w.issues[0].Open {
+		t.Errorf("%d runs, mock-plugin-1 = %+v", len(w.gateRuns), g)
 	}
 }
 
