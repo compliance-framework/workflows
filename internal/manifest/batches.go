@@ -83,9 +83,6 @@ func (m *Manifest) validateBatches() error {
 		if r.Batch == 0 {
 			continue
 		}
-		if r.Batch < 0 {
-			return fmt.Errorf("repo %q: batch %d: batches are numbered from 1", r.Name, r.Batch)
-		}
 		if !slices.Contains(batchKinds, r.Kind) {
 			return fmt.Errorf("repo %q: kind %q is a core repo, always active: only kinds %q and %q take a batch", r.Name, r.Kind, KindGoPlugin, KindPolicies)
 		}
