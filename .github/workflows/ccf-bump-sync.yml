@@ -81,7 +81,7 @@ jobs:
     # (repo-settings), so a workflow on another branch can't read them.
     environment: release
     strategy:
-      # One chunk at a time, in stage order; a failed chunk doesn't stop the others.
+      # One chunk at a time (the chunks are in stage order); a failed chunk doesn't stop the others.
       max-parallel: 1
       fail-fast: false
       matrix:
@@ -141,11 +141,12 @@ jobs:
           SLUG: ${{ steps.token.outputs.app-slug }}
         run: go run ./cmd/ccf-bump merge --manifest "$MANIFEST" --repos "$REPOS" --author "${SLUG}[bot]" --wait 20m
       - name: Wait out the hour before the next chunk
-        # Only when this chunk pushed PRs, and not after the last one.
-        if: ${{ !cancelled() && env.DRY_RUN != 'true' && steps.bump.outputs.prs != '' && steps.bump.outputs.prs != '0' && matrix.chunk.index != matrix.chunk.of }}
+        # Unless this chunk is known to have pushed nothing (prs=0; a Bump step that died without
+        # saying may have pushed some), and not after the last one.
+        if: ${{ !cancelled() && env.DRY_RUN != 'true' && steps.bump.outcome != 'skipped' && steps.bump.outputs.prs != '0' && matrix.chunk.index != matrix.chunk.of }}
         env:
           START: ${{ steps.start.outputs.at }}
-          PRS: ${{ steps.bump.outputs.prs }}
+          PRS: ${{ steps.bump.outputs.prs || 'an unknown number of' }}
         run: |
           left=$(( START + 3600 - $(date -u +%s) ))
           if [ "$left" -gt 0 ]; then

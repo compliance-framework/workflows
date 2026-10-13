@@ -67,6 +67,7 @@ func TestRunErrors(t *testing.T) {
 		{[]string{"config", "--manifest", "../../repos.mock.yaml", "--preset", "missing.json"}, "read preset"},
 		{[]string{"config", "--manifest", "../../repos.mock.yaml", "--preset", "../../renovate/default.json", "--dry-run", "true"}, "dry run"},
 		{[]string{"list", "--manifest", "../../repos.mock.yaml", "--dry-run", "of"}, "dry run"},
+		{[]string{"list", "--manifest", "../../repos.mock.yaml", "--dry-run", "off", "--max-repos", "-1"}, "--max-repos -1"},
 		// A live run never takes a repo of an inactive batch (repos.yaml has none active).
 		{[]string{"list", "--manifest", "../../repos.yaml", "--repos", "plugin-file-attestation", "--dry-run", "off"}, "not active"},
 		{[]string{"config", "--manifest", "../../repos.yaml", "--repos", "api,plugin-file-attestation", "--dry-run", "off", "--preset", "../../renovate/default.json"}, "not active"},

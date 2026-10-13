@@ -172,14 +172,15 @@ them first is harmless.
 `dry_run` (default `true`). Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the
 mocks. They are dry runs until the repo variable `CCF_BUMP_SYNC_LIVE` is `true`.
 
-The `select` job runs `ccf-bump list --chunk 10` and fails on an empty selection. Then one `sync`
-job per chunk runs, one at a time (`max-parallel: 1`) in stage order, and a failed chunk doesn't
-stop the others. Each mints its own `ccf-release-bot` token scoped to exactly its chunk's repos
+The `select` job runs `ccf-bump list --chunk 10` and fails on an empty selection. The chunks are in
+stage order. One `sync` job per chunk runs, one at a time (`max-parallel: 1`), and a failed chunk
+doesn't stop the others. Each mints its own `ccf-release-bot` token scoped to exactly its chunk's repos
 (`RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY`, this repo's `release` environment secrets; main
 only): read-only for dry runs; contents, pull requests and workflows write otherwise (bumps edit
 workflow files), and checks read. Commits are authored by the bot. A live chunk then runs
-`ccf-bump merge --wait 20m` over its repos. If it pushed any PRs (`prs` above 0) and isn't the last
-chunk, it waits until an hour after it started before the next chunk begins.
+`ccf-bump merge --wait 20m` over its repos. Unless it is the last chunk, it then waits until an hour
+after it started before the next chunk begins. It skips the wait only when it knows it pushed
+nothing (`prs=0`); a Bump step that failed without reporting may have pushed PRs, so it waits.
 
 So the org gets at most 10 bump PRs an hour (one chunk's), and no token is used past its hour.
 Before, one job ran `sync --batch 10` over every repo: its wait after 10 PRs outlived the job's

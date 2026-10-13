@@ -50,6 +50,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
+	if *maxRepos < 0 {
+		return fmt.Errorf("--max-repos %d: want 0 (no limit) or more", *maxRepos)
+	}
 	m, err := manifest.Load(*path)
 	if err != nil {
 		return err
