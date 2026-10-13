@@ -1,0 +1,7 @@
+lisa-design:
+- Entries are explicit (flow-style, one line per repo, grouped by batch and plugin); include_patterns ["plugin-*"] + exclude feed only the coverage check (manifest.CheckCoverage via cmd/manifest --org), never a tool's selection.
+- exclude = exactly the 20 repos W2-S0-T03 archived. The org's other archived plugin-* repos (plugin-aws-ecr-policies, plugin-os-ubuntu, plugin-os-ubuntu-policies) are skipped as archived; no non-archived plugin-* repo is unkept today.
+- Templates (plugin-template, plugin-template-policies, policy-template) are listed with release: false, batch: 1 (overseer spec), not excluded (the plan's line). policy-template doesn't match plugin-* but is listed, so it is checked to exist.
+- No default-branch field: every tool reads the default branch from GitHub (12 repos are on master; marked in comments).
+- CI runs the check with github.token, which lists public org repos only; a listed repo must therefore be public (all 67 are).
+- Excluded names that no longer exist are not an error (a typo still shows up as an uncovered repo).
