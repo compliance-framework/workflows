@@ -86,6 +86,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		Repos:                 &train.GitHub{BaseURL: api, Token: getenv("GH_TOKEN"), Owner: *owner},
 		Tracker:               tracker,
 		Bumper:                execBumper{path: *bumpPath, log: stdout},
+		Gate:                  tracker, // plugin-probe.yml and stack-smoke.yml in the tracker repo
+		Registry:              "ghcr.io/" + strings.ToLower(*owner),
 		Load:                  load,
 		ReposURL:              server + "/" + *owner,
 		Channel:               getenv("SLACK_CHANNEL"),
@@ -120,8 +122,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	return err
 }
 
-// waiting reports whether is is an open train with a repo in an open stage that waits on
-// GitHub (release-please, checks, a release workflow) rather than on a human.
+// waiting reports whether is is an open train with a repo in an open stage, or a gate check,
+// that waits on GitHub (release-please, checks, a release workflow, a gate run) rather than on
+// a human.
 func waiting(is train.Issue) bool {
 	st, err := train.Parse(is.Body)
 	if !is.Open || err != nil || st.Status != train.StatusOpen {
@@ -129,6 +132,8 @@ func waiting(is train.Issue) bool {
 	}
 	return slices.ContainsFunc(st.Repos, func(r *train.RepoState) bool {
 		return st.StageOpen(r.Stage) && !r.Phase.Done() && r.Hold == train.NoHold
+	}) || slices.ContainsFunc(st.Gate, func(g *train.GateCheck) bool {
+		return g.Result == train.GatePending || g.Result == train.GateRunning
 	})
 }
 
