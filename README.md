@@ -909,7 +909,9 @@ daily in `ccf-bump-merge.yml`). See [docs/ccf-bump.md](docs/ccf-bump.md).
 `train.yml` releases the manifest's repos once a month, stage by stage: it bumps each repo's
 internal dependencies with `ccf-bump`, merges the release PRs, waits for the releases, and tracks it
 all in a `Release train YYYY-MM` issue and a live Slack board with a thread; when it finishes it posts
-the digest draft to #ccf-release-digests. See [docs/train.md](docs/train.md).
+the digest draft to #ccf-release-digests. Before helm, a gate probes the train's plugins and policy
+bundles (`plugin-probe.yml`) and smoke-tests its api, ui and agent (`stack-smoke.yml`). See
+[docs/train.md](docs/train.md).
 
 ## Slack messages
 

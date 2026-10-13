@@ -109,3 +109,8 @@ SMOKE_API_TAG=0.21.0 SMOKE_UI_TAG=2.12.1 SMOKE_AGENT_TAG=0.9.0 \
 `SMOKE_AGENT_CONFIG` (the rendered agent config, which `smoke/run.sh` writes to a temporary
 directory and removes afterwards unless the stack is left up), and its agent runs without a
 key. Use `smoke/run.sh`.
+
+## In the release train
+
+The release train dispatches `stack-smoke.yml` in its gate with the api, ui and agent versions
+it released ([train.md](train.md), The gate).

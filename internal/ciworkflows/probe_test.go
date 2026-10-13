@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/compliance-framework/workflows/internal/train"
 )
 
 // fakeProbe stands in for the built plugin-probe: it records its arguments, writes a report with
@@ -39,6 +41,10 @@ func TestProbeStep(t *testing.T) {
 		}
 		if err := json.Unmarshal([]byte(r.outputs["report"]), &report); err != nil || len(report.Plugins) != 1 || report.Plugins[0].Error != "line1\nline2" {
 			t.Errorf("report output = %q (%v)", r.outputs["report"], err)
+		}
+		// The release train's gate reads the report from this one log line.
+		if !strings.Contains(r.out, "\n"+train.ProbeReportMarker+r.outputs["report"]+"\n") {
+			t.Errorf("no %q line in the output:\n%s", train.ProbeReportMarker, r.out)
 		}
 		args, err := os.ReadFile(filepath.Join(r.temp, "args"))
 		if err != nil {

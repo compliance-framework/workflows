@@ -182,3 +182,18 @@ func TestWatch(t *testing.T) {
 		}
 	}
 }
+
+func TestWaitingOnTheGate(t *testing.T) {
+	for result, want := range map[train.GateResult]bool{train.GateRunning: true, train.GatePending: true, train.GateFailed: false, train.GatePassed: false} {
+		st := &train.State{Month: "2026-12", Status: train.StatusOpen, GateStage: 2,
+			Repos: []*train.RepoState{{Name: "p", Stage: 1, Phase: train.Released}, {Name: "h", Stage: 2, Phase: train.Waiting, Hold: train.Blocked}},
+			Gate:  []*train.GateCheck{{Name: "p", Result: result}}}
+		body, err := train.Render(st, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := waiting(train.Issue{Open: true, Body: body}); got != want {
+			t.Errorf("%q: waiting = %v", result, got)
+		}
+	}
+}
