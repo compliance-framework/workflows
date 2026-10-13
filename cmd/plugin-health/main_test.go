@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/compliance-framework/workflows/internal/manifest"
 	"github.com/compliance-framework/workflows/internal/pluginhealth"
 )
 
@@ -84,13 +86,35 @@ func testDeps(env map[string]string, src source, tr *tracker, sl *slack) deps {
 	}
 }
 
-// batch1 are the kept plugins of batch 1 (plugin-template has release: false).
-var batch1 = []string{"plugin-file-attestation", "plugin-github-settings", "plugin-github-repositories",
-	"plugin-dependabot", "plugin-apt-versions", "plugin-local-ssh", "plugin-jira", "plugin-gitlab-repositories",
-	"plugin-k8s", "plugin-cloud-custodian"}
+// kept are the kept plugins of repos.yaml: its active go-plugin repos with release: true, in
+// manifest order. They are read from the manifest, so activating a batch needs no test edit.
+func kept(t *testing.T) []string {
+	t.Helper()
+	m, err := manifest.Load("../../repos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range m.ActiveRepos() {
+		if r.Kind == manifest.KindGoPlugin && r.Release {
+			names = append(names, r.Name)
+		}
+	}
+	// The report cases below need these two batch-1 plugins; plugin-template has release: false.
+	for _, want := range []string{"plugin-jira", "plugin-k8s"} {
+		if !slices.Contains(names, want) {
+			t.Fatalf("%s is not a kept plugin of repos.yaml: %v", want, names)
+		}
+	}
+	if slices.Contains(names, "plugin-template") {
+		t.Fatalf("plugin-template (release: false) is a kept plugin: %v", names)
+	}
+	return names
+}
 
 func TestPlan(t *testing.T) {
 	env := map[string]string{"GITHUB_REPOSITORY": "compliance-framework/workflows", "ISSUE_TOKEN": "t"}
+	plugins := kept(t)
 	for _, tc := range []struct {
 		name, event, workflow string
 		tr                    *tracker
@@ -107,18 +131,20 @@ func TestPlan(t *testing.T) {
 		if err := run(context.Background(), args, testDeps(env, source{}, tc.tr, nil), &out, &log); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
-		want := "repos=agent," + strings.Join(batch1, ",") + "\ndue=" + map[bool]string{true: "true", false: "false"}[tc.due] + "\n"
+		want := "repos=agent," + strings.Join(plugins, ",") + "\ndue=" + map[bool]string{true: "true", false: "false"}[tc.due] + "\n"
 		if out.String() != want {
 			t.Errorf("%s: output\n%s\nwant\n%s", tc.name, out.String(), want)
 		}
 	}
 }
 
-// TestReportBatch1 is what a manual run on repos.yaml produces: a row per batch-1 plugin.
-func TestReportBatch1(t *testing.T) {
+// TestReportRepos is what a manual run on repos.yaml produces: a row per kept plugin of the
+// active batches.
+func TestReportRepos(t *testing.T) {
 	env := map[string]string{"GH_TOKEN": "t", "ISSUE_TOKEN": "t", "GITHUB_REPOSITORY": "compliance-framework/workflows",
 		"GITHUB_RUN_ID": "77", "SLACK_CHANNEL": "C-RELEASES"}
 	tr, sl := &tracker{train: 4}, &slack{}
+	plugins := kept(t)
 
 	var out, log bytes.Buffer
 	if err := run(context.Background(), []string{"report", "--manifest", "../../repos.yaml", "--dry-run"}, testDeps(env, source{v1: "plugin-jira"}, tr, sl), &out, &log); err != nil {
@@ -128,10 +154,10 @@ func TestReportBatch1(t *testing.T) {
 		t.Fatal("a dry run wrote the issue or posted")
 	}
 	md := out.String()
-	if n := strings.Count(md, "\n| [plugin-"); n != len(batch1) {
-		t.Errorf("%d rows, want %d:\n%s", n, len(batch1), md)
+	if n := strings.Count(md, "\n| [plugin-"); n != len(plugins) {
+		t.Errorf("%d rows, want %d:\n%s", n, len(plugins), md)
 	}
-	for _, p := range batch1 {
+	for _, p := range plugins {
 		want := "| [" + p + "](https://github.com/compliance-framework/" + p + ") | v0.8.0 | 1 | v2 | none | v1.0.0 (2026-09-01) | healthy |"
 		if p == "plugin-jira" {
 			want = "| [plugin-jira](https://github.com/compliance-framework/plugin-jira) | v0.8.0 | 1 | v1 | none | v1.0.0 (2026-09-01) | deprecation candidate |"
