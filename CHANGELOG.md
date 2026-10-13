@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.6.0](https://github.com/compliance-framework/workflows/compare/v1.5.2...v1.6.0) (2026-10-13)
+
+
+### Features
+
+* **manifest:** activate batch 1 ([#111](https://github.com/compliance-framework/workflows/issues/111)) ([8abeeb2](https://github.com/compliance-framework/workflows/commit/8abeeb269b118a4f1d5aee800d852bf465f9d7fe))
+* **manifest:** activate batch 2 ([#115](https://github.com/compliance-framework/workflows/issues/115)) ([36095fc](https://github.com/compliance-framework/workflows/commit/36095fccfbff118b76259890acdfa534e623bea6))
+* **manifest:** activate batch 3 ([#121](https://github.com/compliance-framework/workflows/issues/121)) ([105e29d](https://github.com/compliance-framework/workflows/commit/105e29d60b709c2eda2a8238c115073c0f149762))
+* **manifest:** add the plugins and policy repos ([#108](https://github.com/compliance-framework/workflows/issues/108)) ([4733ca9](https://github.com/compliance-framework/workflows/commit/4733ca9612a63efdfaac3041a3a8fb0d829ca99d))
+* **manifest:** gate repos by batch ([#107](https://github.com/compliance-framework/workflows/issues/107)) ([75cd984](https://github.com/compliance-framework/workflows/commit/75cd984f3585e36818e7e1c564a586b576e92761))
+* **plugin-health:** GitHub and registry clients, issue and Slack publishing ([#118](https://github.com/compliance-framework/workflows/issues/118)) ([056718f](https://github.com/compliance-framework/workflows/commit/056718fc2c99eaec732b4ad43565f0e5fbb54244))
+* **plugin-health:** plugin-health command and workflow ([#119](https://github.com/compliance-framework/workflows/issues/119)) ([62a582f](https://github.com/compliance-framework/workflows/commit/62a582f6c229380a6507c211e8caf2efd149eccd))
+* **plugin-health:** status rules and the report table ([#117](https://github.com/compliance-framework/workflows/issues/117)) ([667c764](https://github.com/compliance-framework/workflows/commit/667c764d0b1a7af874ff432be4edf9b2ad8bb107))
+* **renovate:** throttle Renovate and ccf-bump sync for plugin batches ([#110](https://github.com/compliance-framework/workflows/issues/110)) ([39214c2](https://github.com/compliance-framework/workflows/commit/39214c2878d2fe1a03d20e0eee162e6d03cb67bf))
+* **smoke:** plugin-file-attestation evidence check ([#116](https://github.com/compliance-framework/workflows/issues/116)) ([39f6e87](https://github.com/compliance-framework/workflows/commit/39f6e872fb12385107945944d58a01186339b731))
+* **train:** gate the helm stage on plugin-probe and stack-smoke ([#112](https://github.com/compliance-framework/workflows/issues/112)) ([ef062e2](https://github.com/compliance-framework/workflows/commit/ef062e29c9b0a98dfce6faf5e12e1b60d6fe69c3))
+* **train:** run the train gate from train.yml ([#113](https://github.com/compliance-framework/workflows/issues/113)) ([94fd9d4](https://github.com/compliance-framework/workflows/commit/94fd9d460246bd83a64a285373a4e8cafaedc2a9))
+
+
+### Bug Fixes
+
+* **deps:** update module golang.org/x/crypto to v0.56.0 [security] ([#98](https://github.com/compliance-framework/workflows/issues/98)) ([d077235](https://github.com/compliance-framework/workflows/commit/d0772355dfd96d0f8304db2f3d3b9c72d7447947))
+* **deps:** update module google.golang.org/grpc to v1.83.1 [security] ([#101](https://github.com/compliance-framework/workflows/issues/101)) ([866570c](https://github.com/compliance-framework/workflows/commit/866570c82fccba91b642399d36ae0d6ad89acb70))
+
 ## [1.5.2](https://github.com/compliance-framework/workflows/compare/v1.5.1...v1.5.2) (2026-10-13)
 
 
