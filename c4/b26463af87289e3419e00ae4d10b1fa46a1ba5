@@ -1,0 +1,9 @@
+lisa-design:
+- The gate dispatches plugin-probe.yml / stack-smoke.yml in the workflows repo (workflow_dispatch with GITHUB_TOKEN) instead of running plugins inside train.yml: the probed plugin binaries never share a job with the release-bot token, and the probe is built per run against the train's agent (agent-ref input), with no go.mod change.
+- One probe run per repo, so a failure blocks exactly that repo and /retry, /skip and fix detection work per repo.
+- GateStage is fixed in the state when the train opens (first helm stage, else Stages()+1 = before finish); 0 = a train opened before the gate: it has no gate, so a train in flight is never changed by this release.
+- Gate holds are holds on a released repo (Phase released, Hold blocked); the generic hold message skips done repos and the gate posts its own message with the output tail. Board shows held before released.
+- v1 detection reads the probe's JSON report from one log line (ccf-plugin-probe-report <json>) of the run's job log; logs are read before a completed run's result is recorded, so a log read error keeps the check running.
+- A dispatch without a run ID in the 200 response fails the check (no automatic re-dispatch loop); /retry runs it again.
+- stack-smoke only when the manifest has repos named api, ui and agent (the images smoke/compose.yaml pulls); the mock manifest has none. The probe's agent-ref follows only the repo named agent (module github.com/compliance-framework/agent); mocks use the go.mod pin.
+- A fix is picked up when the failed repo's default-branch release-please version changes; the train's recorded version and digest stay unchanged.
