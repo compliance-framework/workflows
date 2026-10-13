@@ -29,7 +29,15 @@ func TestRun(t *testing.T) {
 		{
 			name: "text",
 			args: []string{"--manifest", "../../repos.yaml"},
-			want: "stage 1: api gooci\nstage 2: agent ui\nstage 3: agent-action\nstage 4: helm-charts\n",
+			// Batch 1 is active: its released plugin and policy repos join agent-action in stage 3.
+			want: "stage 1: api gooci\nstage 2: agent ui\nstage 3: agent-action " +
+				"plugin-apt-versions plugin-apt-versions-policies plugin-cloud-custodian plugin-cloud-custodian-policies " +
+				"plugin-dependabot plugin-dependabot-granular-policies plugin-dependabot-policies " +
+				"plugin-file-attestation plugin-file-attestation-ctrf-policies plugin-file-attestation-policies plugin-file-attestation-sarif-policies " +
+				"plugin-github-repositories plugin-github-repositories-custom-policies plugin-github-repositories-dependency-policies " +
+				"plugin-github-repositories-policies plugin-github-repositories-pr-policies plugin-github-settings plugin-github-settings-policies " +
+				"plugin-gitlab-repositories plugin-gitlab-repositories-policies plugin-jira plugin-jira-custom-policies plugin-jira-policies " +
+				"plugin-k8s plugin-k8s-opres-policies plugin-local-ssh plugin-local-ssh-policies\nstage 4: helm-charts\n",
 		},
 		{
 			name: "json mock manifest",

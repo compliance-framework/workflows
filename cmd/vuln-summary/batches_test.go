@@ -40,17 +40,23 @@ func TestSelectReposByBatch(t *testing.T) {
 	}
 }
 
-// TestSelectReposByBatchReposYAML: repos.yaml lists every plugin and policy repo with no batch active, and the
-// selection is still today's.
+// TestSelectReposByBatchReposYAML: repos.yaml has batch 1 active, so the selection is the core repos but workflows,
+// plus batch 1's 30 repos, in manifest order; batches 2 and 3 stay out.
 func TestSelectReposByBatchReposYAML(t *testing.T) {
 	m, err := manifest.Load("../../repos.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Repos) == len(m.ActiveRepos()) {
-		t.Fatal("repos.yaml has no inactive repos to leave out")
+	if !slices.Equal(m.ActiveBatches, []int{1}) || len(m.Repos) == len(m.ActiveRepos()) {
+		t.Fatalf("active_batches %v: want [1], with batches 2 and 3 inactive", m.ActiveBatches)
 	}
-	if got, err := selectRepos(m, ""); err != nil || !slices.Equal(got, []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts"}) {
-		t.Errorf("repos.yaml: got %v, %v; want today's selection", got, err)
+	want := []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts"}
+	for _, r := range m.Repos {
+		if r.Batch == 1 {
+			want = append(want, r.Name)
+		}
+	}
+	if got, err := selectRepos(m, ""); err != nil || len(got) != 36 || !slices.Equal(got, want) {
+		t.Errorf("repos.yaml: got %v, %v; want %v", got, err, want)
 	}
 }
