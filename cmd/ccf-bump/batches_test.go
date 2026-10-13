@@ -40,3 +40,18 @@ func TestSelectReposByBatch(t *testing.T) {
 		}
 	}
 }
+
+// TestSelectReposByBatchReposYAML: repos.yaml lists every plugin and policy repo with no batch active, and the
+// selection is still today's.
+func TestSelectReposByBatchReposYAML(t *testing.T) {
+	m, err := manifest.Load("../../repos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Repos) == len(m.ActiveRepos()) {
+		t.Fatal("repos.yaml has no inactive repos to leave out")
+	}
+	if got, err := selectRepos(m, ""); err != nil || !slices.Equal(got, []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts"}) {
+		t.Errorf("repos.yaml: got %v, %v; want today's selection", got, err)
+	}
+}

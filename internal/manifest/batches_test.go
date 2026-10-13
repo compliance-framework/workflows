@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -134,5 +135,94 @@ func TestParseBatches(t *testing.T) {
 	}
 	if !reflect.DeepEqual(m.ActiveBatches, []int{1}) || m.Repo("agent").Batch != 0 || m.Repo("p").Batch != 1 || m.Repo("q").Batch != 2 || m.Repo("x") != nil {
 		t.Errorf("Parse() = %+v", m)
+	}
+}
+
+func TestCheckCoverage(t *testing.T) {
+	m := loadBatches(t)
+	org := func(extra ...OrgRepo) []OrgRepo {
+		out := []OrgRepo{{Name: "plugin-old", Archived: true}, {Name: "plugin-gone", Archived: true}, {Name: "local-dev"}}
+		for _, n := range names(m.Repos) {
+			out = append(out, OrgRepo{Name: n})
+		}
+		return append(out, extra...)
+	}
+	if err := m.CheckCoverage(org()); err != nil {
+		t.Errorf("CheckCoverage(every listed repo, archived and unmatched others) = %v, want nil", err)
+	}
+	if err := m.CheckCoverage(org(OrgRepo{Name: "plugin-old"})); err != nil {
+		t.Errorf("an unarchived excluded repo: %v, want nil", err)
+	}
+
+	var changed []OrgRepo
+	for _, r := range org(OrgRepo{Name: "plugin-new-policies"}, OrgRepo{Name: "plugin-a"}, OrgRepo{Name: "policy-new"}) {
+		switch r.Name {
+		case "api": // deleted
+			continue
+		case "plugin-three-policies":
+			r.Archived = true
+		}
+		changed = append(changed, r)
+	}
+	err := m.CheckCoverage(changed)
+	want := "listed but not in the organisation: api\n" +
+		"listed but archived: plugin-three-policies\n" +
+		"match include_patterns but are neither listed nor excluded: plugin-a, plugin-new-policies"
+	if err == nil || err.Error() != want {
+		t.Errorf("CheckCoverage() = %v, want:\n%s", err, want)
+	}
+}
+
+// TestReposYAMLBatches: repos.yaml's plugin and policy repos, batch by batch.
+func TestReposYAMLBatches(t *testing.T) {
+	m, err := Load("../../repos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(m.ActiveRepos()); len(m.ActiveBatches) != 0 || !reflect.DeepEqual(got, coreRepos) {
+		t.Fatalf("active_batches %v: ActiveRepos() = %v, want the core repos %v", m.ActiveBatches, got, coreRepos)
+	}
+	if len(m.Exclude) != 20 || !reflect.DeepEqual(m.IncludePatterns, []string{"plugin-*"}) {
+		t.Errorf("include_patterns %v, %d excluded; want plugin-* and the 20 repos archived in workstream 2", m.IncludePatterns, len(m.Exclude))
+	}
+	plugins := map[int]int{}
+	for _, r := range m.Repos {
+		if r.Batch == 0 {
+			continue
+		}
+		policies := strings.HasSuffix(r.Name, "-policies") || r.Name == "policy-template"
+		if policies != (r.Kind == KindPolicies) || !reflect.DeepEqual(r.DependsOn, []string{"agent"}) {
+			t.Errorf("%s: kind %s, depends_on %v; want %s and [agent]", r.Name, r.Kind, r.DependsOn, map[bool]Kind{true: KindPolicies, false: KindGoPlugin}[policies])
+		}
+		if template := strings.Contains(r.Name, "template"); template == r.Release || template && r.Batch != 1 {
+			t.Errorf("%s: release %v, batch %d; want the templates in batch 1 with release: false, every other repo released", r.Name, r.Release, r.Batch)
+		}
+		if r.Kind == KindGoPlugin && r.Release {
+			plugins[r.Batch]++
+		}
+	}
+	if want := map[int]int{1: 10, 2: 10, 3: 3}; !reflect.DeepEqual(plugins, want) {
+		t.Errorf("released plugins per batch = %v, want %v", plugins, want)
+	}
+	for b := 1; b <= 3; b++ {
+		m.ActiveBatches = []int{b}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("batch %d: %v", b, err)
+		}
+		stages, err := m.Stages()
+		if err != nil {
+			t.Fatal(err)
+		}
+		third := []string{"agent-action"}
+		for _, r := range m.Repos {
+			if r.Batch == b && r.Release {
+				third = append(third, r.Name)
+			}
+		}
+		slices.Sort(third)
+		want := [][]string{{"api", "gooci"}, {"agent", "ui"}, third, {"helm-charts"}}
+		if !reflect.DeepEqual(stages, want) {
+			t.Errorf("active_batches [%d]: Stages() = %v, want %v", b, stages, want)
+		}
 	}
 }
