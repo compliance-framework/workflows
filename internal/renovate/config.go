@@ -34,9 +34,9 @@ type Options struct {
 // repos the token reaches and whether anything is written.
 var runnerKeys = []string{"platform", "autodiscover", "repositories", "onboarding", "requireConfig", "dryRun", "statusCheckWhen"}
 
-// MaxLiveRepos is the most repos one live run works on (Shard). With the preset's prHourlyLimit of 1
-// and renovate.yml running hourly, it bounds the non-vulnerability PRs opened across the org in an
-// hour (docs/renovate.md#the-org-wide-throttle).
+// MaxLiveRepos is the most repos one live run works on (Shard). With the preset's prHourlyLimit of 1,
+// it bounds the non-vulnerability PRs one renovate.yml run opens across the org
+// (docs/renovate.md#the-org-wide-throttle).
 const MaxLiveRepos = 15
 
 // CheckDryRun returns an error unless mode is one of Renovate's dryRun values or DryRunOff.
@@ -71,8 +71,9 @@ func SelectRepos(m *manifest.Manifest, list, dryRun string) ([]string, error) {
 }
 
 // Shard splits repos into the fewest shards of at most size repos (repo i goes to shard i mod n) and
-// returns shard slot mod n, its index and n. renovate.yml runs hourly with slot = hours since the
-// Unix epoch, so consecutive runs take the shards in turn and each repo is visited every n hours.
+// returns shard slot mod n, its index and n. renovate.yml passes its run number as slot, so
+// consecutive runs take the shards in turn and each repo is visited every n runs, however late or
+// far apart GitHub starts them.
 // size <= 0 returns every repo as one shard.
 func Shard(repos []string, size int, slot int64) (shard []string, index, count int) {
 	if size <= 0 || len(repos) <= size {

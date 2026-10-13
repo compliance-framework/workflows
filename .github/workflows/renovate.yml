@@ -2,9 +2,11 @@ name: renovate
 
 # Self-hosted Renovate for the manifest's repos, with the shared preset (renovate/default.json).
 # Runs hourly: the preset limits normal updates to the 8th and 22nd and lets vulnerability fixes
-# through any day. A live run works on one shard of at most 15 repos (the shards take turns, hour
-# by hour) and the preset opens at most one non-vulnerability PR per repo an hour, so the org gets at
-# most about 15 an hour (docs/renovate.md#the-org-wide-throttle). A scheduled run uses the dispatch
+# through any day. A live run works on one shard of at most 15 repos, picked by the run number, so
+# the shards take turns run by run: each repo is visited every n runs (n = shards). GitHub may delay
+# or drop scheduled runs, which slows the rotation but never skips a shard. The preset opens at most
+# one non-vulnerability PR per repo an hour, so one run opens at most about 15, and two runs close
+# together about 30 (docs/renovate.md#the-org-wide-throttle). A scheduled run uses the dispatch
 # defaults below, except that it runs live when the repo variable RENOVATE_LIVE is "true".
 
 on:
@@ -63,9 +65,12 @@ jobs:
           go-version-file: go.mod
       - name: Select repos
         id: select
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          # Hours since the Unix epoch pick a live run's shard; both commands below get the same one.
-          slot="$(( $(date -u +%s) / 3600 ))"
+          # The run number picks a live run's shard, so each run takes the next one (a re-run keeps
+          # its number and its shard); both commands below get the same slot.
+          slot="$RUN_NUMBER"
           repos="$(go run ./cmd/renovate-config list --manifest "$MANIFEST" --repos "$REPOS" --dry-run "$DRY_RUN" --slot "$slot")"
           # An empty list would mint a token for every repo the app is installed on (all of them).
           if [ -z "$repos" ]; then

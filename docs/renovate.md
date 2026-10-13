@@ -36,9 +36,9 @@ so the required check still gates every merge.
 
 The cost is merge lag: GitHub would merge as soon as the check passes, while Renovate merges on
 its next run that finds the checks green. `renovate.yml` runs hourly and visits each repo's shard in
-turn, so a PR merges up to one rotation (at most 5 hours with every batch active) after its checks
-pass. The 8th/22nd `schedule` doesn't delay this: it only limits when new
-branches are created, while Renovate keeps updating and merging existing PRs on the other days
+turn, so a PR merges up to one rotation (at most 5 runs with every batch active, about 5 hours when
+GitHub starts the runs on time) after its checks pass. The 8th/22nd `schedule` doesn't delay this:
+it only limits when new branches are created, while Renovate keeps updating and merging existing PRs on the other days
 (its defaults `updateNotScheduled: true` and `automergeSchedule: ["at any time"]`, which the preset
 leaves alone). A PR whose checks fail stays open, and Renovate updates or recreates it
 on later runs as usual. The repo's "allow auto-merge" setting is no longer used by Renovate.
@@ -86,35 +86,45 @@ instead:
 
 - A **live** run works on one shard of at most 15 repos (`renovate.MaxLiveRepos`). The active repos,
   in manifest order, are split into `n = ceil(repos / 15)` shards, with repo `i` in shard `i mod n`.
-  The run takes shard `slot mod n`, where `slot` is the number of hours since the Unix epoch. The
-  same slot scopes the token and builds the config.
-- `renovate.yml` runs **hourly** (`17 * * * *`), so consecutive runs take the shards in turn and
-  each repo is visited every `n` hours.
+  The run takes shard `slot mod n`, where `slot` is the workflow's run number (`github.run_number`).
+  The same slot scopes the token and builds the config, and a re-run keeps its number and its shard.
+- The rotation is **per run**: each run takes the next shard, so each repo is visited every `n`
+  runs. `renovate.yml` is scheduled **hourly** (`17 * * * *`), so that is every `n` hours when the
+  runs are on time. GitHub runs scheduled workflows best-effort: a 06:17 cron in this repo has
+  started as late as 15:29, and a busy hour can drop a run. A late or dropped run only slows the
+  rotation; it never skips a shard, because the shard follows the runs, not the clock.
+- A dispatch takes a run number too. A live dispatch on every active repo is simply the next step of
+  the rotation. A dry run, or a live run with `repos` set, leaves the shard of its number unvisited,
+  so that shard waits one more rotation.
 - The preset's `prHourlyLimit: 1` lets each repo of the shard open at most one non-vulnerability
-  PR per visit. The non-major group comes first, then majors one per visit.
+  PR per visit, and at most one per clock hour. The non-major group comes first, then majors one
+  per visit.
 - **Vulnerability fixes keep flowing.** Renovate exempts them from `prHourlyLimit` (and from
   `schedule` and `prCommitsPerRunLimit`; docs: "vulnerability alerts skip the line"), so each
   visit opens every fix a repo needs. They wait at most one rotation for their repo's shard.
 - Dry runs write nothing, so they aren't sharded and take every selected repo.
 
-Worst case for non-vulnerability PRs opened across the org in one hour, from `repos.yaml` (7 core
-repos, this one included; batch 1 has 30 repos, batch 2 27, batch 3 10):
+Worst case for non-vulnerability PRs opened across the org, from `repos.yaml` (7 core repos, this
+one included; batch 1 has 30 repos, batch 2 27, batch 3 10):
 
-| Active batches | Active repos | Shards | Repos per run | Non-vulnerability PRs per hour | Each repo visited every |
-| --- | --- | --- | --- | --- | --- |
-| none (today) | 7 | 1 | 7 | 7 | 1 hour |
-| 1 | 37 | 3 | 13 | 13 | 3 hours |
-| 1, 2 | 64 | 5 | 13 | 13 | 5 hours |
-| 1, 2, 3 | 74 | 5 | 15 | 15 | 5 hours |
+| Active batches | Active repos | Shards | Repos per shard | PRs in one run | Two runs close together | Each repo visited every |
+| --- | --- | --- | --- | --- | --- | --- |
+| none (today) | 7 | 1 | 7 | 7 | 7 (14 across the top of the hour) | 1 run |
+| 1 | 37 | 3 | 13, 12, 12 | 13 | 25 | 3 runs |
+| 1, 2 | 64 | 5 | 13, 13, 13, 13, 12 | 13 | 26 | 5 runs |
+| 1, 2, 3 | 74 | 5 | 15, 15, 15, 15, 14 | 15 | 30 | 5 runs |
 
-Vulnerability PRs come on top of these and are deliberately not capped. A manual live dispatch in
-the same hour as a scheduled run can add one more shard's worth: a repo already visited that hour
-opens nothing more (its `prHourlyLimit` is spent), but a run that lands on another shard does. A
-run is late only when the previous one overruns (the `renovate` concurrency group queues it). A
-live run's shard also keeps it within the app token's one-hour life.
+One run opens at most about 15, and a repo at most one per clock hour. Runs don't overlap (the `renovate`
+concurrency group queues the next one), but GitHub can start two of them close together: a late
+run followed by an on-time one, or a manual live dispatch next to a scheduled run. Two such runs
+take different shards, so a short window can see about two shards' worth, ~30 with every batch
+active. With one shard, both runs take the same repos: `prHourlyLimit` stops the second within the
+same clock hour, but not across the top of the hour. Vulnerability PRs come on top of these and are
+deliberately not capped. A live run's shard also keeps it within the app token's one-hour life.
 
 On the 8th and 22nd (the preset's `schedule`), a repo gets its non-major group PR on its first visit
-that day and a major on each later one. With 5 shards, that is about five visits a day.
+that day and a major on each later one. With 5 shards and 24 runs, that is about five visits a day,
+fewer when GitHub delays or drops runs.
 
 ## The workflow: `renovate.yml`
 

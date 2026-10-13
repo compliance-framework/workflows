@@ -257,30 +257,38 @@ func TestShard(t *testing.T) {
 		}
 	}
 
-	// Every repo is in exactly one shard, and no shard is over the limit, for the manifest's sizes:
-	// today (7), with batch 1 (37), 1+2 (64), and all three (74).
+	// renovate.yml passes its run number as the slot. Any n consecutive run numbers take every shard
+	// exactly once, so every repo is visited exactly once per n runs, and no shard is over the
+	// limit, for the manifest's sizes: today (7), with batch 1 (37), 1+2 (64), and all three (74).
 	for _, n := range []int{7, 37, 64, 74} {
-		seen := map[string]int{}
 		_, _, of := Shard(repos(n), MaxLiveRepos, 0)
-		for slot := range int64(of) {
-			s, _, _ := Shard(repos(n), MaxLiveRepos, slot)
-			if len(s) > MaxLiveRepos {
-				t.Errorf("%d repos: shard %d has %d repos, over %d", n, slot, len(s), MaxLiveRepos)
+		for _, first := range []int64{1, 2, 4242} {
+			seen := map[string]int{}
+			shards := map[int]bool{}
+			for run := first; run < first+int64(of); run++ {
+				s, index, _ := Shard(repos(n), MaxLiveRepos, run)
+				if len(s) > MaxLiveRepos {
+					t.Errorf("%d repos: run %d has %d repos, over %d", n, run, len(s), MaxLiveRepos)
+				}
+				if shards[index] {
+					t.Errorf("%d repos: runs %d..%d take shard %d twice", n, first, first+int64(of)-1, index)
+				}
+				shards[index] = true
+				for _, r := range s {
+					seen[r]++
+				}
 			}
-			for _, r := range s {
-				seen[r]++
-			}
-		}
-		for _, r := range repos(n) {
-			if seen[r] != 1 {
-				t.Errorf("%d repos: %s is in %d shards, want 1", n, r, seen[r])
+			for _, r := range repos(n) {
+				if seen[r] != 1 {
+					t.Errorf("%d repos: runs %d..%d visit %s %d times, want 1", n, first, first+int64(of)-1, r, seen[r])
+				}
 			}
 		}
 	}
 }
 
 // TestThrottle: a live run takes at most MaxLiveRepos repos and each opens at most prHourlyLimit
-// non-vulnerability PRs, so an hourly run stays near the plan's ~15 PRs an hour across the org.
+// non-vulnerability PRs, so one run opens at most the plan's ~15 across the org.
 func TestThrottle(t *testing.T) {
 	data, err := os.ReadFile("../../renovate/default.json")
 	if err != nil {
@@ -293,6 +301,6 @@ func TestThrottle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.PrHourlyLimit != 1 || MaxLiveRepos*p.PrHourlyLimit > 15 {
-		t.Errorf("prHourlyLimit %d x MaxLiveRepos %d: want prHourlyLimit 1 and at most 15 PRs an hour", p.PrHourlyLimit, MaxLiveRepos)
+		t.Errorf("prHourlyLimit %d x MaxLiveRepos %d: want prHourlyLimit 1 and at most 15 PRs a run", p.PrHourlyLimit, MaxLiveRepos)
 	}
 }

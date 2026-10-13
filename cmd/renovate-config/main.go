@@ -7,7 +7,7 @@
 // Renovate global config (internal/renovate) as JSON. Both select every active repo in the
 // manifest unless --repos names a subset; a dry run may name repos of an inactive batch. A live run
 // (--dry-run off) takes only one shard of at most --max-repos of them, picked by --slot, so pass
-// both commands the same --slot.
+// both commands the same --slot (renovate.yml passes its run number).
 package main
 
 import (
@@ -43,7 +43,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	preset := fs.String("preset", "renovate/default.json", "the shared Renovate preset (config)")
 	dryRun := fs.String("dry-run", "full", "full, lookup, extract, or off to run live; only a dry run may name repos of an inactive batch")
 	maxRepos := fs.Int("max-repos", renovate.MaxLiveRepos, "a live run takes one shard of at most this many repos (0: every selected repo)")
-	slot := fs.Int64("slot", time.Now().Unix()/3600, "picks the live run's shard (slot mod shards); default: hours since the Unix epoch")
+	slot := fs.Int64("slot", time.Now().Unix()/3600, "picks the live run's shard (slot mod shards); renovate.yml passes its run number; default: hours since the Unix epoch")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
