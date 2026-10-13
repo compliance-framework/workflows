@@ -1,8 +1,9 @@
 name: stack-smoke
 
 # Stack smoke test (docs/stack-smoke.md): runs postgres, the API, the UI and one agent from the
-# published images at the given tags and checks they work together (smoke/run.sh). The images
-# are only pulled; nothing is pushed or published.
+# published images at the given tags and checks they work together (smoke/run.sh), including
+# that evidence from plugin-file-attestation, run by the agent, reaches the API. The images are
+# only pulled; nothing is pushed or published.
 
 on:
   workflow_call:
@@ -19,6 +20,14 @@ on:
         description: Tag of ghcr.io/compliance-framework/agent
         type: string
         default: "0.9.0"
+      plugin-tag:
+        description: Tag of ghcr.io/compliance-framework/plugin-file-attestation, the plugin the agent runs
+        type: string
+        default: "v0.2.0"
+      policy-tag:
+        description: Tag of ghcr.io/compliance-framework/plugin-file-attestation-policies, the plugin's policies
+        type: string
+        default: "v0.2.0"
   workflow_dispatch:
     inputs:
       api-tag:
@@ -33,6 +42,14 @@ on:
         description: Tag of ghcr.io/compliance-framework/agent
         type: string
         default: "0.9.0"
+      plugin-tag:
+        description: Tag of ghcr.io/compliance-framework/plugin-file-attestation, the plugin the agent runs
+        type: string
+        default: "v0.2.0"
+      policy-tag:
+        description: Tag of ghcr.io/compliance-framework/plugin-file-attestation-policies, the plugin's policies
+        type: string
+        default: "v0.2.0"
 
 permissions:
   contents: read
@@ -62,6 +79,7 @@ jobs:
           SMOKE_API_TAG: ${{ inputs.api-tag }}
           SMOKE_UI_TAG: ${{ inputs.ui-tag }}
           SMOKE_AGENT_TAG: ${{ inputs.agent-tag }}
+          # The agent runs this plugin with these policies; run.sh checks its evidence reaches the API.
+          SMOKE_PLUGIN_TAG: ${{ inputs.plugin-tag }}
+          SMOKE_POLICY_TAG: ${{ inputs.policy-tag }}
         run: smoke/run.sh
-      # TODO(W3): plugin step. The plugin check runs inside smoke/run.sh (check_plugin), while
-      # the stack is up; add a plugin-tag input here and pass it to the step above.

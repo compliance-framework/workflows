@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -13,9 +14,13 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// finalTag is a final release tag of a plugin or policy bundle (they keep the v).
+var finalTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
 // TestStackSmokeWorkflow pins stack-smoke.yml's interface: the same inputs and defaults for
 // workflow_call and workflow_dispatch, read-only permissions, and each input reaching
-// smoke/run.sh as the variable smoke/compose.yaml reads.
+// smoke/run.sh as the variable smoke/compose.yaml (image tags) or smoke/agent-config.yml (plugin
+// and policy tags) reads.
 func TestStackSmokeWorkflow(t *testing.T) {
 	var wf struct {
 		On map[string]struct {
@@ -45,14 +50,26 @@ func TestStackSmokeWorkflow(t *testing.T) {
 			t.Errorf("input %s = %+v, want a string defaulting to %q", name, in, def)
 		}
 	}
-	if len(call) != len(wantDefaults) {
-		t.Errorf("inputs %v, want exactly %v", call, wantDefaults)
+	// The plugin and its policies default to their latest final release; the value moves with
+	// the plugin, so only its shape is pinned here.
+	pluginInputs := map[string]string{"plugin-tag": "SMOKE_PLUGIN_TAG", "policy-tag": "SMOKE_POLICY_TAG"}
+	for name := range pluginInputs {
+		if in, ok := call[name]; !ok || !finalTag.MatchString(in.Default) || in.Type != "string" {
+			t.Errorf("input %s = %+v, want a string defaulting to a final vX.Y.Z tag", name, in)
+		}
+	}
+	if len(call) != len(wantDefaults)+len(pluginInputs) {
+		t.Errorf("inputs %v, want exactly %v and %v", call, wantDefaults, pluginInputs)
 	}
 	if !reflect.DeepEqual(wf.Permissions, map[string]string{"contents": "read"}) {
 		t.Errorf("permissions %v, want contents: read only", wf.Permissions)
 	}
 
 	compose, err := os.ReadFile(filepath.Join("..", "..", "smoke", "compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentConfig, err := os.ReadFile(filepath.Join("..", "..", "smoke", "agent-config.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +89,14 @@ func TestStackSmokeWorkflow(t *testing.T) {
 				}
 				if !strings.Contains(string(compose), "${"+env+":?") {
 					t.Errorf("smoke/compose.yaml does not require %s", env)
+				}
+			}
+			for input, env := range pluginInputs {
+				if want := "${{ inputs." + input + " }}"; s.Env[env] != want {
+					t.Errorf("step %q: %s = %q, want %q", s.Name, env, s.Env[env], want)
+				}
+				if !strings.Contains(string(agentConfig), "${"+env+"}") {
+					t.Errorf("smoke/agent-config.yml does not use ${%s}", env)
 				}
 			}
 		}
@@ -122,8 +147,70 @@ func TestSmokeCompose(t *testing.T) {
 	}
 }
 
-// fakeStack is a fake curl for a healthy stack: it answers each URL smoke/run.sh calls, and
-// lists the agent's instance without a heartbeat on the first poll and with one afterwards.
+// TestSmokeAgentConfig checks that the agent runs plugin-file-attestation from its published
+// image with its published policies, on the shortest schedule, against a fixture that
+// smoke/compose.yaml mounts into the agent.
+func TestSmokeAgentConfig(t *testing.T) {
+	var cfg struct {
+		Plugins map[string]struct {
+			Source   string            `yaml:"source"`
+			Policies []string          `yaml:"policies"`
+			Schedule string            `yaml:"schedule"`
+			Config   map[string]string `yaml:"config"`
+		} `yaml:"plugins"`
+	}
+	readSmoke := func(name string) []byte {
+		b, err := os.ReadFile(filepath.Join("..", "..", "smoke", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	if err := yaml.Unmarshal(readSmoke("agent-config.yml"), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	p, ok := cfg.Plugins["file_attestation"]
+	if !ok || len(cfg.Plugins) != 1 {
+		t.Fatalf("plugins %v, want only file_attestation", cfg.Plugins)
+	}
+	if p.Source != "ghcr.io/compliance-framework/plugin-file-attestation:${SMOKE_PLUGIN_TAG}" {
+		t.Errorf("source %q", p.Source)
+	}
+	if !reflect.DeepEqual(p.Policies, []string{"ghcr.io/compliance-framework/plugin-file-attestation-policies:${SMOKE_POLICY_TAG}"}) {
+		t.Errorf("policies %q", p.Policies)
+	}
+	if p.Schedule != "* * * * *" {
+		t.Errorf("schedule %q, want every minute", p.Schedule)
+	}
+
+	var c struct {
+		Services map[string]struct {
+			Volumes []string `yaml:"volumes"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(readSmoke("compose.yaml"), &c); err != nil {
+		t.Fatal(err)
+	}
+	const mount = "/etc/ccf-agent/fixtures"
+	want := []string{
+		"${SMOKE_AGENT_CONFIG:?set SMOKE_AGENT_CONFIG (or use smoke/run.sh)}:/etc/ccf-agent/config.yml:ro",
+		"./fixtures:" + mount + ":ro",
+	}
+	if got := c.Services["agent"].Volumes; !reflect.DeepEqual(got, want) {
+		t.Errorf("agent volumes %q, want %q", got, want)
+	}
+	rel, ok := strings.CutPrefix(p.Config["file_path"], mount+"/")
+	if !ok {
+		t.Fatalf("file_path %q is not under %s", p.Config["file_path"], mount)
+	}
+	if len(readSmoke(filepath.Join("fixtures", rel))) == 0 {
+		t.Errorf("fixture smoke/fixtures/%s is empty", rel)
+	}
+}
+
+// fakeStack is a fake curl for a healthy stack: it answers each URL smoke/run.sh calls, lists
+// the agent's instance without a heartbeat on the first poll and with one afterwards, and finds
+// the plugin's evidence from the second search on (never with FAKE_EVIDENCE=none).
 const fakeStack = `#!/bin/sh
 echo "curl $*" >> "$CALLS"
 out=""
@@ -149,6 +236,14 @@ case "$url" in
     else
       body='{"data":[{"instance-id":"inst-1","agent-version":"0.9.0","mode":"report","status":"not-applicable","heartbeat-config-revision":0}]}'
     fi ;;
+  */api/evidence/search*)
+    n=$(( $(cat "$CALLS.searches" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$CALLS.searches"
+    if [ "$n" -lt 2 ] || [ "${FAKE_EVIDENCE:-}" = "none" ]; then
+      body='{"data":[],"total":0}'
+    else
+      body='{"data":[{"title":"File exists","status":{"state":"satisfied"}}],"total":1}'
+    fi ;;
   http://127.0.0.1:18000/) body='<!doctype html><div id="app"></div>' ;;
   *) body='not found'; code=404 ;;
 esac
@@ -172,12 +267,16 @@ func runSmoke(t *testing.T, healthy bool, env ...string) (out, calls string, fai
 	bin := t.TempDir()
 	for name, src := range map[string]string{
 		// The psql query for the API's tables finds all four; starting the agent records the
-		// key it gets.
+		// key it gets and the config it mounts.
 		"docker": `#!/bin/sh
 echo "docker $*" >> "$CALLS"
 case "$*" in
   *psql*) echo 4 ;;
-  *"up -d --no-deps agent"*) echo "agent key: $SMOKE_AGENT_CLIENT_ID $SMOKE_AGENT_CLIENT_SECRET" >> "$CALLS" ;;
+  *"up -d --no-deps agent"*)
+    echo "agent key: $SMOKE_AGENT_CLIENT_ID $SMOKE_AGENT_CLIENT_SECRET" >> "$CALLS"
+    echo "agent config: $SMOKE_AGENT_CONFIG" >> "$CALLS"
+    cat "$SMOKE_AGENT_CONFIG" >> "$CALLS" ;;
+  *"logs --no-color --tail 50 agent"*) echo "agent log tail" ;;
 esac
 `,
 		"curl": curl,
@@ -190,6 +289,8 @@ esac
 	cmd.Env = append(os.Environ(), append([]string{
 		"PATH=" + bin + ":" + os.Getenv("PATH"), "CALLS=" + callsFile, "GITHUB_ACTIONS=",
 		"SMOKE_API_TAG=0.21.0", "SMOKE_UI_TAG=2.12.1", "SMOKE_AGENT_TAG=0.9.0", "SMOKE_TIMEOUT=0",
+		"SMOKE_PLUGIN_TAG=v9.8.7", "SMOKE_POLICY_TAG=v6.5.4", "SMOKE_AGENT_CONFIG=", "FAKE_EVIDENCE=",
+		"TMPDIR=" + t.TempDir(),
 		"SMOKE_API_PORT=", "SMOKE_UI_PORT=", "SMOKE_PROJECT=", "SMOKE_KEEP=",
 	}, env...)...)
 	b, err := cmd.CombinedOutput()
@@ -221,6 +322,8 @@ func TestSmokeRunSettings(t *testing.T) {
 		{"SMOKE_UI_TAG=", "SMOKE_UI_TAG is not set"},
 		{"SMOKE_AGENT_TAG=0.9.0;id", "SMOKE_AGENT_TAG '0.9.0;id' is not a valid image tag"},
 		{"SMOKE_API_TAG=-rc", "SMOKE_API_TAG '-rc' is not a valid image tag"},
+		{"SMOKE_PLUGIN_TAG=", "SMOKE_PLUGIN_TAG is not set"},
+		{"SMOKE_POLICY_TAG=v1|x", "SMOKE_POLICY_TAG 'v1|x' is not a valid image tag"},
 		{"SMOKE_TIMEOUT=3m", "SMOKE_TIMEOUT '3m' is not a whole number"},
 		{"SMOKE_API_PORT=80a", "SMOKE_API_PORT '80a' is not a whole number"},
 		{"SMOKE_UI_PORT=-1", "SMOKE_UI_PORT '-1' is not a whole number"},
@@ -272,6 +375,35 @@ func TestSmokeRunPasses(t *testing.T) {
 	if n := strings.Count(calls, "/api/admin/agents/agent-1/instances"); n < 2 {
 		t.Errorf("polled the instances %d time(s); the first poll has no heartbeat, so want at least 2", n)
 	}
+	if !strings.Contains(out, `plugin: evidence "File exists" (status satisfied) from plugin-file-attestation reached the API`) {
+		t.Errorf("no plugin evidence line; output:\n%s", out)
+	}
+	if n := strings.Count(calls, "/api/evidence/search"); n < 2 {
+		t.Errorf("searched the evidence %d time(s); the first search finds none, so want at least 2", n)
+	}
+	for _, label := range []string{`"label":"provider","operator":"=","value":"file"`, `"label":"type","operator":"=","value":"attestation"`,
+		`"label":"source","operator":"=","value":"local"`, `"label":"_agent","operator":"=","value":"client-1"`} {
+		if !strings.Contains(calls, label) {
+			t.Errorf("the evidence search does not filter on %s; calls:\n%s", label, calls)
+		}
+	}
+	// The agent mounts the config with both tags filled in, and run.sh removes it afterwards.
+	for _, line := range []string{"source: ghcr.io/compliance-framework/plugin-file-attestation:v9.8.7",
+		"- ghcr.io/compliance-framework/plugin-file-attestation-policies:v6.5.4"} {
+		if !strings.Contains(calls, line) {
+			t.Errorf("the agent's config has no %q; calls:\n%s", line, calls)
+		}
+	}
+	if strings.Contains(calls, "${SMOKE_") {
+		t.Errorf("the agent's config still has a placeholder; calls:\n%s", calls)
+	}
+	_, rest, _ := strings.Cut(calls, "agent config: ")
+	cfg, _, _ := strings.Cut(rest, "\n")
+	if cfg == "" {
+		t.Error("the agent got no SMOKE_AGENT_CONFIG")
+	} else if _, err := os.Stat(cfg); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the rendered config %s is still there after the run (%v)", cfg, err)
+	}
 	want := []string{"pull --quiet", "up -d postgres api ui",
 		"exec -T postgres psql -U postgres -d ccf -tAc select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('ccf_users', 'ccf_agents', 'ccf_agent_service_account_keys', 'ccf_agent_instances')"}
 	got := composeCalls(calls)
@@ -281,7 +413,26 @@ func TestSmokeRunPasses(t *testing.T) {
 	}
 
 	out, _, failed = runSmoke(t, true, "SMOKE_TIMEOUT=30", "GITHUB_ACTIONS=true")
+	if failed {
+		t.Fatalf("on Actions: failed; output:\n%s", out)
+	}
 	if failed || !strings.Contains(out, "::add-mask::s3cret") || !strings.Contains(out, "::add-mask::t0ken") {
 		t.Errorf("on Actions the key's secret and the token must be masked; failed=%v, output:\n%s", failed, out)
+	}
+}
+
+// TestSmokeRunNoPluginEvidence checks that when the plugin's evidence never arrives, the
+// failure names the plugin and its labels and prints the agent's log tail before the full dump.
+func TestSmokeRunNoPluginEvidence(t *testing.T) {
+	out, calls, failed := runSmoke(t, true, "SMOKE_TIMEOUT=4", "FAKE_EVIDENCE=none")
+	if !failed || !strings.Contains(out, "SMOKE FAILED: no evidence from plugin-file-attestation (labels provider=file, type=attestation, source=local, _agent=client-1)") {
+		t.Fatalf("failed=%v; output:\n%s", failed, out)
+	}
+	if !strings.Contains(out, "---- last 50 lines of the agent's log ----\nagent log tail\n") {
+		t.Errorf("no agent log tail; output:\n%s", out)
+	}
+	got := composeCalls(calls)
+	if n := len(got); n < 4 || !reflect.DeepEqual(got[n-4:], []string{"logs --no-color --tail 50 agent", "ps -a", "logs --no-color --timestamps", "down -v --remove-orphans"}) {
+		t.Errorf("compose calls %q", got)
 	}
 }
