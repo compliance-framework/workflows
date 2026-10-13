@@ -1,0 +1,2 @@
+lisa-addressed:
+- pass 2: README wording now says an older agent's OPA may not parse template strings.
