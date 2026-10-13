@@ -6,10 +6,12 @@ import (
 	"strings"
 )
 
-// Stages groups the repos with release: true into topological stages: every
-// repo's dependencies are in earlier stages, and each repo sits in the earliest
-// stage it can. Repos with release: false (the workflows repo) are left out,
-// and dependencies on them are ignored.
+// Stages groups the active repos (ActiveRepos) with release: true into
+// topological stages: every repo's dependencies are in earlier stages, and each
+// repo sits in the earliest stage it can. Repos with release: false (the
+// workflows repo) and repos of inactive batches are left out, and dependencies
+// on them are ignored. Plugin and policy repos depend on agent, so an active
+// batch lands in agent-action's stage, ahead of helm.
 //
 // Helm repos are deployment bundles that pin the versions of everything else,
 // so they release last: a repo of kind helm implicitly depends on every
@@ -23,7 +25,7 @@ import (
 // Dependencies on repos that are not in the manifest are ignored here; Validate
 // reports them.
 func (m *Manifest) Stages() ([][]string, error) {
-	return m.stages(func(r Repo) bool { return r.Release })
+	return m.stages(func(r Repo) bool { return r.Release && m.Active(r) })
 }
 
 // stages orders the repos for which keep is true; Validate keeps them all, to find every cycle.

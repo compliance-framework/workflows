@@ -94,7 +94,7 @@ Runs daily at 06:17 UTC and on `workflow_dispatch`, as one job:
 | Input | Default | What |
 | --- | --- | --- |
 | `manifest` | `repos.yaml` | The repos to run on: the product repos and this one. `repos.mock.yaml` for the mocks. |
-| `repos` | every repo in the manifest | Comma-separated subset; each must be in the manifest. |
+| `repos` | every active repo in the manifest | Comma-separated subset; each must be in the manifest and active ([manifest.md](manifest.md)). |
 | `dry_run` | `full` | Renovate's `dryRun`: `full` logs every branch and PR it would create, `lookup` stops after finding updates, `extract` after reading the package files. `off` runs live. |
 | `log_level` | `info` | `debug` for a full trace. |
 

@@ -34,25 +34,18 @@ type Options struct {
 // repos the token reaches and whether anything is written.
 var runnerKeys = []string{"platform", "autodiscover", "repositories", "onboarding", "requireConfig", "dryRun", "statusCheckWhen"}
 
-// SelectRepos returns the repos named in list (comma- or space-separated), or every repo in the
-// manifest (the workflows repo included) if list is empty, in manifest order. Named repos must be
-// in the manifest.
+// SelectRepos returns the repos named in list (comma- or space-separated), or every active repo in
+// the manifest (the workflows repo included; manifest.ActiveRepos) if list is empty, in manifest
+// order. Named repos must be in the manifest and active.
 func SelectRepos(m *manifest.Manifest, list string) ([]string, error) {
 	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
-	var unknown []string
-	for _, n := range names {
-		if !slices.ContainsFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n }) {
-			unknown = append(unknown, n)
-		}
-	}
-	if len(unknown) > 0 {
-		return nil, fmt.Errorf("not in the manifest: %s", strings.Join(unknown, ", "))
+	repos, err := m.Select(names, false)
+	if err != nil {
+		return nil, err
 	}
 	var out []string
-	for _, r := range m.Repos {
-		if len(names) == 0 || slices.Contains(names, r.Name) {
-			out = append(out, r.Name)
-		}
+	for _, r := range repos {
+		out = append(out, r.Name)
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no repos selected")

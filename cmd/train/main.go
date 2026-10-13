@@ -178,22 +178,35 @@ func selectRepos(ctx context.Context, tracker *train.GitHub, mode, path string, 
 	if err != nil {
 		return err
 	}
+	names, err := trainRepos(m, path, selected)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(stdout, "open=%t\nmanifest=%s\nrepos=%s\n", open, path, strings.Join(names, ","))
+	return err
+}
+
+// trainRepos returns the repos of selected, or every active repo (manifest.ActiveRepos) with
+// release: true, in manifest order. Each selected repo must be one of those.
+func trainRepos(m *manifest.Manifest, path string, selected []string) ([]string, error) {
 	var names []string
-	for _, r := range m.Repos {
+	for _, r := range m.ActiveRepos() {
 		if r.Release && (len(selected) == 0 || slices.Contains(selected, r.Name)) {
 			names = append(names, r.Name)
 		}
 	}
 	for _, s := range selected {
+		if r := m.Repo(s); r != nil && r.Release && !m.Active(*r) {
+			return nil, fmt.Errorf("repo %q is in batch %d, which is not active in %s", s, r.Batch, path)
+		}
 		if !slices.Contains(names, s) {
-			return fmt.Errorf("repo %q is not in %s with release: true", s, path)
+			return nil, fmt.Errorf("repo %q is not in %s with release: true", s, path)
 		}
 	}
 	if len(names) == 0 {
-		return errors.New("no repos selected")
+		return nil, errors.New("no repos selected")
 	}
-	_, err = fmt.Fprintf(stdout, "open=%t\nmanifest=%s\nrepos=%s\n", open, path, strings.Join(names, ","))
-	return err
+	return names, nil
 }
 
 func split(list string) []string {
