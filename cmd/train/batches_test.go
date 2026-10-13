@@ -41,23 +41,24 @@ func TestTrainReposByBatch(t *testing.T) {
 	}
 }
 
-// TestTrainReposByBatchReposYAML: repos.yaml has batches 1 and 2 active, so the selection is the released core
-// repos plus batch 1's 27 released repos and batch 2's 27, in manifest order; batch 3 stays out.
+// TestTrainReposByBatchReposYAML: every batch of repos.yaml is active (1, 2 and 3), so the selection is the released
+// core repos plus every batch's released repos (27, 27 and 10), in manifest order. The inactive-batch paths are
+// covered on testdata/batches.yaml above.
 func TestTrainReposByBatchReposYAML(t *testing.T) {
 	m, err := manifest.Load("../../repos.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(m.ActiveBatches, []int{1, 2}) || len(m.Repos) == len(m.ActiveRepos()) {
-		t.Fatalf("active_batches %v: want [1 2], with batch 3 inactive", m.ActiveBatches)
+	if len(m.ActiveRepos()) != len(m.Repos) {
+		t.Fatalf("active_batches %v: want every batch of repos.yaml active", m.ActiveBatches)
 	}
 	want := []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts"}
 	for _, r := range m.Repos {
-		if (r.Batch == 1 || r.Batch == 2) && r.Release {
+		if r.Batch != 0 && r.Release {
 			want = append(want, r.Name)
 		}
 	}
-	if got, err := trainRepos(m, "repos.yaml", nil); err != nil || len(got) != 60 || !slices.Equal(got, want) {
+	if got, err := trainRepos(m, "repos.yaml", nil); err != nil || len(got) != 70 || !slices.Equal(got, want) {
 		t.Errorf("repos.yaml: got %v, %v; want %v", got, err, want)
 	}
 }

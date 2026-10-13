@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/compliance-framework/workflows/internal/manifest"
 )
 
 func TestRunList(t *testing.T) {
@@ -24,21 +26,22 @@ func TestRunList(t *testing.T) {
 	if err := run([]string{"list", "--manifest", "../../repos.yaml"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	// Batches 1 and 2 are active: the core repos, then batch 1's 30 repos and batch 2's 27.
-	want = "api,gooci,agent,ui,agent-action,helm-charts,workflows," +
-		"plugin-file-attestation,plugin-file-attestation-policies,plugin-file-attestation-ctrf-policies,plugin-file-attestation-sarif-policies," +
-		"plugin-github-settings,plugin-github-settings-policies,plugin-github-repositories,plugin-github-repositories-policies," +
-		"plugin-github-repositories-custom-policies,plugin-github-repositories-dependency-policies,plugin-github-repositories-pr-policies," +
-		"plugin-dependabot,plugin-dependabot-policies,plugin-dependabot-granular-policies,plugin-apt-versions,plugin-apt-versions-policies," +
-		"plugin-local-ssh,plugin-local-ssh-policies,plugin-jira,plugin-jira-policies,plugin-jira-custom-policies," +
-		"plugin-gitlab-repositories,plugin-gitlab-repositories-policies,plugin-k8s,plugin-k8s-opres-policies," +
-		"plugin-cloud-custodian,plugin-cloud-custodian-policies,plugin-template,plugin-template-policies,policy-template," +
-		"plugin-aws-rds-aurora-psql,plugin-aws-rds-aurora-psql-policies,plugin-http-collector,plugin-http-collector-policies," +
-		"plugin-intruder,plugin-intruder-policies,plugin-aws-acm,plugin-aws-acm-certificate-policies," +
-		"plugin-aws-ecr,plugin-aws-ecr-image-policies,plugin-aws-ecr-registry-policies,plugin-aws-ecr-repository-policies," +
-		"plugin-aws-ec2,plugin-aws-ec2-policies,plugin-aws-eks,plugin-aws-eks-policies,plugin-aws-eks-addon-policies,plugin-aws-eks-nodegroup-policies," +
-		"plugin-aws-elb,plugin-aws-elb-listener-policies,plugin-aws-elb-loadbalancer-policies,plugin-aws-elb-targetgroup-policies," +
-		"plugin-aws-elb-targethealth-policies,plugin-aws-s3,plugin-aws-s3-policies,plugin-aws-secretsmanager,plugin-aws-secretsmanager-policies\n"
+	// Every batch of repos.yaml is active: every repo, in manifest order (the core repos first).
+	m, err := manifest.Load("../../repos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.ActiveRepos()) != len(m.Repos) {
+		t.Fatalf("active_batches %v: want every batch of repos.yaml active", m.ActiveBatches)
+	}
+	var all []string
+	for _, r := range m.Repos {
+		all = append(all, r.Name)
+	}
+	if len(all) != 74 || !slices.Equal(all[:7], []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts", "workflows"}) {
+		t.Fatalf("repos.yaml: %d repos %v; want 74, the 7 core repos first", len(all), all)
+	}
+	want = strings.Join(all, ",") + "\n"
 	if got := out.String(); got != want {
 		t.Errorf("list repos.yaml = %q, want %q", got, want)
 	}
@@ -69,6 +72,9 @@ func TestRunConfig(t *testing.T) {
 	}
 }
 
+// batchesYAML is the fixture with plugin and policy repos in three batches, none active.
+const batchesYAML = "../../internal/manifest/testdata/batches.yaml"
+
 func TestRunErrors(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
@@ -83,9 +89,10 @@ func TestRunErrors(t *testing.T) {
 		{[]string{"config", "--manifest", "../../repos.mock.yaml", "--preset", "../../renovate/default.json", "--dry-run", "true"}, "dry run"},
 		{[]string{"list", "--manifest", "../../repos.mock.yaml", "--dry-run", "of"}, "dry run"},
 		{[]string{"list", "--manifest", "../../repos.mock.yaml", "--dry-run", "off", "--max-repos", "-1"}, "--max-repos -1"},
-		// A live run never takes a repo of an inactive batch (repos.yaml has batch 3 inactive).
-		{[]string{"list", "--manifest", "../../repos.yaml", "--repos", "plugin-aws-vpc", "--dry-run", "off"}, "not active"},
-		{[]string{"config", "--manifest", "../../repos.yaml", "--repos", "api,plugin-aws-vpc", "--dry-run", "off", "--preset", "../../renovate/default.json"}, "not active"},
+		// A live run never takes a repo of an inactive batch (batches.yaml has none active; every batch of
+		// repos.yaml is).
+		{[]string{"list", "--manifest", batchesYAML, "--repos", "plugin-two", "--dry-run", "off"}, "not active"},
+		{[]string{"config", "--manifest", batchesYAML, "--repos", "api,plugin-two", "--dry-run", "off", "--preset", "../../renovate/default.json"}, "not active"},
 	} {
 		var out bytes.Buffer
 		if err := run(tc.args, &out, io.Discard); err == nil || !strings.Contains(err.Error(), tc.err) {
@@ -97,15 +104,15 @@ func TestRunErrors(t *testing.T) {
 // TestRunDryRunInactive: a dry run may name repos of an inactive batch, to check the batch before it is switched
 // on; the token's list and the config name the same repos.
 func TestRunDryRunInactive(t *testing.T) {
-	names := "plugin-aws-vpc,plugin-aws-vpc-policies" // batch 3
+	names := "plugin-two,plugin-three-policies" // batches 2 and 3 of batches.yaml, none active
 	var list, cfgOut bytes.Buffer
-	if err := run([]string{"list", "--manifest", "../../repos.yaml", "--repos", names, "--dry-run", "full"}, &list, io.Discard); err != nil {
+	if err := run([]string{"list", "--manifest", batchesYAML, "--repos", names, "--dry-run", "full"}, &list, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if got := list.String(); got != names+"\n" {
 		t.Errorf("list = %q, want %q", got, names+"\n")
 	}
-	args := []string{"config", "--manifest", "../../repos.yaml", "--repos", names, "--dry-run", "lookup", "--preset", "../../renovate/default.json"}
+	args := []string{"config", "--manifest", batchesYAML, "--repos", names, "--dry-run", "lookup", "--preset", "../../renovate/default.json"}
 	if err := run(args, &cfgOut, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +123,7 @@ func TestRunDryRunInactive(t *testing.T) {
 	if err := json.Unmarshal(cfgOut.Bytes(), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(cfg.Repositories, []string{"compliance-framework/plugin-aws-vpc", "compliance-framework/plugin-aws-vpc-policies"}) || cfg.DryRun != "lookup" {
+	if !slices.Equal(cfg.Repositories, []string{"compliance-framework/plugin-two", "compliance-framework/plugin-three-policies"}) || cfg.DryRun != "lookup" {
 		t.Errorf("config: repositories %v, dryRun %q", cfg.Repositories, cfg.DryRun)
 	}
 }

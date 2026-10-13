@@ -10,7 +10,7 @@ holidays:
 # Plugin and policy repos carry a `batch`; the tools (Renovate, ccf-bump, the train, the attention
 # digest, the vulnerability summary, repo-settings' default selection) act on a batch's repos only
 # once it is listed here. Repos without a batch are core and always active. See docs/manifest.md.
-active_batches: [1, 2]
+active_batches: [1, 2, 3]
 
 # Repo name globs and explicit exclusions. They select nothing for the tools: they feed the
 # coverage check (`go run ./cmd/manifest --org compliance-framework`), which fails when an

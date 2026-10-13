@@ -179,15 +179,16 @@ func TestReposYAMLBatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Batches 1 and 2 are active: the core repos plus batch 1's 30 repos and batch 2's 27, in manifest order.
+	// Every batch is active: the core repos plus batch 1's 30 repos, batch 2's 27 and batch 3's 10, in manifest
+	// order. The inactive-batch paths are covered on testdata/batches.yaml.
 	active := slices.Clone(coreRepos)
 	for _, r := range m.Repos {
-		if r.Batch == 1 || r.Batch == 2 {
+		if r.Batch != 0 {
 			active = append(active, r.Name)
 		}
 	}
-	if got := names(m.ActiveRepos()); !reflect.DeepEqual(m.ActiveBatches, []int{1, 2}) || len(got) != 64 || !reflect.DeepEqual(got, active) {
-		t.Fatalf("active_batches %v: ActiveRepos() = %v, want the core repos and batches 1 and 2 %v", m.ActiveBatches, got, active)
+	if got := names(m.ActiveRepos()); !reflect.DeepEqual(m.ActiveBatches, []int{1, 2, 3}) || len(got) != 74 || !reflect.DeepEqual(got, active) {
+		t.Fatalf("active_batches %v: ActiveRepos() = %v, want the core repos and every batch %v", m.ActiveBatches, got, active)
 	}
 	if len(m.Exclude) != 20 || !reflect.DeepEqual(m.IncludePatterns, []string{"plugin-*"}) {
 		t.Errorf("include_patterns %v, %d excluded; want plugin-* and the 20 repos archived in workstream 2", m.IncludePatterns, len(m.Exclude))
