@@ -2,3 +2,7 @@ lisa-design:
 - With batch 3 active no batch of repos.yaml is inactive, so every inactive-batch test case runs on the fixture internal/manifest/testdata/batches.yaml (no batch active) instead of a real repos.yaml repo; renovate-config TestRunErrors/TestRunDryRunInactive now use plugin-two / plugin-three-policies there.
 - The repos.yaml state tests derive their expected repo lists from the manifest (r.Batch != 0, r.Release) and guard "every batch active" with len(ActiveRepos()) == len(Repos), keeping the counts (74/73/70/65) as sanity pins; only internal/manifest TestReposYAMLBatches pins active_batches [1 2 3] literally, as the manifest's own test.
 - No docs change: docs/renovate.md already lists the 1,2,3 shard sizes (15,15,15,15,14), which match the local list output.
+
+lisa-selfreview:
+pass 1 (approve): no blocking findings. go test -race, vet, gofmt, actionlint v1.7.12 and cmd/manifest on both manifests pass.
+- deferred (should-fix, pre-existing, out of scope "repos.yaml only"): docs/renovate.md:112 and docs/ccf-bump.md:192 still label the "none" row "(today)"; that has been stale since batch 1. The 1,2,3 rows (74 repos / 5 shards 15,15,15,15,14; 70 repos / 7 chunks) match the local list output. Left for a human to decide.
