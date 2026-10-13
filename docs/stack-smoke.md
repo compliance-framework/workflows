@@ -113,4 +113,6 @@ key. Use `smoke/run.sh`.
 ## In the release train
 
 The release train dispatches `stack-smoke.yml` in its gate with the api, ui and agent versions
-it released ([train.md](train.md), The gate).
+it released, and `plugin-tag` / `policy-tag` with its versions of plugin-file-attestation and
+plugin-file-attestation-policies when the train holds them, else the defaults above
+([train.md](train.md), The gate).

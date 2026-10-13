@@ -34,8 +34,10 @@ workflow of this repo, dispatched by the train (`workflow_dispatch` on the defau
 
 | Check | Runs |
 | --- | --- |
-| each `go-plugin` and `policies` repo of the earlier stages | [`plugin-probe.yml`](plugin-probe.md) on `ghcr.io/compliance-framework/<repo>:v<version>` (a plugin in `plugins`, a bundle in `policies`), at the version this train released, or its version when the train started if it released nothing. `agent-ref` is the version of the `agent` repo this train released (or its current one), so the probe loads plugins and compiles policies as that agent and its OPA would; a manifest without an `agent` repo (the mocks) probes with the agent in this repo's `go.mod`. |
-| `stack-smoke` | [`stack-smoke.yml`](stack-smoke.md) with the `api`, `ui` and `agent` image tags at the train's versions (released, or current). Only when the manifest has those three repos: the mocks have none, so a mock train has no smoke check. |
+| each `go-plugin` and `policies` repo of the earlier stages | [`plugin-probe.yml`](plugin-probe.md) on `ghcr.io/compliance-framework/<repo>:v<version>` (a plugin in `plugins`, a bundle in `policies`), at the version this train released, or its version when the train started if it released nothing. `agent-ref` is the version of the `agent` repo this train released (or its version when the train started), so the probe loads plugins and compiles policies as that agent and its OPA would; a train without the `agent` repo (the mocks, or a `repos` selection) probes with the agent in this repo's `go.mod`. |
+| `stack-smoke` | [`stack-smoke.yml`](stack-smoke.md) with the train's versions of `api`, `ui` and `agent` (`api-tag`, `ui-tag`, `agent-tag`), and of `plugin-file-attestation` and `plugin-file-attestation-policies` (`plugin-tag`, `policy-tag`) when the train holds them, else the workflow's defaults. Only when the train holds `api`, `ui` and `agent`: a mock train has no smoke check. |
+
+The gate reads only the train's repos: the release-bot token reaches no others.
 
 The gate holds the helm stage until every check has passed or been skipped:
 
