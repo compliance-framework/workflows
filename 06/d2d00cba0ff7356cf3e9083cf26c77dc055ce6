@@ -1,0 +1,2 @@
+lisa-addressed:
+Thread PRRT_kwDOKQL6as6r9NWH (#108 ci.yml:48, Must-fix): moved the --org coverage run into a manifest-coverage job (contents: read, same pinned checkout/setup-go) that is not in required's needs; go job keeps offline validation of repos.yaml and repos.mock.yaml. TestSelfRequired excludes advisory jobs from the needs check and asserts manifest-coverage exists. docs/manifest.md, README and the repos.yaml header say the job is advisory and doesn't gate merges.
