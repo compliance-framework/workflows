@@ -4,3 +4,7 @@ lisa-design:
 - Evidence filter: provider=file, type=attestation, source=local (plugin's buildEvidenceLabels at v0.2.0) plus _agent=<this run's key client-id>, so only this run's agent counts. Status is not asserted (fixture has no attestation; some policies are not satisfied by design).
 - Schedule "* * * * *" is the shortest the agent's cron parser (minute granularity) accepts; check_plugin reuses SMOKE_TIMEOUT (default 180s).
 - run.sh requires SMOKE_PLUGIN_TAG/SMOKE_POLICY_TAG (like the other tags) rather than defaulting them, so the defaults live only in stack-smoke.yml. Tests pin the defaults' shape (final vX.Y.Z), not the value, so a plugin release bump does not need a test change.
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- [must-fix 9712adf80ba2] smoke/run.sh cleanup: SMOKE_KEEP=1 deletes the rendered agent config the kept stack mounts, and the printed `down -v` hint fails compose interpolation (SMOKE_AGENT_CONFIG, tags). Fix: keep it when the stack stays up; print the hint with the env set.
