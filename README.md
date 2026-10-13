@@ -44,7 +44,7 @@ repos:
   - name: agent
     kind: go-service          # go-service | go-plugin | go-lib | policies | ui | helm | action | workflows
     depends_on: [api, gooci]  # repos that release before this one
-    release: true             # required; whether the release tooling acts on it (repo-settings manages every repo)
+    release: true             # required; whether the release tooling acts on it (repo-settings manages every active repo)
   - name: helm-charts
     kind: helm
     depends_on: [api, ui, agent]
@@ -60,7 +60,7 @@ needs `release: false`, has no `depends_on`, and no repo depends on it.
 Plugin and policy repos carry a `batch` (1 or more); the tools act on them only once their batch
 is in `active_batches`. Batches and how to switch one on: [docs/manifest.md](docs/manifest.md).
 
-`Stages()` groups the repos with `release: true` into release stages. Every repo's dependencies are in earlier stages,
+`Stages()` groups the active repos with `release: true` into release stages. Every repo's dependencies are in earlier stages,
 and each stage is sorted by name. Repos of kind `helm` always release last, after every
 non-helm repo, because the charts pin the versions of everything else. For `repos.yaml`:
 
@@ -754,7 +754,7 @@ desired state, defined in `internal/reposettings`:
   secrets are written (encrypted with the environment's public key); present ones are left alone
   unless `rotate-secrets` is on. Its other protection rules (reviewers, wait timer) aren't managed.
 
-Every repo in the manifest gets these settings, the `workflows` repo (`release: false`) too: every
+Every active repo in the manifest (and every repo named in `repos`) gets these settings, the `workflows` repo (`release: false`) too: every
 caller's CI and releases run its code. Rulesets are matched by name; other rulesets are left alone.
 Settings outside this list are not read or changed. A repo's required check exists once it calls
 the shared CI with a `required` job (the caller job is named `ci`, so the check is `ci / required`,
