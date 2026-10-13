@@ -179,15 +179,15 @@ func TestReposYAMLBatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Batch 1 is active: the core repos plus batch 1's 30 repos, in manifest order.
+	// Batches 1 and 2 are active: the core repos plus batch 1's 30 repos and batch 2's 27, in manifest order.
 	active := slices.Clone(coreRepos)
 	for _, r := range m.Repos {
-		if r.Batch == 1 {
+		if r.Batch == 1 || r.Batch == 2 {
 			active = append(active, r.Name)
 		}
 	}
-	if got := names(m.ActiveRepos()); !reflect.DeepEqual(m.ActiveBatches, []int{1}) || len(got) != 37 || !reflect.DeepEqual(got, active) {
-		t.Fatalf("active_batches %v: ActiveRepos() = %v, want the core repos and batch 1 %v", m.ActiveBatches, got, active)
+	if got := names(m.ActiveRepos()); !reflect.DeepEqual(m.ActiveBatches, []int{1, 2}) || len(got) != 64 || !reflect.DeepEqual(got, active) {
+		t.Fatalf("active_batches %v: ActiveRepos() = %v, want the core repos and batches 1 and 2 %v", m.ActiveBatches, got, active)
 	}
 	if len(m.Exclude) != 20 || !reflect.DeepEqual(m.IncludePatterns, []string{"plugin-*"}) {
 		t.Errorf("include_patterns %v, %d excluded; want plugin-* and the 20 repos archived in workstream 2", m.IncludePatterns, len(m.Exclude))

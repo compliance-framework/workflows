@@ -21,17 +21,26 @@ func TestLoadRepoManifests(t *testing.T) {
 		path   string
 		stages [][]string
 	}{
-		{"../../repos.yaml", [][]string{ // batch 1 is active
+		{"../../repos.yaml", [][]string{ // batches 1 and 2 are active
 			{"api", "gooci"},
 			{"agent", "ui"},
 			{
 				"agent-action",
-				"plugin-apt-versions", "plugin-apt-versions-policies", "plugin-cloud-custodian", "plugin-cloud-custodian-policies",
+				"plugin-apt-versions", "plugin-apt-versions-policies",
+				"plugin-aws-acm", "plugin-aws-acm-certificate-policies", "plugin-aws-ec2", "plugin-aws-ec2-policies",
+				"plugin-aws-ecr", "plugin-aws-ecr-image-policies", "plugin-aws-ecr-registry-policies", "plugin-aws-ecr-repository-policies",
+				"plugin-aws-eks", "plugin-aws-eks-addon-policies", "plugin-aws-eks-nodegroup-policies", "plugin-aws-eks-policies",
+				"plugin-aws-elb", "plugin-aws-elb-listener-policies", "plugin-aws-elb-loadbalancer-policies",
+				"plugin-aws-elb-targetgroup-policies", "plugin-aws-elb-targethealth-policies",
+				"plugin-aws-rds-aurora-psql", "plugin-aws-rds-aurora-psql-policies", "plugin-aws-s3", "plugin-aws-s3-policies",
+				"plugin-aws-secretsmanager", "plugin-aws-secretsmanager-policies",
+				"plugin-cloud-custodian", "plugin-cloud-custodian-policies",
 				"plugin-dependabot", "plugin-dependabot-granular-policies", "plugin-dependabot-policies",
 				"plugin-file-attestation", "plugin-file-attestation-ctrf-policies", "plugin-file-attestation-policies", "plugin-file-attestation-sarif-policies",
 				"plugin-github-repositories", "plugin-github-repositories-custom-policies", "plugin-github-repositories-dependency-policies",
 				"plugin-github-repositories-policies", "plugin-github-repositories-pr-policies", "plugin-github-settings", "plugin-github-settings-policies",
-				"plugin-gitlab-repositories", "plugin-gitlab-repositories-policies", "plugin-jira", "plugin-jira-custom-policies", "plugin-jira-policies",
+				"plugin-gitlab-repositories", "plugin-gitlab-repositories-policies", "plugin-http-collector", "plugin-http-collector-policies",
+				"plugin-intruder", "plugin-intruder-policies", "plugin-jira", "plugin-jira-custom-policies", "plugin-jira-policies",
 				"plugin-k8s", "plugin-k8s-opres-policies", "plugin-local-ssh", "plugin-local-ssh-policies",
 			},
 			{"helm-charts"},
