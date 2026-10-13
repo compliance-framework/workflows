@@ -76,17 +76,27 @@ func ExpectsCheck(err error) bool {
 const maxPages = 10
 
 func (g *GitHub) do(ctx context.Context, method, path string, in, out any) error {
+	data, err := g.send(ctx, method, path, in)
+	if err != nil || out == nil || len(data) == 0 {
+		return err
+	}
+	return json.Unmarshal(data, out)
+}
+
+// send makes a request and returns the response body (redirects followed: Go drops the
+// Authorization header on a redirect to another host, such as a log's signed URL).
+func (g *GitHub) send(ctx context.Context, method, path string, in any) ([]byte, error) {
 	var body io.Reader
 	if in != nil {
 		data, err := json.Marshal(in)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		body = bytes.NewReader(data)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(g.BaseURL, "/")+path, body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -99,20 +109,17 @@ func (g *GitHub) do(ctx context.Context, method, path string, in, out any) error
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.StatusCode/100 != 2 {
-		return &StatusError{Method: method, Path: req.URL.Path, Status: resp.StatusCode, Body: string(bytes.TrimSpace(data))}
+		return nil, &StatusError{Method: method, Path: req.URL.Path, Status: resp.StatusCode, Body: string(bytes.TrimSpace(data))}
 	}
-	if out == nil || len(data) == 0 {
-		return nil
-	}
-	return json.Unmarshal(data, out)
+	return data, nil
 }
 
 // pages GETs path page by page until a short page, appending to out.
@@ -286,14 +293,7 @@ func (g *GitHub) Merge(ctx context.Context, repo string, number int, sha string)
 // Runs returns the workflow runs of event at head commit sha.
 func (g *GitHub) Runs(ctx context.Context, repo, event, sha string) ([]Run, error) {
 	var r struct {
-		Runs []struct {
-			ID         int64  `json:"id"`
-			Path       string `json:"path"`
-			HeadBranch string `json:"head_branch"`
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-			URL        string `json:"html_url"`
-		} `json:"workflow_runs"`
+		Runs []ghRun `json:"workflow_runs"`
 	}
 	q := url.Values{"event": {event}, "head_sha": {sha}, "per_page": {"100"}}
 	if err := g.do(ctx, http.MethodGet, g.repoPath(repo)+"/actions/runs?"+q.Encode(), nil, &r); err != nil {
@@ -301,7 +301,7 @@ func (g *GitHub) Runs(ctx context.Context, repo, event, sha string) ([]Run, erro
 	}
 	out := make([]Run, 0, len(r.Runs))
 	for _, x := range r.Runs {
-		out = append(out, Run{ID: x.ID, Path: x.Path, HeadBranch: x.HeadBranch, Status: x.Status, Conclusion: x.Conclusion, URL: x.URL})
+		out = append(out, x.run())
 	}
 	return out, nil
 }
@@ -450,4 +450,61 @@ func (g *GitHub) IsOrgAdmin(ctx context.Context, user string) (bool, error) {
 		return false, nil
 	}
 	return err == nil && m.State == "active" && m.Role == "admin", err
+}
+
+type ghRun struct {
+	ID         int64  `json:"id"`
+	Path       string `json:"path"`
+	HeadBranch string `json:"head_branch"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"html_url"`
+}
+
+func (x ghRun) run() Run {
+	return Run{ID: x.ID, Path: x.Path, HeadBranch: x.HeadBranch, Status: x.Status, Conclusion: x.Conclusion, URL: x.URL}
+}
+
+// Dispatch runs workflow on the tracker repo's default branch with inputs (the gate). GitHub
+// answers with the run's ID and page.
+func (g *GitHub) Dispatch(ctx context.Context, workflow string, inputs map[string]string) (Run, error) {
+	branch, _, err := g.DefaultBranch(ctx, g.Repo)
+	if err != nil {
+		return Run{}, err
+	}
+	var out struct {
+		ID  int64  `json:"workflow_run_id"`
+		URL string `json:"html_url"`
+	}
+	in := map[string]any{"ref": branch, "inputs": inputs}
+	err = g.do(ctx, http.MethodPost, g.repoPath(g.Repo)+"/actions/workflows/"+url.PathEscape(workflow)+"/dispatches", in, &out)
+	return Run{ID: out.ID, Path: ".github/workflows/" + workflow, Status: "queued", URL: out.URL}, err
+}
+
+// WorkflowRun returns a run of the tracker repo.
+func (g *GitHub) WorkflowRun(ctx context.Context, id int64) (Run, error) {
+	var x ghRun
+	err := g.do(ctx, http.MethodGet, fmt.Sprintf("%s/actions/runs/%d", g.repoPath(g.Repo), id), nil, &x)
+	return x.run(), err
+}
+
+// RunLog returns the logs of a tracker repo run's jobs, one after the other.
+func (g *GitHub) RunLog(ctx context.Context, id int64) (string, error) {
+	var jobs struct {
+		Jobs []struct {
+			ID int64 `json:"id"`
+		} `json:"jobs"`
+	}
+	if err := g.do(ctx, http.MethodGet, fmt.Sprintf("%s/actions/runs/%d/jobs?per_page=100", g.repoPath(g.Repo), id), nil, &jobs); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, j := range jobs.Jobs {
+		data, err := g.send(ctx, http.MethodGet, fmt.Sprintf("%s/actions/jobs/%d/logs", g.repoPath(g.Repo), j.ID), nil)
+		if err != nil {
+			return b.String(), err
+		}
+		b.Write(data)
+	}
+	return b.String(), nil
 }

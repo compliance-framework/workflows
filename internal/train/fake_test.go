@@ -35,6 +35,19 @@ type world struct {
 	// manualBumps: ccf-bump leaves the automerge label off; closedBumps: someone closes the bump PRs.
 	manualBumps, closedBumps bool
 	mergeErrs                []error // returned by the first merges
+	// The gate's runs: probeFail fails the probe of a repo, v1 makes its plugin speak protocol v1,
+	// smokeFail fails stack-smoke.
+	gateRuns           []*gateRun
+	probeFail, v1      map[string]bool
+	smokeFail, noRunID bool     // noRunID: dispatches return no run ID
+	events             []string // "bump <repo>", "dispatch <workflow>", "done <run id>", in order
+}
+
+type gateRun struct {
+	workflow string
+	inputs   map[string]string
+	run      Run
+	log      string
 }
 
 type fakeRepo struct {
@@ -56,7 +69,8 @@ type fakeRepo struct {
 }
 
 func newWorld(t *testing.T) *world {
-	return &world{t: t, repos: map[string]*fakeRepo{}, comments: map[int][]Comment{}, admins: []string{"owner"}}
+	return &world{t: t, repos: map[string]*fakeRepo{}, comments: map[int][]Comment{}, admins: []string{"owner"},
+		probeFail: map[string]bool{}, v1: map[string]bool{}}
 }
 
 func (w *world) nextID() int64 { w.id++; return w.id }
@@ -98,9 +112,14 @@ func (w *world) green(r *fakeRepo, sha string, ok bool) {
 	r.checks[sha] = append(r.checks[sha], Check{ID: w.nextID(), Name: "ci / required", Status: "completed", Conclusion: c})
 }
 
-// tick plays release-please on every repo whose main moved, and the release workflows of
-// tagged releases.
+// tick plays release-please on every repo whose main moved, the release workflows of
+// tagged releases, and the gate's runs.
 func (w *world) tick() {
+	for _, g := range w.gateRuns {
+		if g.run.Status != "completed" {
+			w.finishGateRun(g)
+		}
+	}
 	for _, r := range w.repos {
 		if r.rpDone != r.main {
 			r.rpDone = r.main
@@ -240,6 +259,7 @@ func (w *world) Bump(_ context.Context, path, repo string, sets map[string]strin
 		s = append(s, k+"="+sets[k])
 	}
 	w.bumps = append(w.bumps, fmt.Sprintf("%s %s dry=%v", repo, strings.Join(s, ","), dryRun))
+	w.events = append(w.events, "bump "+repo)
 	r := w.get(repo)
 	if !r.bumped {
 		return BumpResult{Output: "nothing pinned"}, nil
@@ -344,7 +364,8 @@ func (w *world) state(n int) *State {
 // engine returns an Engine on w at now, with the manifest files of the repo root.
 func (w *world) engine(now time.Time) *Engine {
 	return &Engine{
-		Repos: w, Tracker: w, Members: w, Slack: w, Bumper: w,
+		Repos: w, Tracker: w, Members: w, Slack: w, Bumper: w, Gate: w,
+		Registry:              "ghcr.io/compliance-framework",
 		Load:                  func(p string) (*manifest.Manifest, error) { return manifest.Load("../../" + p) },
 		ReposURL:              "https://github.com/compliance-framework",
 		Channel:               "C1",
@@ -354,4 +375,78 @@ func (w *world) engine(now time.Time) *Engine {
 		RunURL:                "https://run",
 		Now:                   func() time.Time { return now },
 	}
+}
+
+// Gate.
+
+func (w *world) Dispatch(_ context.Context, workflow string, inputs map[string]string) (Run, error) {
+	id := w.nextID()
+	g := &gateRun{workflow: workflow, inputs: maps.Clone(inputs), run: Run{ID: id, Path: ".github/workflows/" + workflow, Status: "queued", URL: fmt.Sprintf("https://run/%d", id)}}
+	w.gateRuns = append(w.gateRuns, g)
+	w.events = append(w.events, "dispatch "+workflow)
+	if w.noRunID {
+		return Run{}, nil
+	}
+	return g.run, nil
+}
+
+// finishGateRun completes a run: a probe prints its report, and fails for a repo in probeFail.
+func (w *world) finishGateRun(g *gateRun) {
+	const ts = "2026-12-01T08:00:00.0000000Z "
+	failed := w.smokeFail
+	g.log = ts + "##[group]Run smoke/run.sh\n" + ts + "##[endgroup]\n"
+	if g.workflow == ProbeWorkflow {
+		ref := g.inputs["plugins"] + g.inputs["policies"]
+		repo := ref[strings.LastIndex(ref, "/")+1 : strings.LastIndex(ref, ":")]
+		failed = w.probeFail[repo]
+		protocol := 2
+		if w.v1[repo] {
+			protocol = 1
+		}
+		report := fmt.Sprintf(`{"plugins":[{"source":%q,"protocol":%d}]}`, ref, protocol)
+		if g.inputs["policies"] != "" {
+			report = fmt.Sprintf(`{"policies":[{"source":%q}]}`, ref)
+		}
+		g.log = ts + ProbeReportMarker + report + "\n"
+		if failed {
+			g.log += ts + "| `" + ref + "` | - | - | **failed**: plugin exited during Init |\n"
+		}
+	} else if failed {
+		g.log += ts + "SMOKE FAILED: agent heartbeat\n"
+	}
+	w.events = append(w.events, fmt.Sprintf("done %d", g.run.ID))
+	g.run.Status, g.run.Conclusion = "completed", "success"
+	if failed {
+		g.run.Conclusion = "failure"
+		g.log += ts + "##[error]Process completed with exit code 1.\n" + ts + "Post job cleanup.\n"
+	}
+}
+
+func (w *world) gateRun(id int64) *gateRun {
+	for _, g := range w.gateRuns {
+		if g.run.ID == id {
+			return g
+		}
+	}
+	w.t.Fatalf("no gate run %d", id)
+	return nil
+}
+
+func (w *world) WorkflowRun(_ context.Context, id int64) (Run, error) { return w.gateRun(id).run, nil }
+
+func (w *world) RunLog(_ context.Context, id int64) (string, error) { return w.gateRun(id).log, nil }
+
+// dispatched lists the gate's runs as "workflow name=value ...".
+func (w *world) dispatched() []string {
+	var out []string
+	for _, g := range w.gateRuns {
+		var in []string
+		for _, k := range slices.Sorted(maps.Keys(g.inputs)) {
+			if g.inputs[k] != "" {
+				in = append(in, k+"="+g.inputs[k])
+			}
+		}
+		out = append(out, g.workflow+" "+strings.Join(in, " "))
+	}
+	return out
 }
