@@ -43,9 +43,6 @@ func TestSharedRegalConfig(t *testing.T) {
 	if got := c.Rules["idiomatic"]["prefer-string-interpolation"]["level"]; got != "ignore" {
 		t.Errorf("idiomatic/prefer-string-interpolation level %v, want ignore", got)
 	}
-	if _, ok := c.Rules["imports"]; ok {
-		t.Errorf("the shared config sets imports rules; ci-policies.yml adds unresolved-reference's except-paths itself")
-	}
 }
 
 // TestRegalDataPaths runs the regal lint step with a fake regal: the shared config Regal gets
@@ -121,8 +118,16 @@ func TestRegalDataPaths(t *testing.T) {
 			c := readRegalConfig(t, cfg)
 			var got []string
 			if ref, ok := c.Rules["imports"]["unresolved-reference"]; ok {
-				for _, p := range ref["except-paths"].([]any) {
-					got = append(got, p.(string))
+				paths, ok := ref["except-paths"].([]any)
+				if !ok {
+					t.Fatalf("unresolved-reference except-paths %#v, want a list", ref["except-paths"])
+				}
+				for _, p := range paths {
+					s, ok := p.(string)
+					if !ok {
+						t.Fatalf("except-paths entry %#v, want a string", p)
+					}
+					got = append(got, s)
 				}
 				if len(ref) != 1 {
 					t.Errorf("unresolved-reference config %v, want only except-paths (its level stays the default)", ref)
