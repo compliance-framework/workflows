@@ -6,3 +6,6 @@ lisa-design:
 - Validate: active_batches entries must have repos and be unique; no repo depends on a later batch (core on none); a repo can't be both listed and excluded.
 - The org coverage check (include_patterns/exclude vs the GitHub API) and the plugin entries are in the stacked PR above, to keep each PR under 1000 lines.
 - release: false behaviour is unchanged: ccf-bump and the train skip such repos; Renovate, the attention digest, vuln summary (except workflows) and repo-settings include them.
+
+lisa-selfreview:
+pass 1 (strict): CORE-DOC-001 should-fix: README (release comment, Stages(), repo-settings "every repo"), docs/ccf-bump.md (sync --all) and docs/train.md (open-train repos) still described the full manifest as the default selection. Fixed. No other findings: build/vet/gofmt/race tests/actionlint/both manifests pass; per-tool tests assert exact lists.
