@@ -1,0 +1,2 @@
+lisa-selfreview:
+Pass 1 (strict): must-fix CORE-INPUT-001 negative --max-repos disables the shard (cmd/renovate-config); must-fix CORE-ERR-001 ccf-bump-sync pause skipped when Bump dies without writing prs; should-fix CORE-DOC-001 docs promise matrix jobs run in stage order. All three to fix.
