@@ -2,3 +2,7 @@ lisa-addressed:
 pass 1 fixes:
 - 481e50a44941 GO-NIL-001: TestRegalDataPaths uses ok-form type assertions with t.Fatalf.
 - 995c0996822b test-forbids-shared-except-paths: dropped the "no imports rules in the shared config" assertion from TestSharedRegalConfig.
+
+lisa-selfreview:
+pass 2 (strict), verdict request_changes:
+- [nit X:docs/readme-overstates-opa-support] README.md ci-policies regal row: "older agents' OPA can't parse one" overstates; the spec says they may not.
