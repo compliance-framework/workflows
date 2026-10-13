@@ -24,7 +24,7 @@ func TestRunList(t *testing.T) {
 	if err := run([]string{"list", "--manifest", "../../repos.yaml"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	// Batch 1 is active: the core repos, then batch 1's 30 repos.
+	// Batches 1 and 2 are active: the core repos, then batch 1's 30 repos and batch 2's 27.
 	want = "api,gooci,agent,ui,agent-action,helm-charts,workflows," +
 		"plugin-file-attestation,plugin-file-attestation-policies,plugin-file-attestation-ctrf-policies,plugin-file-attestation-sarif-policies," +
 		"plugin-github-settings,plugin-github-settings-policies,plugin-github-repositories,plugin-github-repositories-policies," +
@@ -32,7 +32,13 @@ func TestRunList(t *testing.T) {
 		"plugin-dependabot,plugin-dependabot-policies,plugin-dependabot-granular-policies,plugin-apt-versions,plugin-apt-versions-policies," +
 		"plugin-local-ssh,plugin-local-ssh-policies,plugin-jira,plugin-jira-policies,plugin-jira-custom-policies," +
 		"plugin-gitlab-repositories,plugin-gitlab-repositories-policies,plugin-k8s,plugin-k8s-opres-policies," +
-		"plugin-cloud-custodian,plugin-cloud-custodian-policies,plugin-template,plugin-template-policies,policy-template\n"
+		"plugin-cloud-custodian,plugin-cloud-custodian-policies,plugin-template,plugin-template-policies,policy-template," +
+		"plugin-aws-rds-aurora-psql,plugin-aws-rds-aurora-psql-policies,plugin-http-collector,plugin-http-collector-policies," +
+		"plugin-intruder,plugin-intruder-policies,plugin-aws-acm,plugin-aws-acm-certificate-policies," +
+		"plugin-aws-ecr,plugin-aws-ecr-image-policies,plugin-aws-ecr-registry-policies,plugin-aws-ecr-repository-policies," +
+		"plugin-aws-ec2,plugin-aws-ec2-policies,plugin-aws-eks,plugin-aws-eks-policies,plugin-aws-eks-addon-policies,plugin-aws-eks-nodegroup-policies," +
+		"plugin-aws-elb,plugin-aws-elb-listener-policies,plugin-aws-elb-loadbalancer-policies,plugin-aws-elb-targetgroup-policies," +
+		"plugin-aws-elb-targethealth-policies,plugin-aws-s3,plugin-aws-s3-policies,plugin-aws-secretsmanager,plugin-aws-secretsmanager-policies\n"
 	if got := out.String(); got != want {
 		t.Errorf("list repos.yaml = %q, want %q", got, want)
 	}
@@ -77,9 +83,9 @@ func TestRunErrors(t *testing.T) {
 		{[]string{"config", "--manifest", "../../repos.mock.yaml", "--preset", "../../renovate/default.json", "--dry-run", "true"}, "dry run"},
 		{[]string{"list", "--manifest", "../../repos.mock.yaml", "--dry-run", "of"}, "dry run"},
 		{[]string{"list", "--manifest", "../../repos.mock.yaml", "--dry-run", "off", "--max-repos", "-1"}, "--max-repos -1"},
-		// A live run never takes a repo of an inactive batch (repos.yaml has only batch 1 active).
-		{[]string{"list", "--manifest", "../../repos.yaml", "--repos", "plugin-http-collector", "--dry-run", "off"}, "not active"},
-		{[]string{"config", "--manifest", "../../repos.yaml", "--repos", "api,plugin-http-collector", "--dry-run", "off", "--preset", "../../renovate/default.json"}, "not active"},
+		// A live run never takes a repo of an inactive batch (repos.yaml has batch 3 inactive).
+		{[]string{"list", "--manifest", "../../repos.yaml", "--repos", "plugin-aws-vpc", "--dry-run", "off"}, "not active"},
+		{[]string{"config", "--manifest", "../../repos.yaml", "--repos", "api,plugin-aws-vpc", "--dry-run", "off", "--preset", "../../renovate/default.json"}, "not active"},
 	} {
 		var out bytes.Buffer
 		if err := run(tc.args, &out, io.Discard); err == nil || !strings.Contains(err.Error(), tc.err) {
@@ -91,7 +97,7 @@ func TestRunErrors(t *testing.T) {
 // TestRunDryRunInactive: a dry run may name repos of an inactive batch, to check the batch before it is switched
 // on; the token's list and the config name the same repos.
 func TestRunDryRunInactive(t *testing.T) {
-	names := "plugin-http-collector,plugin-http-collector-policies" // batch 2
+	names := "plugin-aws-vpc,plugin-aws-vpc-policies" // batch 3
 	var list, cfgOut bytes.Buffer
 	if err := run([]string{"list", "--manifest", "../../repos.yaml", "--repos", names, "--dry-run", "full"}, &list, io.Discard); err != nil {
 		t.Fatal(err)
@@ -110,7 +116,7 @@ func TestRunDryRunInactive(t *testing.T) {
 	if err := json.Unmarshal(cfgOut.Bytes(), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(cfg.Repositories, []string{"compliance-framework/plugin-http-collector", "compliance-framework/plugin-http-collector-policies"}) || cfg.DryRun != "lookup" {
+	if !slices.Equal(cfg.Repositories, []string{"compliance-framework/plugin-aws-vpc", "compliance-framework/plugin-aws-vpc-policies"}) || cfg.DryRun != "lookup" {
 		t.Errorf("config: repositories %v, dryRun %q", cfg.Repositories, cfg.DryRun)
 	}
 }

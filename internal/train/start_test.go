@@ -112,8 +112,8 @@ func TestDryRunPlansReposYAMLStages(t *testing.T) {
 	for _, n := range []string{"agent", "ui", "agent-action", "helm-charts"} {
 		w.repo(n, "0.1.0").bumped = true
 	}
-	// repos.yaml has batch 1 active: its released plugin and policy repos join stage 3, with nothing
-	// to release or bump.
+	// repos.yaml has batches 1 and 2 active: their released plugin and policy repos join stage 3, with
+	// nothing to release or bump.
 	m, err := manifest.Load("../../repos.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -125,8 +125,8 @@ func TestDryRunPlansReposYAMLStages(t *testing.T) {
 			batch = append(batch, r.Name)
 		}
 	}
-	if len(batch) != 27 {
-		t.Fatalf("batch 1 has %d released repos, want 27: %v", len(batch), batch)
+	if len(batch) != 54 {
+		t.Fatalf("batches 1 and 2 have %d released repos, want 54: %v", len(batch), batch)
 	}
 	w.tick() // release-please has opened the release PRs
 	e := w.engine(trainDay)
