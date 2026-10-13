@@ -1,0 +1,6 @@
+lisa-design:
+- agent-config.yml is a template rendered by run.sh (sed of ${SMOKE_PLUGIN_TAG}/${SMOKE_POLICY_TAG}) into a mktemp dir mounted via ${SMOKE_AGENT_CONFIG:?}: agent v0.9.0 expands ${env:NAME} only in plugins.*.config, never in source/policies. Tags pass check_settings' tag grammar first, so sed is safe. Rendering happens before any compose call because compose interpolates the whole file.
+- No protocol_version in the config: the v0.2.0 plugin OCI index carries org.ccf.plugin.protocol.version=2 (verified anonymously against ghcr), and agent 0.9.0 reads it.
+- Evidence filter: provider=file, type=attestation, source=local (plugin's buildEvidenceLabels at v0.2.0) plus _agent=<this run's key client-id>, so only this run's agent counts. Status is not asserted (fixture has no attestation; some policies are not satisfied by design).
+- Schedule "* * * * *" is the shortest the agent's cron parser (minute granularity) accepts; check_plugin reuses SMOKE_TIMEOUT (default 180s).
+- run.sh requires SMOKE_PLUGIN_TAG/SMOKE_POLICY_TAG (like the other tags) rather than defaulting them, so the defaults live only in stack-smoke.yml. Tests pin the defaults' shape (final vX.Y.Z), not the value, so a plugin release bump does not need a test change.
