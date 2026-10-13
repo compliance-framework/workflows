@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.2](https://github.com/compliance-framework/workflows/compare/v1.5.1...v1.5.2) (2026-10-13)
+
+
+### Bug Fixes
+
+* **ci-policies:** treat data.json keys as known to Regal and drop prefer-string-interpolation ([#103](https://github.com/compliance-framework/workflows/issues/103)) ([7b29ebf](https://github.com/compliance-framework/workflows/commit/7b29ebfa3908eff9b5bd339e5ef82852dbe7b34b))
+* **ci:** don't fail lint when golangci-lint.run is unreachable ([#105](https://github.com/compliance-framework/workflows/issues/105)) ([749a8fc](https://github.com/compliance-framework/workflows/commit/749a8fc4554b6f913ccc35f9c68af842e9a1c39d))
+
 ## [1.5.1](https://github.com/compliance-framework/workflows/compare/v1.5.0...v1.5.1) (2026-10-09)
 
 
