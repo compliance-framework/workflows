@@ -78,8 +78,8 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) er
 	return nil
 }
 
-// perPage is the GitHub API's largest page size.
-const perPage = 100
+// perPage is the GitHub API's largest page size; maxPages bounds the listing (10,000 repos).
+const perPage, maxPages = 100, 100
 
 // orgRepos lists every repo of org that the token (if any) can see, archived ones included.
 func orgRepos(ctx context.Context, getenv func(string) string, org string) ([]manifest.OrgRepo, error) {
@@ -89,7 +89,7 @@ func orgRepos(ctx context.Context, getenv func(string) string, org string) ([]ma
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	var all []manifest.OrgRepo
-	for page := 1; ; page++ {
+	for page := 1; page <= maxPages; page++ {
 		u := fmt.Sprintf("%s/orgs/%s/repos?type=all&per_page=%d&page=%d", base, url.PathEscape(org), perPage, page)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
@@ -118,4 +118,5 @@ func orgRepos(ctx context.Context, getenv func(string) string, org string) ([]ma
 			return all, nil
 		}
 	}
+	return nil, fmt.Errorf("list %s repos: more than %d pages", org, maxPages)
 }
