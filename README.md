@@ -930,6 +930,13 @@ from their published images at given tags and checks they work together (`smoke/
 library, report each one's protocol (v1 or v2) and agent library version, and check policy
 bundles with the agent's OPA version. See [docs/plugin-probe.md](docs/plugin-probe.md).
 
+## Plugin health
+
+`plugin-health.yml` regenerates the pinned "Plugin health" issue (agent library and minors
+behind, protocol, last ccf-bump, last release and status per kept plugin) after each ccf-bump sync
+and finished train, and posts to `#ccf-releases` when the deprecation candidates change. See
+[docs/plugin-health.md](docs/plugin-health.md).
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,
