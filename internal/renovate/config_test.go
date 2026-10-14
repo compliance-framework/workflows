@@ -146,6 +146,8 @@ func TestSharedPreset(t *testing.T) {
 			Schedule           []string        `json:"schedule"`
 			MinimumReleaseAge  json.RawMessage `json:"minimumReleaseAge"`
 			SemanticCommitType string          `json:"semanticCommitType"`
+			GroupName          string          `json:"groupName"`
+			GroupSlug          string          `json:"groupSlug"`
 		} `json:"vulnerabilityAlerts"`
 		PackageRules []struct {
 			MatchManagers      []string `json:"matchManagers"`
@@ -175,6 +177,16 @@ func TestSharedPreset(t *testing.T) {
 	if p.VulnerabilityAlerts.SemanticCommitType != "fix" {
 		t.Errorf("vulnerabilityAlerts.semanticCommitType = %q, want fix", p.VulnerabilityAlerts.SemanticCommitType)
 	}
+	// Renovate merges at most one PR per repo per run (two with its restart), and Go fixes conflict
+	// on go.sum once one merges, so separate fixes took one visit each. Grouped per manager they are
+	// one PR. groupSlug is what keeps them out of all-non-major; OPA gets its own slug, or in the api
+	// (never auto-merged, needs-human) it would hold every Go fix. Renovate 44.145.1 renders these as
+	// renovate/security-gomod and renovate/security-gomod-opa (docs/renovate.md).
+	const opaSuffix = "{{#if (containsString packageName 'open-policy-agent/opa')}}"
+	if va := p.VulnerabilityAlerts; !strings.Contains(va.GroupName, "{{{manager}}}") ||
+		va.GroupSlug != "security-{{{manager}}}"+opaSuffix+"-opa{{/if}}" || strings.Contains(va.GroupSlug, "all-non-major") {
+		t.Errorf("vulnerabilityAlerts groupName %q, groupSlug %q: want one group per manager, OPA apart, outside all-non-major", va.GroupName, va.GroupSlug)
+	}
 	if p.MinimumReleaseAge != "7 days" || p.InternalChecksFilter != "strict" {
 		t.Errorf("minimumReleaseAge %q, internalChecksFilter %q", p.MinimumReleaseAge, p.InternalChecksFilter)
 	}
@@ -186,9 +198,10 @@ func TestSharedPreset(t *testing.T) {
 	if p.PlatformAutomerge == nil || *p.PlatformAutomerge || p.AutomergeStrategy != "squash" {
 		t.Errorf("platformAutomerge %v, automergeStrategy %q, want false and squash", p.PlatformAutomerge, p.AutomergeStrategy)
 	}
-	// With automerge on, Renovate's default rebaseWhen "auto" means behind-base-branch: after one
-	// merge every other PR is behind main and gets rebased (a new CI run) instead of merged, so a
-	// run merges at most one PR per repo. ccf-required doesn't require up-to-date branches.
+	// With automerge on, Renovate's default rebaseWhen "auto" means behind-base-branch: after each
+	// merge every other PR is behind main and gets rebased, with a new CI run. "conflicted" rebases a
+	// branch only when it conflicts; ccf-required doesn't require up-to-date branches. (It doesn't
+	// lift Renovate's one merge per repo per run; grouping the security fixes works around that.)
 	if p.RebaseWhen != "conflicted" {
 		t.Errorf("rebaseWhen = %q, want conflicted", p.RebaseWhen)
 	}

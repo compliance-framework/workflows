@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "CCF shared Renovate preset: third-party dependencies only (ccf-bump owns compliance-framework ones). Branches are rebased only on conflicts (rebaseWhen), so one run merges every green PR. See docs/renovate.md.",
+  "description": "CCF shared Renovate preset: third-party dependencies only (ccf-bump owns compliance-framework ones). Renovate merges at most one PR per repo per run (two with its restart), so vulnerability fixes are grouped into one PR per package manager (vulnerabilityAlerts groupName/groupSlug), and branches are rebased only on conflicts (rebaseWhen). See docs/renovate.md.",
   "extends": [
     "config:recommended",
     ":semanticCommits",
@@ -15,7 +15,9 @@
     "enabled": true,
     "schedule": ["at any time"],
     "minimumReleaseAge": null,
-    "semanticCommitType": "fix"
+    "semanticCommitType": "fix",
+    "groupName": "security fixes ({{{manager}}}{{#if (containsString packageName 'open-policy-agent/opa')}}, opa{{/if}})",
+    "groupSlug": "security-{{{manager}}}{{#if (containsString packageName 'open-policy-agent/opa')}}-opa{{/if}}"
   },
   "osvVulnerabilityAlerts": true,
   "platformAutomerge": false,
