@@ -5,3 +5,7 @@ lisa-design:
 - Dry-run skip lives in ccf-bump (bumper.tagged, --dry-run only), not in the train: ccf-bump knows which repos actually pin a Go module, so only those are affected; it returns an error after printing the plan, which the train already reports as "ccf-bump couldn't plan (planned versions aren't tagged yet?)" and treats as bumped, i.e. the existing dry-run semantics are kept.
 - The tag check is limited to go.mod changes (Change.GoModule): only those run go get; text-only updaters never ask the proxy. Live runs are unchanged (the train bumps after the release, so the tag exists).
 - Tests use a fake `go` on PATH that logs args and env, so they assert the real exec env and that go never ran, without a test-only runner hook in production code.
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- [nit 7088fef21043] uncached-dry-run-tag-lookup (cmd/ccf-bump/bumper.go tagged): TagCommit repeated per repo for the same dep@version in a multi-repo dry run; reuse the b.commits cache. -> fix
