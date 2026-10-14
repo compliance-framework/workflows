@@ -1,0 +1,7 @@
+lisa-design:
+- The latest-final lookup is in the train (Engine.bumpSets, used by bump and the dry-run plan), not a ccf-bump change: ccf-bump --mode train keeps "only the --set versions" (its OPA and workflows-pin semantics stay as they are); the train just passes more --set values.
+- bumpSets = st.released(stage) (unchanged: every single-package repo an earlier stage released) + for each depends_on of the repo that is in this train and released nothing in it (nothing to release, or skipped): Repos.LatestFinal(dep), the highest final vX.Y.Z release, read with bump.GitHub.LatestFinal so it is exactly what ccf-bump sync targets. A version released in this train always wins.
+- Dependencies outside the train (not selected with --repos) feed nothing: the train's release-bot token is scoped to the train's repos, and train semantics only move to versions of the train's own repos.
+- "Never older than the chart pins" is ccf-bump's Decide: a pin newer than the target is a conflict that is left as it is (listed in the PR body), not a downgrade; no extra check in the train.
+- LatestFinal is read only when the repo starts its bump (BumpPR == 0), and cached per Engine (per train run), so ~60 plugins depending on agent cost one releases call.
+- Effect: every repo with a dependency in the train now runs ccf-bump each train even if nothing released in an earlier stage (the bump is a no-op when the pins already match); stage 2 (agent <- gooci) and stage 3 (plugins <- agent) get the same treatment as helm.
