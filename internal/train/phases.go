@@ -12,14 +12,18 @@ import (
 	"github.com/compliance-framework/workflows/internal/release"
 )
 
-// bump runs ccf-bump with what earlier stages released, then merges its PR.
+// bump runs ccf-bump with what earlier stages released and its dependencies' latest final
+// releases (bumpSets), then merges its PR.
 func (e *Engine) bump(ctx context.Context, st *State, r *RepoState) error {
-	sets := st.released(r.Stage)
-	if len(sets) == 0 {
-		r.next(ReleasePR)
-		return nil
-	}
 	if r.BumpPR == 0 {
+		sets, err := e.bumpSets(ctx, st, r)
+		if err != nil {
+			return err
+		}
+		if len(sets) == 0 {
+			r.next(ReleasePR)
+			return nil
+		}
 		// Always run ccf-bump rather than adopt an open bump PR: one left from an earlier train
 		// would pin older versions. A rerun the same day updates the PR it opened.
 		res, err := e.Bumper.Bump(ctx, st.Manifest, r.Name, sets, false)

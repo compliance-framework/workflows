@@ -255,3 +255,64 @@ func TestMergeDropsAForkPR(t *testing.T) {
 		t.Errorf("after merge: %s %q, merges %v", r.Status(), r.Detail, w.merges)
 	}
 }
+
+// latestWorld: mock-api has a release pending; mock-agent released v0.1.3 outside the train (and a
+// prerelease after it); mock-ui and mock-gooci have final releases too. Only mock-helm-charts
+// finds pins to move.
+func latestWorld(t *testing.T) *world {
+	w := newWorld(t)
+	w.repo("mock-api", "0.1.0").pending("0.2.0")
+	w.repo("mock-gooci", "0.1.5").finals = []string{"v0.1.5"}
+	w.repo("mock-agent", "0.1.3").finals = []string{"v0.1.2", "v0.1.3", "v0.2.0-rc.1"}
+	w.repo("mock-ui", "0.4.0").finals = []string{"v0.4.0"}
+	w.repo("mock-plugin-1", "0.1.0")
+	w.repo("mock-helm-charts", "0.1.0").bumped = true
+	return w
+}
+
+// A dependency in the train that released nothing in it, or was skipped, feeds its latest final
+// release to the bumps of later stages; one outside the train (mock-gooci) feeds nothing.
+func TestBumpLatestFinal(t *testing.T) {
+	repos := []string{"mock-api", "mock-agent", "mock-ui", "mock-plugin-1", "mock-helm-charts"}
+	want := []string{
+		"mock-agent mock-api=v0.2.0",
+		"mock-helm-charts mock-agent=v0.1.3,mock-api=v0.2.0,mock-ui=v0.4.0",
+		"mock-plugin-1 mock-agent=v0.1.3,mock-api=v0.2.0",
+	}
+	for _, dryRun := range []bool{false, true} {
+		w := latestWorld(t)
+		e := w.engine(trainDay)
+		if dryRun {
+			// The plan reads mock-api's release PR (release-please opens it on the tick) and plans
+			// nothing to release for mock-agent and mock-ui.
+			w.tick()
+			if err := e.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: repos, DryRun: true}); err != nil {
+				t.Fatal(err)
+			}
+			want = append(want, "mock-ui mock-api=v0.2.0") // not skipped in the dry run
+		} else {
+			if err := e.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: repos}); err != nil {
+				t.Fatal(err)
+			}
+			w.say(1, "owner", "/skip mock-ui")
+			drive(t, w, e, 10)
+			st := w.state(1)
+			if st.Status != StatusFinished || st.Repo("mock-agent").Detail != "nothing to release" || st.Repo("mock-ui").Phase != Skipped {
+				t.Fatalf("dry run %v:\n%s", dryRun, w.issues[0].Body)
+			}
+		}
+		var got []string
+		for _, b := range w.bumps {
+			got = append(got, strings.TrimSuffix(strings.TrimSuffix(b, " dry=false"), " dry=true"))
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("dry run %v: bumps = %q, want %q", dryRun, got, want)
+		}
+		// mock-agent is read once for both bumps; a dependency the train released, or one outside
+		// it, is never read.
+		if a, api, gooci := w.get("mock-agent").lookups, w.get("mock-api").lookups, w.get("mock-gooci").lookups; a != 1 || api != 0 || gooci != 0 {
+			t.Errorf("dry run %v: lookups agent %d, api %d, gooci %d", dryRun, a, api, gooci)
+		}
+	}
+}

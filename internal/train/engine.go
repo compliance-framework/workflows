@@ -43,6 +43,8 @@ type Engine struct {
 	Registry              string // where the repos' OCI artifacts are, e.g. ghcr.io/compliance-framework
 	Now                   func() time.Time
 	Log                   io.Writer
+
+	finals map[string]string // repo -> latest final release (LatestFinal), read once per run
 }
 
 func (e *Engine) logf(format string, args ...any) {
@@ -232,6 +234,42 @@ func (s *State) released(stage int) map[string]string {
 		}
 	}
 	return sets
+}
+
+// bumpSets returns the --set versions for r's bump: what the earlier stages released (released),
+// and for each dependency of r (depends_on) in this train that released nothing in it, or was
+// skipped, its latest final release, the version ccf-bump sync would move it to. A dependency
+// outside the train is left out: the train's token only reaches its own repos. ccf-bump never
+// downgrades, so a pin newer than the latest final release stays as it is.
+func (e *Engine) bumpSets(ctx context.Context, st *State, r *RepoState) (map[string]string, error) {
+	sets := st.released(r.Stage)
+	m, err := e.Load(st.Manifest)
+	if err != nil {
+		return nil, err
+	}
+	repo := m.Repo(r.Name)
+	if repo == nil {
+		return sets, nil
+	}
+	for _, dep := range repo.DependsOn {
+		if _, ok := sets[dep]; ok || st.Repo(dep) == nil {
+			continue
+		}
+		v, ok := e.finals[dep]
+		if !ok {
+			if v, err = e.Repos.LatestFinal(ctx, dep); err != nil {
+				return nil, fmt.Errorf("latest release of %s: %w", dep, err)
+			}
+			if e.finals == nil {
+				e.finals = map[string]string{}
+			}
+			e.finals[dep] = v
+		}
+		if v != "" {
+			sets[dep] = v
+		}
+	}
+	return sets, nil
 }
 
 // post posts m to the train's thread (or as a new message when threadTS is ""), and logs it.

@@ -79,6 +79,9 @@ type Repos interface {
 	// Tags returns every tag of repo and the commit it points at.
 	Tags(ctx context.Context, repo string) (map[string]string, error)
 	Release(ctx context.Context, repo, tag string) (body, url string, err error)
+	// LatestFinal returns repo's highest final release tag (vX.Y.Z, not a draft or prerelease),
+	// as ccf-bump sync targets it, or "" when it has none.
+	LatestFinal(ctx context.Context, repo string) (string, error)
 	RerunFailed(ctx context.Context, repo string, runID int64) error
 	// EnsureIssue opens an issue unless an open one with the same title exists.
 	EnsureIssue(ctx context.Context, repo, title, body string) (url string, err error)
