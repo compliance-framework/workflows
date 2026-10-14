@@ -230,6 +230,16 @@ func (w *world) TagsAt(_ context.Context, repo, sha string) ([]string, error) {
 	return slices.Clone(w.get(repo).tags[sha]), nil
 }
 
+func (w *world) Tags(_ context.Context, repo string) (map[string]string, error) {
+	out := map[string]string{}
+	for sha, tags := range w.get(repo).tags {
+		for _, tag := range tags {
+			out[tag] = sha
+		}
+	}
+	return out, nil
+}
+
 func (w *world) Release(_ context.Context, repo, tag string) (string, string, error) {
 	return w.get(repo).notes[tag], "https://github.com/o/" + repo + "/releases/tag/" + tag, nil
 }

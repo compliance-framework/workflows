@@ -234,9 +234,30 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 		}
 		return nil
 	}
-	runs, err := e.Repos.Runs(ctx, r.Name, "release", r.MergeSHA)
-	if err != nil {
+	pending, failed, err := e.releaseWorkflows(ctx, r.Name, r.MergeSHA, tags)
+	switch {
+	case err != nil:
 		return err
+	case failed != nil:
+		r.FailedRun = failed.ID
+		r.hold(Blocked, false, "the release workflow failed for %s: %s; re-run it, or `/retry %s`", failed.HeadBranch, failed.URL, r.Name)
+		return nil
+	case len(pending) > 0:
+		r.wait("waiting for the release workflow of %s", strings.Join(pending, ", "))
+		return nil
+	}
+	r.FailedRun = 0
+	r.next(Released)
+	return nil
+}
+
+// releaseWorkflows reads the release workflows of tags, release-please's tags on sha: the first
+// failed run (the latest of a tag and workflow), else the tags still waiting for theirs (none ran,
+// or one hasn't finished). A tag is published once neither lists it.
+func (e *Engine) releaseWorkflows(ctx context.Context, repo, sha string, tags []string) (pending []string, failed *Run, err error) {
+	runs, err := e.Repos.Runs(ctx, repo, "release", sha)
+	if err != nil {
+		return nil, nil, err
 	}
 	latest := map[string]Run{} // tag and workflow -> latest run
 	for _, run := range runs {
@@ -245,7 +266,6 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 			latest[k] = run
 		}
 	}
-	var pending []string
 	for _, tag := range tags {
 		found := false
 		for _, k := range slices.Sorted(maps.Keys(latest)) {
@@ -257,22 +277,14 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 			if run.Status != "completed" {
 				pending = append(pending, tag)
 			} else if run.Conclusion != "success" {
-				r.FailedRun = run.ID
-				r.hold(Blocked, false, "the release workflow failed for %s: %s; re-run it, or `/retry %s`", tag, run.URL, r.Name)
-				return nil
+				return nil, &run, nil
 			}
 		}
 		if !found {
 			pending = append(pending, tag)
 		}
 	}
-	if len(pending) > 0 {
-		r.wait("waiting for the release workflow of %s", strings.Join(pending, ", "))
-		return nil
-	}
-	r.FailedRun = 0
-	r.next(Released)
-	return nil
+	return pending, nil, nil
 }
 
 // releaseTags keeps release-please's release tags among tags: [<component>-]vX.Y.Z[-<pre-release>]

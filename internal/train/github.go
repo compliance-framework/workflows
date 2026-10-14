@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -308,6 +309,19 @@ func (g *GitHub) Runs(ctx context.Context, repo, event, sha string) ([]Run, erro
 
 // TagsAt returns the tags that point at sha.
 func (g *GitHub) TagsAt(ctx context.Context, repo, sha string) ([]string, error) {
+	tags, err := g.Tags(ctx, repo)
+	var out []string
+	for name, at := range tags {
+		if at == sha {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out, err
+}
+
+// Tags returns every tag of repo and the commit it points at.
+func (g *GitHub) Tags(ctx context.Context, repo string) (map[string]string, error) {
 	var tags []struct {
 		Name   string `json:"name"`
 		Commit struct {
@@ -317,11 +331,9 @@ func (g *GitHub) TagsAt(ctx context.Context, repo, sha string) ([]string, error)
 	if err := pages(ctx, g, g.repoPath(repo)+"/tags", &tags); err != nil {
 		return nil, err
 	}
-	var out []string
+	out := make(map[string]string, len(tags))
 	for _, t := range tags {
-		if t.Commit.SHA == sha {
-			out = append(out, t.Name)
-		}
+		out[t.Name] = t.Commit.SHA
 	}
 	return out, nil
 }

@@ -86,6 +86,9 @@ func TestGitHubRepos(t *testing.T) {
 	if tags, err := g.TagsAt(ctx, "r", "m"); err != nil || !reflect.DeepEqual(tags, []string{"v0.2.0"}) {
 		t.Errorf("TagsAt = %v %v", tags, err)
 	}
+	if tags, err := g.Tags(ctx, "r"); err != nil || !reflect.DeepEqual(tags, map[string]string{"v0.2.0": "m", "v0.1.0": "x"}) {
+		t.Errorf("Tags = %v %v", tags, err)
+	}
 	if err := g.Merge(ctx, "r", 4, "h"); err != nil || !strings.HasSuffix((*bodies)[len(*bodies)-1], `{"merge_method":"squash","sha":"h"}`) {
 		t.Errorf("Merge: %v %v", err, *bodies)
 	}
