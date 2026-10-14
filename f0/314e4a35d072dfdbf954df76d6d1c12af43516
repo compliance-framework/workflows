@@ -1,0 +1,6 @@
+lisa-design:
+Members token condition is `steps.plan.outputs.write == 'true'`. The plan step sets write=true exactly when
+open == true, or mode == start and the run is not a dry run, so it equals the spec's suggested
+`open == 'true' || (mode == 'start' && write == 'true')` with one fewer term and no second source of truth.
+Dry-run starts never read commands: Start() runs plan() which sets StatusFinished and save() closes the issue
+without train:open, so the --watch loop finds no open train and run() skips commands() for DryRun states.
