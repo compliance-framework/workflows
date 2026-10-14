@@ -1,0 +1,9 @@
+lisa-design:
+- User decision 2026-10-14: drop the mock-* repos and all mock configuration from workflows (supersedes the W3-S5-T03 plan line "keep the mock-* repos ... in repos.mock.yaml").
+- repos.mock.yaml becomes the test fixture internal/manifest/testdata/mock.yaml (mock-* names kept as plain fixture names) rather than rewriting ~150 test assertions onto repos.yaml or batches.yaml.
+- Workflows lose the manifest dispatch input and set MANIFEST: repos.yaml; scheduled behaviour is unchanged (it already read repos.yaml). The tools keep --manifest (tests and local runs use it).
+- cmd/train's manifest must sit in the repo root, so cmd/train tests switch to repos.yaml with product names; internal/train tests load mock.yaml from testdata through loadManifest in fake_test.go.
+- ccf-bump: sync-mock-api-version.sh and the versionKey mechanism existed only for mock-ui (#127); both removed. The ui updater's current version is now always unknown, so a ui bump is always held (MajorReason), as production ui already was. Tests that needed an auto-mergeable PR use mock-plugin-1 instead of mock-ui.
+- The cmd-level "planned change not applied" warning test is dropped: only the mock script's no-op could reach it. Plan.Settle's dropped path stays unit-tested in internal/bump TestSettle.
+- Historical evidence references in docs (mock-plugin-2#14, mock-ui #13/#14, "seen on the mocks in run ...") are kept: they explain past decisions, not instructions.
+- Commit type chore: no consumer-facing change needs a release; plugin-release.yml has no callers (default-branch scan of all 99 non-archived org repos).
