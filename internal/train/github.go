@@ -465,20 +465,33 @@ func (x ghRun) run() Run {
 	return Run{ID: x.ID, Path: x.Path, HeadBranch: x.HeadBranch, Status: x.Status, Conclusion: x.Conclusion, URL: x.URL}
 }
 
-// Dispatch runs workflow on the tracker repo's default branch with inputs (the gate). GitHub
-// answers with the run's ID and page.
+// Dispatch runs workflow on the tracker repo's default branch with inputs (the gate). With
+// return_run_details, GitHub answers 200 with the run's ID and page; without it (or where the
+// flag isn't supported) it answers 204 with no body, and the run's ID is 0.
 func (g *GitHub) Dispatch(ctx context.Context, workflow string, inputs map[string]string) (Run, error) {
 	branch, _, err := g.DefaultBranch(ctx, g.Repo)
 	if err != nil {
 		return Run{}, err
 	}
+	run := Run{Path: ".github/workflows/" + workflow, Status: "queued"}
+	in := map[string]any{"ref": branch, "inputs": inputs, "return_run_details": true}
+	data, err := g.send(ctx, http.MethodPost, g.repoPath(g.Repo)+"/actions/workflows/"+url.PathEscape(workflow)+"/dispatches", in)
+	if err != nil {
+		return Run{}, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return run, nil // 204 No Content: dispatched, but no run ID
+	}
 	var out struct {
 		ID  int64  `json:"workflow_run_id"`
 		URL string `json:"html_url"`
 	}
-	in := map[string]any{"ref": branch, "inputs": inputs}
-	err = g.do(ctx, http.MethodPost, g.repoPath(g.Repo)+"/actions/workflows/"+url.PathEscape(workflow)+"/dispatches", in, &out)
-	return Run{ID: out.ID, Path: ".github/workflows/" + workflow, Status: "queued", URL: out.URL}, err
+	// The run started either way: an unreadable body is no run ID too, not an error that would
+	// dispatch it again.
+	if json.Unmarshal(data, &out) == nil {
+		run.ID, run.URL = out.ID, out.URL
+	}
+	return run, nil
 }
 
 // WorkflowRun returns a run of the tracker repo.

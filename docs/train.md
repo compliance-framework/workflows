@@ -50,8 +50,9 @@ The gate holds the helm stage until every check has passed or been skipped:
   check again as it is; `/skip <repo>` (or `/skip stack-smoke`) passes it.
 - **A protocol v1 plugin** (the probe report's `protocol: 1`, read from the run's log) is posted
   once as a deprecation candidate. It never blocks.
-- A check that GitHub dispatched without returning a run ID fails rather than being dispatched
-  again; `/retry` it.
+- The train finds each check's run from the dispatch itself: it asks for `return_run_details`, and
+  GitHub answers with the run's ID. A check that GitHub dispatched without returning a run ID (a
+  `204` with no body) fails rather than being dispatched again; `/retry` it.
 
 The issue shows a gate table under the repos. A dry run plans the gate (each check with the planned
 versions) in its plan comment and runs nothing. A train started before the gate existed has none.

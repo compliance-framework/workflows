@@ -142,7 +142,8 @@ func TestGitHubGate(t *testing.T) {
 	if err != nil || run.ID != 42 || run.URL != "https://run/42" {
 		t.Errorf("Dispatch = %+v %v", run, err)
 	}
-	if want := `POST /repos/o/workflows/actions/workflows/plugin-probe.yml/dispatches {"inputs":{"plugins":"ghcr.io/o/p:v1.0.0"},"ref":"main"}`; !slices.Contains(*bodies, want) {
+	// return_run_details: without it GitHub answers 204 with no run ID.
+	if want := `POST /repos/o/workflows/actions/workflows/plugin-probe.yml/dispatches {"inputs":{"plugins":"ghcr.io/o/p:v1.0.0"},"ref":"main","return_run_details":true}`; !slices.Contains(*bodies, want) {
 		t.Errorf("bodies = %q", *bodies)
 	}
 	if run, err := g.WorkflowRun(ctx, 42); err != nil || run.Status != "completed" || run.Conclusion != "failure" {
@@ -150,5 +151,44 @@ func TestGitHubGate(t *testing.T) {
 	}
 	if log, err := g.RunLog(ctx, 42); err != nil || log != "line 1\nline 2\n" {
 		t.Errorf("RunLog = %q %v", log, err)
+	}
+}
+
+// A dispatch GitHub answers 204 (no body) or with a body it can't read is a run without an ID,
+// not an error: the gate fails the check rather than dispatching it again. The call keeps the
+// client's API version.
+func TestGitHubDispatchNoRunID(t *testing.T) {
+	for name, resp := range map[string]string{"204": "", "unreadable": "<html>", "no ID": `{"html_url":"u"}`} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "GET /repos/o/workflows":
+					_, _ = io.WriteString(w, `{"default_branch":"main"}`)
+				case "GET /repos/o/workflows/branches/main":
+					_, _ = io.WriteString(w, `{"commit":{"sha":"abc"}}`)
+				case "POST /repos/o/workflows/actions/workflows/stack-smoke.yml/dispatches":
+					if v := r.Header.Get("X-GitHub-Api-Version"); v != "2022-11-28" {
+						t.Errorf("X-GitHub-Api-Version = %q", v)
+					}
+					var in map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in["return_run_details"] != true || in["ref"] != "main" {
+						t.Errorf("dispatch body = %v %v", in, err)
+					}
+					if resp == "" {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					_, _ = io.WriteString(w, resp)
+				default:
+					http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			g := &GitHub{BaseURL: srv.URL, Owner: "o", Repo: "workflows"}
+			run, err := g.Dispatch(ctx, "stack-smoke.yml", map[string]string{"api": "v1"})
+			if err != nil || run.ID != 0 || run.Path != ".github/workflows/stack-smoke.yml" || run.Status != "queued" {
+				t.Errorf("Dispatch = %+v %v", run, err)
+			}
+		})
 	}
 }
