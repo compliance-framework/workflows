@@ -1,0 +1,2 @@
+lisa-addressed:
+- 7088fef21043 uncached-dry-run-tag-lookup: tagged() now uses and fills b.commits; TestDryRunTagReadOnce asserts one tag read for two repos.
