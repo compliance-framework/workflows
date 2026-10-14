@@ -121,5 +121,5 @@ required until it is made public, and a listed repo must be public.
 The coverage job is advisory: it isn't in the `ci / required` job's `needs`, so it doesn't gate
 merges. A new, renamed or archived `plugin-*` repo (or a GitHub API error) turns it red on every PR
 and on `main` without blocking unrelated changes; fix it by editing `repos.yaml`. The `go` job
-still validates both manifests offline (`go run ./cmd/manifest --manifest repos.yaml` and
-`--manifest repos.mock.yaml`), and that part is required.
+still validates the manifest offline (`go run ./cmd/manifest --manifest repos.yaml`), and that part
+is required.

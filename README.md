@@ -21,7 +21,6 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | Path | What |
 | --- | --- |
 | `repos.yaml` | Manifest of the product repos: `name`, `kind`, `depends_on`, `release`, `charts`, plus top-level `holidays`, `include_patterns` and `exclude`. |
-| `repos.mock.yaml` | The same schema for the `mock-*` repos, used to develop and test changes without touching product repos. |
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/slackkit` | The Block Kit message kit for the Slack messages: blocks, the status bar, and a client that posts, replies and edits in place ([docs/slack.md](docs/slack.md)). |
 | `internal/notify` | The CI incident rules (which runs, incident key, transitions), the incident and needs-human cards, and a plain-text Slack client on `internal/slackkit` ([docs/notify.md](docs/notify.md)). |
@@ -77,10 +76,11 @@ stage 4: helm-charts
 `NextWorkingWeekday(date)` returns `date` if it is a working weekday, and otherwise the next day
 that is neither a weekend nor a manifest holiday (2027-01-01 becomes 2027-01-04).
 
-Every tool takes `--manifest` (default `repos.yaml`), and every workflow takes a `manifest`
-input, so the same code runs against `repos.mock.yaml`. The scheduled tools (Renovate, ccf-bump,
-the train, the attention digest and the vulnerability summary) read `repos.yaml`; dispatch with
-`manifest=repos.mock.yaml` for the mocks.
+The workflows that read a manifest (Renovate, ccf-bump, the train, repo-settings, plugin health, the
+attention digest and the vulnerability summary) read `repos.yaml`; they have no `manifest` input.
+The tools take `--manifest` (default `repos.yaml`), which their tests point at fixtures such as
+`internal/manifest/testdata/mock.yaml`. There is no mock test bed: changes are verified by dry runs
+and unit tests.
 
 ## How repos consume the workflows
 
@@ -119,8 +119,7 @@ jobs:
 ```
 
 Each `kind` gets its own CI workflow (`ci-<kind>.yml`, see [Kind CI workflows](#kind-ci-workflows)),
-plus release workflows later. The mock repos adopt each one before the
-product repos do. Consumers pin `@<sha> # vX.Y.Z`, the commit a release tag points at, never
+plus release workflows later. Consumers pin `@<sha> # vX.Y.Z`, the commit a release tag points at, never
 `@main` or a tag: a SHA can't move under the caller, and each update is a reviewable
 [ccf-bump](docs/ccf-bump.md) PR; this repo's tags never move.
 The `permissions` above are the ones `ci-common.yml` and `notify-failure.yml` need (see
@@ -384,7 +383,7 @@ an earlier one failed (rules in `internal/release`):
 
 | Check | Fails when |
 | --- | --- |
-| `internal-deps-final` | A `github.com/compliance-framework/*` requirement in `go.mod` (the `mock-*` repos included) isn't a final semver (a pre-release or pseudo-version), or `go.mod` replaces one. |
+| `internal-deps-final` | A `github.com/compliance-framework/*` requirement in `go.mod` isn't a final semver (a pre-release or pseudo-version), or `go.mod` replaces one. |
 | `version-guard` | A package's major version is higher in the PR's `.release-please-manifest.json` than at the base (0.x to 1.0 included; a new package counts from 0.0.0), and the PR lacks the `release:major-approved` label. |
 | `go-module-path` | The module path's major suffix doesn't match the root package's (`.`) new version: none for v0 and v1, `/vN` for vN with N >= 2. |
 
@@ -718,8 +717,9 @@ other manifest repo.
   release PR propose `2.0.0`. `ci.yml` calls `release-checks.yml`, so the PR needs the
   `release:major-approved` label (`module-path: false`: the module path keeps no `/v2`, the
   major is the workflows' interface, not a Go API). After it merges, ccf-bump reports each
-  caller's v1 pins as conflicts: move each repo by hand, mocks first, adapting the inputs the
-  release notes list, to `@<v2 sha> # v2.0.0`; from then on ccf-bump keeps it current.
+  caller's v1 pins as conflicts: move each repo by hand, adapting the inputs the release notes
+  list, to `@<v2 sha> # v2.0.0`; from then on ccf-bump keeps it current. There is no mock test
+  bed: each move is checked by the caller's CI on its PR.
 - **The `workflows-ref` input** of `notify-failure.yml` now defaults to the commit it is called
   at; ccf-bump deletes it from callers when it moves their pin.
 
@@ -759,15 +759,14 @@ desired state, defined in `internal/reposettings`:
 Every active repo in the manifest (and every repo named in `repos`) gets these settings, the `workflows` repo (`release: false`) too: every
 caller's CI and releases run its code. Rulesets are matched by name; other rulesets are left alone.
 Settings outside this list are not read or changed. A repo's required check exists once it calls
-the shared CI with a `required` job (the caller job is named `ci`, so the check is `ci / required`,
-as on the mocks); until then `ccf-required` blocks its merges. This repo's own `ci.yml` has a
+the shared CI with a `required` job (the caller job is named `ci`, so the check is `ci / required`);
+until then `ccf-required` blocks its merges. This repo's own `ci.yml` has a
 `required` job named `ci / required` for the same check.
 
 Inputs:
 
 | Input | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.yaml` | `repos.mock.yaml` for the mocks. |
 | `repos` | every active repo in the manifest | Comma-separated subset; each must be in the manifest, and may be in a batch that is not active yet ([docs/manifest.md](docs/manifest.md)). |
 | `apply` | `false` | `false` prints the diff and writes nothing; `true` writes it (from `main` only). |
 | `release-bot-app-id` | org variable `RELEASE_BOT_APP_ID` | `ccf-release-bot`'s app ID, the `ccf-review` bypass actor. Set the org variable (Settings, Secrets and variables, Actions, Variables) to the app's ID from its settings page, or pass the input; the run fails if both are empty. |
@@ -794,7 +793,7 @@ reaches no other repo before reading anything.
 Output, per repo, is one line per differing setting, `key: current -> desired`, then a total:
 
 ```console
-compliance-framework/mock-api: 41 change(s)
+compliance-framework/api: 41 change(s)
   repo.allow_merge_commit: true -> false
   security.dependabot_security_updates: enabled -> disabled
   actions.can_approve_pull_request_reviews: true -> false
@@ -802,7 +801,7 @@ compliance-framework/mock-api: 41 change(s)
   ruleset[ccf-review].rules.pull_request.required_approving_review_count: 0 -> 1
   ruleset[ccf-release-tags]: missing -> create
   ...
-compliance-framework/mock-ui: up to date
+compliance-framework/ui: up to date
 41 change(s) in 1 of 2 repo(s) (dry run, nothing written; re-run with apply to write)
 ```
 
@@ -836,16 +835,16 @@ the end if any step failed.
 How to run it:
 
 1. **Dry run**: Actions, `repo-settings`, Run workflow, with `apply` off. Or
-   `gh workflow run repo-settings.yml -f manifest=repos.mock.yaml`. An admin approves the
+   `gh workflow run repo-settings.yml -f repos=api,ui`. An admin approves the
    `repo-admin` deployment; the token is read-only, so a dry run can't change anything. Review
    the diff.
 2. **Apply** (a human, never an agent): run it from `main` with the same inputs and `apply` on,
    and approve the deployment. Run it again with `apply` on: every repo should be `up to date` and
    nothing is written (the sync is idempotent). A dry run can't show this, since its token is
    read-only: a repo that is otherwise in sync shows `0 change(s), 10 unknown` (7 merge settings,
-   3 ruleset bypass lists). Do the mocks first.
+   3 ruleset bypass lists). There is no mock test bed: the dry run is the check.
 
-**Moving the ccf-release-bot secrets into the environments** (once; the mocks first):
+**Moving the ccf-release-bot secrets into the environments** (once):
 
 1. Grant `ccf-repo-admin` the permissions above (app settings, Permissions; then accept them on
    the org installation) and create the `repo-admin` environment with its four secrets. Generate a
@@ -854,9 +853,9 @@ How to run it:
 2. Merge this change; the jobs that mint a token now name the `release` environment. Until a
    repo's environment exists, GitHub creates an empty one on first use and the job still gets
    the org secret, so nothing breaks in between.
-3. Apply `repo-settings` (`repos.mock.yaml`, then `repos.yaml`): each repo gets its `release`
-   environment, its policies, then the secrets. Check a release on a mock (release-please on
-   `main`, the release workflow on its tag).
+3. Apply `repo-settings`: each repo gets its `release` environment, its policies, then the
+   secrets. Check a release on one repo (release-please on `main`, the release workflow on its
+   tag).
 4. Remove the repos from the org secrets `RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY` (or
    delete them) and the org secrets `REPO_ADMIN_*`, then delete the old private keys from both
    apps.
@@ -873,7 +872,7 @@ runs against a token in `GH_TOKEN` (a personal token isn't an installation token
 `--check-token-scope=false`):
 
 ```sh
-go run ./cmd/repo-settings sync --manifest repos.mock.yaml --repos mock-api --bypass-app-id <id> --check-token-scope=false
+go run ./cmd/repo-settings sync --repos api --bypass-app-id <id> --check-token-scope=false
 ```
 
 ## Renovate
@@ -955,6 +954,4 @@ removes them, and until then they stay unchanged:
 
 - `.github/workflows/build.yml`: builds the old assessment-runtime stack with Docker Compose
   (needs the `GH_DEPL_KEY_CONF_SVC` deploy-key secret).
-- `.github/workflows/plugin-release.yml`: the old reusable plugin release workflow (GoReleaser
-  and a `gooci` upload). `.github/actionlint.yaml` silences one shellcheck finding in it.
 - `docker-compose.yml`: the stack that `build.yml` starts.

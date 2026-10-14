@@ -79,7 +79,7 @@ func TestSettle(t *testing.T) {
 	gomod := Ref{Updater: goMod{}.Name(), Dep: "api", Key: "github.com/compliance-framework/api", Current: "v0.20.0", File: "go.mod"}
 	pin := Ref{Updater: workflowRef{}.Name(), Dep: DepWorkflows, Key: wf + "ci.yml", Current: sha10, Version: "v1.0.0", File: ".github/workflows/ci.yml"}
 	conformance := Ref{Updater: uiScript{}.Name(), Dep: "api", Key: "scripts/sync-agentconfig-conformance.sh", File: "src/fixture.json"}
-	mockUI := Ref{Updater: uiScript{}.Name(), Dep: "api", Key: "scripts/sync-mock-api-version.sh", File: "src/api-version.json"}
+	written := Ref{Updater: uiScript{}.Name(), Dep: "api", Key: "scripts/sync-agentconfig-conformance.sh", File: "src/written.json"}
 	image := Ref{Updater: dockerfile{}.Name(), Dep: "agent", Key: "ghcr.io/compliance-framework/agent", Current: "alpine:3.20", File: "Dockerfile"}
 	gone := Ref{Updater: helm{}.Name(), Dep: "api", Key: "appVersion", Current: "0.20.0", File: "charts/ccf/Chart.yaml"}
 	release := WorkflowsPin(sha11, "v1.1.0")
@@ -88,7 +88,7 @@ func TestSettle(t *testing.T) {
 			{Ref: gomod, To: "v0.21.0"},
 			{Ref: pin, To: release}, {Ref: pin, To: release}, // two jobs pin it, a same-major move; one moved
 			{Ref: conformance, To: "v0.21.0"}, // the script left its file as it was
-			{Ref: mockUI, To: "v0.21.0"},      // version unknown, file written
+			{Ref: written, To: "v0.21.0"},     // version unknown, file written
 			{Ref: image, To: "v0.21.0"},       // not a version: would be held; the edit did nothing
 			{Ref: gone, To: "v0.21.0"},        // not found again, but its file is unchanged
 		},
@@ -98,8 +98,8 @@ func TestSettle(t *testing.T) {
 	movedPin.Current, movedPin.Version = sha11, "v1.1.0"
 	movedMod := gomod
 	movedMod.Current = "v0.21.0"
-	after := []Ref{movedMod, pin, movedPin, conformance, {Updater: mockUI.Updater, Dep: "api", Key: mockUI.Key, Current: "v0.21.0", File: mockUI.File}, image}
-	changed := map[string]bool{"go.mod": true, "go.sum": true, ".github/workflows/ci.yml": true, "src/api-version.json": true}
+	after := []Ref{movedMod, pin, movedPin, conformance, written, image}
+	changed := map[string]bool{"go.mod": true, "go.sum": true, ".github/workflows/ci.yml": true, "src/written.json": true}
 
 	if got := p.HoldReasons(manifest.KindUI); !slices.Equal(got, []string{MajorReason}) {
 		t.Fatalf("planned HoldReasons = %q", got)
@@ -115,7 +115,7 @@ func TestSettle(t *testing.T) {
 	check(t, "applied", describeAll(settled.Changes), []string{
 		"go.mod github.com/compliance-framework/api v0.20.0",
 		".github/workflows/ci.yml " + wf + "ci.yml " + sha10,
-		"src/api-version.json scripts/sync-mock-api-version.sh ",
+		"src/written.json scripts/sync-agentconfig-conformance.sh ",
 	})
 	check(t, "unchanged", describeAll(unchanged), []string{"src/fixture.json scripts/sync-agentconfig-conformance.sh "})
 	check(t, "dropped", describeAll(dropped), []string{
@@ -129,11 +129,11 @@ func TestSettle(t *testing.T) {
 	if len(p.UpToDate) != 1 {
 		t.Errorf("Settle changed the plan it was called on: %+v", p.UpToDate)
 	}
-	// mockUI's unknown version still holds the PR; the dropped image would have too.
+	// written's unknown version still holds the PR; the dropped image would have too.
 	if got := settled.HoldReasons(manifest.KindUI); !slices.Equal(got, []string{MajorReason}) {
 		t.Errorf("settled HoldReasons = %q", got)
 	}
-	settled.Changes = slices.DeleteFunc(settled.Changes, func(c Change) bool { return c.Ref == mockUI })
+	settled.Changes = slices.DeleteFunc(settled.Changes, func(c Change) bool { return c.Ref == written })
 	if got := settled.HoldReasons(manifest.KindUI); got != nil {
 		t.Errorf("HoldReasons without unapplied changes = %q, want none", got)
 	}

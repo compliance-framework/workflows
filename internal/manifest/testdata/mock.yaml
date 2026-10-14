@@ -1,6 +1,5 @@
-# Manifest of the mock repos used to develop and test the shared workflows and
-# tools without touching product repos. Same schema as repos.yaml; pass it with
-# --manifest repos.mock.yaml (tools) or the `manifest` input (workflows).
+# A test manifest in repos.yaml's schema, with mock-* repo names: one repo of each kind, two
+# plugins and two policy repos, every repo active. The tools' tests load it.
 
 holidays:
   - "2026-12-25"

@@ -68,9 +68,6 @@ func TestGoreleaserPins(t *testing.T) {
 	pins := map[string][]string{}
 	for _, path := range files {
 		file := filepath.Base(path)
-		if file == "plugin-release.yml" { // legacy, unchanged until removed (README)
-			continue
-		}
 		var wf struct {
 			Jobs map[string]struct {
 				Steps []struct {

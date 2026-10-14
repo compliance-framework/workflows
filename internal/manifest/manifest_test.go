@@ -43,7 +43,7 @@ func TestLoadRepoManifests(t *testing.T) {
 			third,
 			{"helm-charts"},
 		}},
-		{"../../repos.mock.yaml", [][]string{
+		{"testdata/mock.yaml", [][]string{
 			{"mock-api", "mock-gooci"},
 			{"mock-agent", "mock-ui"},
 			{"mock-agent-action", "mock-plugin-1", "mock-plugin-2", "mock-plugin-policies-1", "mock-plugin-policies-2"},

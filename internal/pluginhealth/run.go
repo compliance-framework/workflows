@@ -14,8 +14,8 @@ import (
 // nobody else's issue titled the same, or a state marker they write, is trusted.
 const IssueAuthor = "github-actions[bot]"
 
-// Title is the issue's title for a manifest: "Plugin health" for repos.yaml, so that runs on
-// repos.mock.yaml never overwrite it.
+// Title is the issue's title for a manifest: "Plugin health" for repos.yaml; a run on any other
+// manifest (--manifest, locally) never overwrites it.
 func Title(manifestPath string) string {
 	if manifestPath == manifest.DefaultPath {
 		return "Plugin health"

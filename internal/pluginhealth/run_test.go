@@ -165,7 +165,7 @@ func TestTitle(t *testing.T) {
 	if got := Title("repos.yaml"); got != "Plugin health" {
 		t.Errorf("Title = %q", got)
 	}
-	if got := Title("repos.mock.yaml"); got != "Plugin health (repos.mock.yaml)" {
+	if got := Title("mock.yaml"); got != "Plugin health (mock.yaml)" {
 		t.Errorf("Title = %q", got)
 	}
 }

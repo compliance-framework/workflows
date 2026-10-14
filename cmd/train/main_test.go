@@ -34,7 +34,7 @@ func tracker(t *testing.T, issues string) func(string) string {
 }
 
 func openTrain(t *testing.T, repos ...string) string {
-	st := &train.State{Month: "2026-12", Manifest: "repos.mock.yaml", Status: train.StatusOpen}
+	st := &train.State{Month: "2026-12", Manifest: "repos.yaml", Status: train.StatusOpen}
 	for _, r := range repos {
 		st.Repos = append(st.Repos, &train.RepoState{Name: r, Stage: 1, Phase: train.Waiting})
 	}
@@ -64,13 +64,13 @@ func TestSelect(t *testing.T) {
 		args         []string
 		want, err    string
 	}{
-		{"start, no open train", `[]`, []string{"--for", "start", "--manifest", "repos.mock.yaml", "--repos", "mock-ui,mock-api"},
-			"open=false\nmanifest=repos.mock.yaml\nrepos=mock-api,mock-ui\n", ""},
+		{"start, no open train", `[]`, []string{"--for", "start", "--manifest", "repos.yaml", "--repos", "ui,api"},
+			"open=false\nmanifest=repos.yaml\nrepos=api,ui\n", ""},
 		{"start, every release repo", `[]`, []string{"--for", "start"}, "open=false\nmanifest=repos.yaml\nrepos=" + strings.Join(released, ",") + "\n", ""},
 		{"reconcile, no open train", `[]`, []string{"--for", "reconcile"}, "open=false\nmanifest=\nrepos=\n", ""},
-		{"the open train's repos win", openTrain(t, "mock-gooci", "mock-api"), []string{"--for", "start", "--repos", "mock-ui"},
-			"open=true\nmanifest=repos.mock.yaml\nrepos=mock-api,mock-gooci\n", ""},
-		{"a state naming a repo outside its manifest", openTrain(t, "mock-api", "api"), []string{"--for", "reconcile"}, "", `repo "api" is not in repos.mock.yaml`},
+		{"the open train's repos win", openTrain(t, "gooci", "api"), []string{"--for", "start", "--repos", "ui"},
+			"open=true\nmanifest=repos.yaml\nrepos=api,gooci\n", ""},
+		{"a state naming a repo outside its manifest", openTrain(t, "api", "nope"), []string{"--for", "reconcile"}, "", `repo "nope" is not in repos.yaml`},
 		{"unknown repo", `[]`, []string{"--for", "start", "--repos", "nope"}, "", `repo "nope" is not in repos.yaml`},
 		{"manifest outside the root", `[]`, []string{"--for", "start", "--manifest", "../repos.yaml"}, "", "want a .yaml file in the repo root"},
 		{"no mode", `[]`, nil, "", "--for start or --for reconcile"},
@@ -104,24 +104,24 @@ func TestExecBumper(t *testing.T) {
 	}
 	var log bytes.Buffer
 	b := execBumper{path: script("ok", `echo "args: $*"; echo "  PR: https://github.com/o/r/pull/12"; echo "  auto-merge: on"`), log: &log}
-	res, err := b.Bump(context.Background(), "repos.mock.yaml", "mock-agent", map[string]string{"mock-gooci": "v0.1.1", "mock-api": "v0.2.0"}, false)
+	res, err := b.Bump(context.Background(), "repos.yaml", "agent", map[string]string{"gooci": "v0.1.1", "api": "v0.2.0"}, false)
 	if err != nil || res.PR != 12 || !res.Changed {
 		t.Fatalf("Bump = %+v, %v", res, err)
 	}
-	if want := "args: --manifest repos.mock.yaml --repo mock-agent --mode train --pr --set mock-api=v0.2.0 --set mock-gooci=v0.1.1\n"; !strings.HasPrefix(res.Output, want) || !strings.Contains(log.String(), want) {
+	if want := "args: --manifest repos.yaml --repo agent --mode train --pr --set api=v0.2.0 --set gooci=v0.1.1\n"; !strings.HasPrefix(res.Output, want) || !strings.Contains(log.String(), want) {
 		t.Errorf("output %q, log %q", res.Output, log.String())
 	}
 
 	b.path = script("dry", `echo "$*" | grep -q -- '--dry-run$' && echo "  dry run: would push ccf-bump/train-2026-12-01"`)
-	if res, err := b.Bump(context.Background(), "repos.mock.yaml", "mock-agent", map[string]string{"mock-api": "v0.2.0"}, true); err != nil || res.PR != 0 || !res.Changed {
+	if res, err := b.Bump(context.Background(), "repos.yaml", "agent", map[string]string{"api": "v0.2.0"}, true); err != nil || res.PR != 0 || !res.Changed {
 		t.Errorf("dry run = %+v, %v", res, err)
 	}
 	b.path = script("none", `echo "  nothing pinned"`)
-	if res, err := b.Bump(context.Background(), "repos.mock.yaml", "mock-api", map[string]string{"x": "v1.0.0"}, false); err != nil || res.PR != 0 || res.Changed {
+	if res, err := b.Bump(context.Background(), "repos.yaml", "api", map[string]string{"x": "v1.0.0"}, false); err != nil || res.PR != 0 || res.Changed {
 		t.Errorf("no change = %+v, %v", res, err)
 	}
-	b.path = script("fail", `echo "::error::ccf-bump: mock-agent: git push: denied"; echo "more" >&2; exit 1`)
-	if _, err := b.Bump(context.Background(), "repos.mock.yaml", "mock-agent", nil, false); err == nil || !strings.Contains(err.Error(), "ccf-bump: mock-agent: git push: denied") {
+	b.path = script("fail", `echo "::error::ccf-bump: agent: git push: denied"; echo "more" >&2; exit 1`)
+	if _, err := b.Bump(context.Background(), "repos.yaml", "agent", nil, false); err == nil || !strings.Contains(err.Error(), "ccf-bump: agent: git push: denied") {
 		t.Errorf("failure: %v", err)
 	}
 }
@@ -136,15 +136,15 @@ func TestRunRejectsUnknownCommands(t *testing.T) {
 
 func TestWatch(t *testing.T) {
 	render := func(r *train.RepoState) string {
-		body, err := train.Render(&train.State{Month: "2026-12", Manifest: "repos.mock.yaml", Status: train.StatusOpen, Repos: []*train.RepoState{r}}, "", "")
+		body, err := train.Render(&train.State{Month: "2026-12", Manifest: "repos.yaml", Status: train.StatusOpen, Repos: []*train.RepoState{r}}, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
 		return body
 	}
 	// Waiting for release-please to tag the merge commit, and held for a human.
-	publishing := render(&train.RepoState{Name: "mock-api", Stage: 1, Phase: train.Publishing, MergeSHA: "m", Versions: map[string]string{".": "0.2.0"}})
-	held := render(&train.RepoState{Name: "mock-api", Stage: 1, Phase: train.Bumping, Hold: train.Blocked, Sticky: true, Detail: "ccf-bump failed"})
+	publishing := render(&train.RepoState{Name: "api", Stage: 1, Phase: train.Publishing, MergeSHA: "m", Versions: map[string]string{".": "0.2.0"}})
+	held := render(&train.RepoState{Name: "api", Stage: 1, Phase: train.Bumping, Hold: train.Blocked, Sticky: true, Detail: "ccf-bump failed"})
 	body, edits := "", 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
@@ -154,9 +154,9 @@ func TestWatch(t *testing.T) {
 				return
 			}
 			_, _ = fmt.Fprintf(w, `[{"number":7,"state":"open","body":%q,"labels":[{"name":"train:open"}]}]`, body)
-		case "GET /repos/compliance-framework/workflows/issues/7/comments", "GET /repos/compliance-framework/mock-api/tags":
+		case "GET /repos/compliance-framework/workflows/issues/7/comments", "GET /repos/compliance-framework/api/tags":
 			_, _ = io.WriteString(w, `[]`)
-		case "GET /repos/compliance-framework/mock-api/actions/runs":
+		case "GET /repos/compliance-framework/api/actions/runs":
 			_, _ = io.WriteString(w, `{"workflow_runs":[]}`)
 		case "PATCH /repos/compliance-framework/workflows/issues/7":
 			edits++

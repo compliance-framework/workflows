@@ -11,7 +11,7 @@ changes.
 | --- | --- |
 | `workflow_run` of `ccf-bump-sync` (completed, on `main`, not cancelled) | Regenerates the report. |
 | `workflow_run` of `train` (completed, on `main`, not cancelled) | The train runs every hour, so `plan` regenerates the report only when a train issue (label `train`) has closed since the last report: the issue keeps the number of the last closed train it saw. Otherwise the `report` job is skipped. |
-| `workflow_dispatch` | Regenerates the report. `manifest: repos.mock.yaml` writes a separate issue, `Plugin health (repos.mock.yaml)`; `dry_run` prints the table to the job summary only. |
+| `workflow_dispatch` | Regenerates the report. `dry_run` prints the table to the job summary only. |
 
 There is no schedule. Triggering by `workflow_run` leaves `train.yml` and `ccf-bump-sync.yml`
 untouched.

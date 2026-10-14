@@ -208,13 +208,14 @@ func TestUpdaters(t *testing.T) {
 			reapplyStable: true,
 		},
 		{
-			fixture:       "ui",
-			cfg:           Config{UIDep: "mock-api"},
-			targets:       map[string]string{"mock-api": "v0.1.0"},
-			changes:       []string{"ui sync src/api-version.json scripts/sync-mock-api-version.sh: v0.0.0 -> v0.1.0"},
-			cmds:          []string{"bash scripts/sync-mock-api-version.sh v0.1.0"},
-			golden:        true,
-			reapplyStable: true,
+			// The script records no version: every run plans it, and Plan.Settle keeps the
+			// change only if the script changed its file.
+			fixture: "ui",
+			cfg:     Config{UIDep: "mock-api"},
+			targets: map[string]string{"mock-api": "v0.1.0"},
+			changes: []string{"ui sync src/utils/agent-config/__tests__/fixtures/agentconfig-conformance.json scripts/sync-agentconfig-conformance.sh:  -> v0.1.0"},
+			cmds:    []string{"bash scripts/sync-agentconfig-conformance.sh v0.1.0"},
+			golden:  true,
 		},
 		{
 			fixture: "helm",

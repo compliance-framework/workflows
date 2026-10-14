@@ -135,8 +135,7 @@ func (e *Engine) currentVersion(ctx context.Context, repo string) (string, error
 
 // gateChecks lists the gate's checks: a probe of each go-plugin and policies repo before stage
 // gs, at its train version, built against the train's agent (the go.mod pin when the train has no
-// agent repo); and stack-smoke when the train has the api, ui and agent repos (the product images;
-// the mocks have none).
+// agent repo); and stack-smoke when the train has the api, ui and agent repos (the product images).
 func gateChecks(registry string, m *manifest.Manifest, st *State, gs int) []*GateCheck {
 	agentRef := "" // plugin-probe.yml's default: the agent in this repo's go.mod
 	if v := repoVersion(st, AgentRepo); v != "" {

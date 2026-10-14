@@ -27,8 +27,6 @@ echo "Copied api@${ref} ($url) to $fixture."
 
 const (
 	conformanceFixture = "src/utils/agent-config/__tests__/fixtures/agentconfig-conformance.json"
-	mockScript         = "scripts/sync-mock-api-version.sh"
-	mockVersionFile    = "src/api-version.json"
 	// workflowsCI pins a shared workflow to an older release of the same major: an applied move
 	// that is auto-merged.
 	workflowsCI = "name: ci\non: pull_request\njobs:\n  ci:\n" +
@@ -61,13 +59,11 @@ func TestSettledPR(t *testing.T) {
 	workflowsOnly := `create mock-ui-2 main<-ccf-bump/sync-2026-10-08 "ci(deps): bump workflows to v1.1.0"`
 	both := `create mock-ui-2 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0, workflows to v1.1.0"`
 	automerge, held := "label mock-ui-2#1 ccf-bump:automerge", "label mock-ui-2#1 needs-human"
-	noop := "#!/usr/bin/env bash\nexit 0\n"
 	for name, tc := range map[string]struct {
-		files   map[string]string
-		calls   []string
-		out     []string // in the output
-		api     bool     // the PR table lists mock-api
-		warning string
+		files map[string]string
+		calls []string
+		out   []string // in the output
+		api   bool     // the PR table lists mock-api
 	}{
 		// compliance-framework/ui#355: the conformance script ran, the fixture was already api@v0.1.0's.
 		"conformance fixture already current": {
@@ -83,23 +79,10 @@ func TestSettledPR(t *testing.T) {
 			out:   []string{"auto-merge: off (" + bump.MajorReason + ")"},
 			api:   true,
 		},
-		"a pin that is not a version, moved": {
-			files: map[string]string{mockScript: "#!/usr/bin/env bash\nprintf '{\"mockApi\": \"%s\"}\\n' \"$1\" > src/api-version.json\n",
-				mockVersionFile: `{"mockApi": "main"}` + "\n", ".github/workflows/ci.yml": workflowsCI},
-			calls: []string{both, held},
-			out:   []string{"auto-merge: off (" + bump.MajorReason + ")"},
-			api:   true,
-		},
-		"a planned change that is not applied": {
-			files: map[string]string{mockScript: noop, mockVersionFile: `{"mockApi": "main"}` + "\n", ".github/workflows/ci.yml": workflowsCI},
-			calls: []string{workflowsOnly, automerge},
-			warning: "::warning::ccf-bump: mock-ui-2: planned mock-api main -> v0.1.0 (src/api-version.json " + mockScript +
-				") was not applied; it is left out of the PR",
-		},
-		"nothing applied": {
-			files:   map[string]string{mockScript: noop, mockVersionFile: `{"mockApi": "main"}` + "\n"},
-			out:     []string{"no file changes"},
-			warning: "::warning::ccf-bump: mock-ui-2: planned mock-api main -> v0.1.0",
+		"conformance fixture already current, nothing else to bump": {
+			files: map[string]string{"scripts/sync-agentconfig-conformance.sh": fmt.Sprintf(conformanceScript, `{"cases":[]}`),
+				conformanceFixture: "{\"cases\":[]}\n"},
+			out: []string{"no file changes"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -117,12 +100,12 @@ func TestSettledPR(t *testing.T) {
 			if !slices.Equal(gh.calls, tc.calls) {
 				t.Errorf("calls %q, want %q\n%s", gh.calls, tc.calls, out)
 			}
-			for _, s := range append(tc.out, tc.warning) {
+			for _, s := range tc.out {
 				if !strings.Contains(out.String(), s) {
 					t.Errorf("output lacks %q:\n%s", s, out)
 				}
 			}
-			if tc.warning == "" && strings.Contains(out.String(), "::warning::") {
+			if strings.Contains(out.String(), "::warning::") {
 				t.Errorf("unexpected warning:\n%s", out)
 			}
 			if tc.calls == nil {

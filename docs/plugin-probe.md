@@ -53,15 +53,15 @@ report (`-` for stdout; only one of the two can use stdout). The exit status is 
 fails to load or any policy bundle fails its check, and both reports are still written.
 
 ```console
-$ go run ./cmd/plugin-probe --plugins bin/mock-plugin-1,bin/mock-plugin-2,ghcr.io/compliance-framework/plugin-github-settings:v0.5.0 --json report.json
+$ go run ./cmd/plugin-probe --plugins bin/new-plugin,bin/old-plugin,ghcr.io/compliance-framework/plugin-github-settings:v0.5.0 --json report.json
 ## Plugin probe
 
 Agent library v0.9.0, OPA v1.14.1.
 
 | Plugin | Protocol | Agent library | Result | Notes |
 | --- | --- | --- | --- | --- |
-| `bin/mock-plugin-1` | v2 | v0.9.0 | ok |  |
-| `bin/mock-plugin-2` | v1 | v0.8.1 | ok |  |
+| `bin/new-plugin` | v2 | v0.9.0 | ok |  |
+| `bin/old-plugin` | v1 | v0.8.1 | ok |  |
 | `ghcr.io/compliance-framework/plugin-github-settings:v0.5.0` | v2 | v0.8.0-rc4 | ok |  |
 ```
 
@@ -115,9 +115,9 @@ keychain); public GHCR packages need none.
 To probe plugins that have no OCI release yet, build them and pass the binaries:
 
 ```sh
-git clone --depth 1 https://github.com/compliance-framework/mock-plugin-1 /tmp/mock-plugin-1
-go -C /tmp/mock-plugin-1 build -o /tmp/bin/mock-plugin-1 .
-go run ./cmd/plugin-probe --plugins /tmp/bin/mock-plugin-1 --policies ../mock-plugin-policies-1
+git clone --depth 1 https://github.com/compliance-framework/plugin-github-settings /tmp/plugin-github-settings
+go -C /tmp/plugin-github-settings build -o /tmp/bin/plugin-github-settings .
+go run ./cmd/plugin-probe --plugins /tmp/bin/plugin-github-settings --policies ../plugin-github-settings-policies
 ```
 
 To probe with an unreleased agent, point `go.mod` at it with a temporary `replace` (don't

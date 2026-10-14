@@ -53,7 +53,7 @@ func TestRun(t *testing.T) {
 		},
 		{
 			name: "json mock manifest",
-			args: []string{"--manifest", "../../repos.mock.yaml", "--json"},
+			args: []string{"--manifest", "../../internal/manifest/testdata/mock.yaml", "--json"},
 			want: `[["mock-api","mock-gooci"],["mock-agent","mock-ui"],["mock-agent-action","mock-plugin-1","mock-plugin-2","mock-plugin-policies-1","mock-plugin-policies-2"],["mock-helm-charts"]]` + "\n",
 		},
 		{

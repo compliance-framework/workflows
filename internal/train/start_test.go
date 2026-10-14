@@ -12,7 +12,7 @@ import (
 func TestStartPostsTheParentMessage(t *testing.T) {
 	w := mockWorld(t)
 	w.tick() // release-please has opened stage 1's release PRs
-	if err := w.engine(trainDay).Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Scheduled: true}); err != nil {
+	if err := w.engine(trainDay).Start(ctx, StartOptions{Manifest: "mock.yaml", Scheduled: true}); err != nil {
 		t.Fatal(err)
 	}
 	st := w.state(1)
@@ -55,7 +55,7 @@ func TestStartSchedule(t *testing.T) {
 		if tt.existing != "" {
 			w.issues = append(w.issues, &Issue{Number: 1, Title: tt.existing, Labels: []string{LabelTrain, LabelDone}})
 		}
-		if err := w.engine(day(tt.now)).Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api"}, Scheduled: true}); err != nil {
+		if err := w.engine(day(tt.now)).Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api"}, Scheduled: true}); err != nil {
 			t.Fatal(err)
 		}
 		got := ""
@@ -70,7 +70,7 @@ func TestStartSchedule(t *testing.T) {
 	w := newWorld(t)
 	w.repo("mock-api", "0.1.0")
 	w.issues = append(w.issues, &Issue{Number: 1, Title: "Release train 2026-12", Labels: []string{LabelTrain, LabelDone}})
-	if err := w.engine(day("2026-12-09")).Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api"}}); err != nil {
+	if err := w.engine(day("2026-12-09")).Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := w.issues[len(w.issues)-1].Title; got != "Release train 2026-12 (2)" {
@@ -84,13 +84,13 @@ func TestEscalation(t *testing.T) {
 	w.get("mock-api").failChecks = true
 	w.get("mock-api").pending("0.2.0")
 	nov := w.engine(time.Date(2026, 11, 2, 8, 0, 0, 0, time.UTC))
-	if err := nov.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api"}}); err != nil {
+	if err := nov.Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api"}}); err != nil {
 		t.Fatal(err)
 	}
 	dec := w.engine(trainDay)
 	for range 2 {
 		w.tick()
-		if err := dec.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Scheduled: true}); err != nil {
+		if err := dec.Start(ctx, StartOptions{Manifest: "mock.yaml", Scheduled: true}); err != nil {
 			t.Fatal(err)
 		}
 	}

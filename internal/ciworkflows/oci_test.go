@@ -94,9 +94,6 @@ func TestUploadOnceTagTheRest(t *testing.T) {
 	var jobs []string
 	for _, path := range files {
 		file := filepath.Base(path)
-		if file == "plugin-release.yml" { // legacy, unchanged until removed (README)
-			continue
-		}
 		var wf workflow
 		read(t, file, &wf)
 		for name, job := range wf.Jobs {

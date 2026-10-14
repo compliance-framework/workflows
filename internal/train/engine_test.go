@@ -14,7 +14,7 @@ var (
 	trainDay = time.Date(2026, 12, 1, 8, 0, 0, 0, time.UTC) // a Tuesday
 )
 
-// mockWorld has the repos.mock.yaml repos: mock-api has a minor release pending, mock-gooci a
+// mockWorld has the mock.yaml repos: mock-api has a minor release pending, mock-gooci a
 // patch, and every later repo pins something the train bumps.
 func mockWorld(t *testing.T) *world {
 	w := newWorld(t)
@@ -65,7 +65,7 @@ func stageOf(st *State, repo string) int { return st.Repo(repo).Stage }
 func TestTrainReleasesStageByStage(t *testing.T) {
 	w := mockWorld(t)
 	e := w.engine(trainDay)
-	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml"})
+	open(t, w, e, StartOptions{Manifest: "mock.yaml"})
 	drive(t, w, e, 30)
 	is := w.issues[0]
 	st := w.state(1)
@@ -125,7 +125,7 @@ func TestFailureInStage2BlocksStage3(t *testing.T) {
 	w := mockWorld(t)
 	w.get("mock-agent").failChecks = true
 	e := w.engine(trainDay)
-	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml"})
+	open(t, w, e, StartOptions{Manifest: "mock.yaml"})
 	drive(t, w, e, 10)
 	st := w.state(1)
 	agent := st.Repo("mock-agent")
@@ -177,7 +177,7 @@ func TestMajorNeedsApproval(t *testing.T) {
 	w.repo("mock-api", "0.9.0").pending("1.0.0")
 	w.repo("mock-gooci", "0.1.0")
 	e := w.engine(trainDay)
-	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-gooci", "mock-api"}})
+	open(t, w, e, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-gooci", "mock-api"}})
 	drive(t, w, e, 3)
 	api := w.state(1).Repo("mock-api")
 	if api.Hold != NeedsHuman || !strings.Contains(api.Detail, "raises a major version (.: v0.9.0 -> v1.0.0)") {
@@ -212,7 +212,7 @@ func TestHolds(t *testing.T) {
 		w.repo("mock-agent", "0.1.0").bumped = true
 		tt.setup(w)
 		e := w.engine(trainDay)
-		open(t, w, e, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api", "mock-agent"}})
+		open(t, w, e, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api", "mock-agent"}})
 		drive(t, w, e, 4)
 		if r := w.state(1).Repo(tt.repo); r.Hold != tt.hold || !strings.Contains(r.Detail, tt.detail) || !w.issues[0].Open {
 			t.Errorf("%s: %s = %s %q", tt.name, tt.repo, r.Status(), r.Detail)
@@ -229,7 +229,7 @@ func TestForkReleasePRIsNeverMerged(t *testing.T) {
 	gooci.prs[99] = &PR{Number: 99, URL: ReleaseBranchPrefix + "main", Open: true, Fork: true, HeadSHA: "evil", BaseSHA: gooci.main}
 	w.green(gooci, "evil", true)
 	e := w.engine(trainDay)
-	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api", "mock-gooci"}})
+	open(t, w, e, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api", "mock-gooci"}})
 	drive(t, w, e, 6)
 	if g := w.state(1).Repo("mock-gooci"); g.Phase != Released || g.Detail != "nothing to release" {
 		t.Errorf("mock-gooci = %s %q", g.Status(), g.Detail)

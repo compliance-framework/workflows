@@ -255,7 +255,7 @@ func TestSharedPreset(t *testing.T) {
 				slices.Equal(r.MatchUpdateTypes, nonMajor)
 		case slices.Equal(r.MatchPackageNames, opaNames):
 			if off {
-				opaOff = slices.Equal(r.MatchRepositories, []string{"!compliance-framework/api", "!compliance-framework/mock-api"})
+				opaOff = slices.Equal(r.MatchRepositories, []string{"!compliance-framework/api"})
 			} else {
 				opaAPI = r.Automerge != nil && !*r.Automerge && r.GroupName != "" && slices.Contains(r.MatchRepositories, "compliance-framework/api")
 			}

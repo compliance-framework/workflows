@@ -21,9 +21,9 @@ public repos.
 | Go | `postUpdateOptions: ["gomodTidy"]`. Indirect modules are left to `go mod tidy` (Renovate's default). |
 | Indirect Go modules | When Renovate does update one, it is `fix(deps)`, not the `chore(deps)` that `depType: indirect` gets by default: indirect modules are linked into the binary, so the update must release (`matchManagers: ["gomod"], matchDepTypes: ["indirect"], semanticCommitType: "fix"`). A security fix to one is `fix(deps)` through `vulnerabilityAlerts` regardless of this rule. |
 | Actions | Pinned by digest (`helpers:pinGitHubActionDigests`). Dockerfile base images and images in helm values are tracked by Renovate's own managers. |
-| OPA | Off in every repo except `api` (and `mock-api`), so in agent, the policy repos and the plugins it follows the api through `ccf-bump`. In `api` it gets its own PR, `renovate/opa`, which never auto-merges, because a bump forces agent and the policies to follow. An OPA security fix gets its own security PR too, `renovate/security-gomod-opa`, so that in `api` it doesn't hold the other Go fixes (a group auto-merges only if every update in it does). Elsewhere Renovate still opens one, since it forces vulnerability fixes on over `enabled: false` (as for internal packages), and it auto-merges there. |
+| OPA | Off in every repo except `api`, so in agent, the policy repos and the plugins it follows the api through `ccf-bump`. In `api` it gets its own PR, `renovate/opa`, which never auto-merges, because a bump forces agent and the policies to follow. An OPA security fix gets its own security PR too, `renovate/security-gomod-opa`, so that in `api` it doesn't hold the other Go fixes (a group auto-merges only if every update in it does). Elsewhere Renovate still opens one, since it forces vulnerability fixes on over `enabled: false` (as for internal packages), and it auto-merges there. |
 | Needs a human | Majors and the api's `renovate/opa` and `renovate/security-gomod-opa` PRs get the `needs-human` label (`addLabels`). See [attention.md](attention.md). |
-| Internal packages | Off: `github.com/compliance-framework/**` (Go modules), `ghcr.io/compliance-framework/**` (images) and `compliance-framework/**` (actions and reusable workflows, such as this repo's). The mocks use the same prefixes. |
+| Internal packages | Off: `github.com/compliance-framework/**` (Go modules), `ghcr.io/compliance-framework/**` (images) and `compliance-framework/**` (actions and reusable workflows, such as this repo's). |
 
 ### Why Renovate merges, not GitHub
 
@@ -175,14 +175,13 @@ Runs hourly at minute 17 and on `workflow_dispatch`, as one job:
 
 | Input | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.yaml` | The repos to run on: the product repos and this one. `repos.mock.yaml` for the mocks. |
 | `repos` | every active repo in the manifest | Comma-separated subset; each must be in the manifest. A live run takes only active repos, and one shard of at most 15 of them. A dry run may name repos of an inactive batch, to check the batch before it is switched on ([manifest.md](manifest.md#switching-a-batch-on)). |
 | `dry_run` | `full` | Renovate's `dryRun`: `full` logs every branch and PR it would create, `lookup` stops after finding updates, `extract` after reading the package files. `off` runs live. |
 | `log_level` | `info` | `debug` for a full trace. |
 
 A scheduled run has no inputs and uses these defaults, except `dry_run`: it is `off` (live) when the
-repo variable `RENOVATE_LIVE` is `"true"`, and `full` otherwise. Scheduled runs read `repos.yaml`;
-dispatch with `manifest=repos.mock.yaml` for the mocks. With `RENOVATE_LIVE` set, a scheduled run is
+repo variable `RENOVATE_LIVE` is `"true"`, and `full` otherwise. Every run reads `repos.yaml`: the
+product repos and this one. With `RENOVATE_LIVE` set, a scheduled run is
 live on the product repos and this one, the same switch as `CCF_BUMP_SYNC_LIVE` and `TRAIN_LIVE`.
 A dispatch always follows its `dry_run` input. A live scheduled run is also what merges Renovate's green PRs (Renovate and the merge pass), so leave it on once
 Renovate is live. Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, from this repo's `release` environment (main only). Variable:
@@ -230,8 +229,8 @@ and the others wait for Renovate's rebase; that is why the security fixes are gr
 A repo's own `renovate.json` that turns `automerge` off for an update doesn't remove the label, so
 it should add `needs-human` to that update as well.
 
-Locally, `GH_TOKEN=... go run ./cmd/renovate-config merge --manifest repos.mock.yaml --repos
-mock-plugin-1` prints what it would merge (`--dry-run` defaults to `full`; `off` merges).
+Locally, `GH_TOKEN=... go run ./cmd/renovate-config merge --repos plugin-github-settings` prints
+what it would merge (`--dry-run` defaults to `full`; `off` merges).
 
 ## Running it
 
@@ -239,13 +238,10 @@ mock-plugin-1` prints what it would merge (`--dry-run` defaults to `full`; `off`
   `gh workflow run renovate.yml -f repos=plugin-a,plugin-a-policies,... -f dry_run=full` with the
   batch's repos. The log lists each `DRY-RUN: Would create PR` per repo. A dry run isn't sharded and
   its read-only token lasts an hour, so dispatch a large batch in groups of about 15 repos.
-- **Dry run on the mocks**: Actions, `renovate`, Run workflow, or
-  `gh workflow run renovate.yml -f manifest=repos.mock.yaml -f dry_run=full`. The log lists each
-  `DRY-RUN: Would create PR` per repo; expect about one grouped PR per repo plus its majors.
-- **Live on the mocks**: the same with `-f dry_run=off`. Renovate opens the grouped PRs, and the
-  merge pass merges the ones whose checks pass within its 20 minutes; a later live dispatch merges
-  the rest. `repos.mock.yaml` lists this
-  `workflows` repo too, so name the mocks with `-f repos=...` to leave it out.
+- **Dry run of a preset change**: Actions, `renovate`, Run workflow, or
+  `gh workflow run renovate.yml -f repos=api,ui -f dry_run=full`. The log lists each
+  `DRY-RUN: Would create PR` per repo; expect about one grouped PR per repo plus its majors. There
+  is no mock test bed: dry runs and unit tests are the check.
 - **Scheduled runs live**: set the repo variable `RENOVATE_LIVE` to `true`
   (`gh variable set RENOVATE_LIVE --body true --repo compliance-framework/workflows`); unset it to go
   back to dry runs.
@@ -253,5 +249,5 @@ mock-plugin-1` prints what it would merge (`--dry-run` defaults to `full`; `off`
   repos and this one, and run live while `RENOVATE_LIVE` is set. A Go-module update here is
   `fix(deps)` and makes a workflows release; `ccf-bump` moves the callers' pins on its next sync.
 
-Locally, `go run ./cmd/renovate-config config --manifest repos.mock.yaml` prints the config the
+Locally, `go run ./cmd/renovate-config config` prints the config the
 workflow would use (the preset path defaults to `renovate/default.json`, run from the repo root).

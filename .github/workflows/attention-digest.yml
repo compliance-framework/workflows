@@ -10,11 +10,6 @@ on:
     - cron: "30 8 * * 1" # Mondays 08:30 UTC
   workflow_dispatch:
     inputs:
-      manifest:
-        description: Manifest to read the repos from
-        type: choice
-        options: [repos.mock.yaml, repos.yaml]
-        default: repos.yaml
       dry_run:
         description: Print the digest instead of posting it
         type: boolean
@@ -37,7 +32,7 @@ jobs:
     timeout-minutes: 15
     env:
       # A scheduled run has no inputs: keep this fallback equal to the input's default.
-      MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
+      MANIFEST: repos.yaml
       # Scheduled runs are dry runs until ATTENTION_DIGEST_LIVE is "true"; manual ones follow the input.
       DRY_RUN: ${{ github.event_name == 'schedule' && vars.ATTENTION_DIGEST_LIVE != 'true' || github.event_name != 'schedule' && inputs.dry_run }}
     steps:

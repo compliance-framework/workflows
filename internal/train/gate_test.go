@@ -13,7 +13,7 @@ func TestGatePassesThenHelmReleases(t *testing.T) {
 	w := mockWorld(t)
 	w.v1["mock-plugin-2"] = true
 	e := w.engine(trainDay)
-	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml"})
+	open(t, w, e, StartOptions{Manifest: "mock.yaml"})
 	drive(t, w, e, 30)
 	st := w.state(1)
 	if w.issues[0].Open || st.Status != StatusFinished || st.Repo("mock-helm-charts").Phase != Released {
@@ -60,7 +60,7 @@ func TestGateFailureBlocksHelmUntilAFix(t *testing.T) {
 	w := mockWorld(t)
 	w.probeFail["mock-plugin-1"] = true
 	e := w.engine(trainDay)
-	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml"})
+	open(t, w, e, StartOptions{Manifest: "mock.yaml"})
 	drive(t, w, e, 30)
 	st := w.state(1)
 	p1, helm := st.Repo("mock-plugin-1"), st.Repo("mock-helm-charts")
@@ -138,7 +138,7 @@ func TestGateWaitsForTheFixReleaseWorkflow(t *testing.T) {
 	w := mockWorld(t)
 	w.probeFail["mock-plugin-1"] = true
 	e := w.engine(trainDay)
-	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml"})
+	open(t, w, e, StartOptions{Manifest: "mock.yaml"})
 	drive(t, w, e, 30)
 	runs := len(w.gateRuns)
 	delete(w.probeFail, "mock-plugin-1")
@@ -170,7 +170,7 @@ func TestGateRetryAndSkip(t *testing.T) {
 		w := mockWorld(t)
 		w.probeFail["mock-plugin-1"] = true
 		e := w.engine(trainDay)
-		open(t, w, e, StartOptions{Manifest: "repos.mock.yaml"})
+		open(t, w, e, StartOptions{Manifest: "mock.yaml"})
 		drive(t, w, e, 30)
 		if st := w.state(1); st.GateCheck("mock-plugin-1").Result != GateFailed || st.Repo("mock-helm-charts").Phase != Waiting {
 			t.Fatalf("%s: before:\n%s", cmd, w.issues[0].Body)
@@ -204,7 +204,7 @@ func TestGateDispatchWithoutRunID(t *testing.T) {
 	w := mockWorld(t)
 	w.noRunID = true
 	e := w.engine(trainDay)
-	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml"})
+	open(t, w, e, StartOptions{Manifest: "mock.yaml"})
 	drive(t, w, e, 30)
 	g := w.state(1).GateCheck("mock-plugin-1")
 	if len(w.gateRuns) != 4 || g.Result != GateFailed || !strings.Contains(g.Detail, "GitHub returned no run ID") || !w.issues[0].Open {

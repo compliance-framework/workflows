@@ -8,7 +8,7 @@ import (
 
 func testState() *State {
 	return &State{
-		Month: "2026-12", Manifest: "repos.mock.yaml", Status: StatusOpen, Channel: "C1", ThreadTS: "1.2",
+		Month: "2026-12", Manifest: "mock.yaml", Status: StatusOpen, Channel: "C1", ThreadTS: "1.2",
 		Repos: []*RepoState{
 			{Name: "mock-api", Stage: 1, Phase: Released, From: map[string]string{".": "0.1.0"}, Versions: map[string]string{".": "0.2.0"}, ReleasePR: 4},
 			{Name: "mock-agent", Stage: 2, Phase: Merging, Hold: Blocked, Detail: "checks failing on #9: ci / go | x", BumpPR: 8, ReleasePR: 9},
@@ -26,7 +26,7 @@ func TestRenderParseRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"Release train 2026-12 over `repos.mock.yaml`: **open**.",
+		"Release train 2026-12 over `mock.yaml`: **open**.",
 		"| 1 | mock-api | released | v0.1.0 | v0.2.0 | release [mock-api#4](https://github.com/o/mock-api/pull/4) |  |",
 		"| 2 | mock-agent | blocked |  |  | bump [mock-agent#8](https://github.com/o/mock-agent/pull/8), release [mock-agent#9](https://github.com/o/mock-agent/pull/9) | " +
 			`checks failing on #9: ci / go \| x --> <!-- injected |`,

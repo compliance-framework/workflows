@@ -16,11 +16,6 @@ on:
         type: choice
         options: [start, reconcile]
         default: start
-      manifest:
-        description: Manifest to read the repos from (start)
-        type: choice
-        options: [repos.mock.yaml, repos.yaml]
-        default: repos.yaml
       repos:
         description: Comma-separated repos (start; default every repo with release true)
         type: string
@@ -77,7 +72,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           SCHEDULE: ${{ github.event.schedule }}
           ACTION: ${{ inputs.action }}
-          MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
+          MANIFEST: repos.yaml
           REPOS: ${{ inputs.repos }}
           # Scheduled starts are dry runs until TRAIN_LIVE is true; manual ones follow the input.
           DRY_RUN: ${{ github.event_name == 'schedule' && vars.TRAIN_LIVE != 'true' || github.event_name == 'workflow_dispatch' && inputs.dry_run }}

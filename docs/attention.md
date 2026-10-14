@@ -31,7 +31,7 @@ posts a tracked bot PR to the `SLACK_CHANNEL_NEEDS_HUMAN` channel, once per PR, 
   channel instead of a CI incident in `SLACK_CHANNEL_CI_FAILURES` (an incident still opens when
   other jobs failed too). `release-checks` itself stays read-only: it never labels or comments.
 
-The post is a card: "Needs a human · mock-ui", the PR (`compliance-framework/mock-ui#13`, linked)
+The post is a card: "Needs a human · ui", the PR (`compliance-framework/ui#13`, linked)
 and its title, fields Why / CI / Opened by / Waiting, and a Review PR button
 ([notify.md](notify.md#needs-a-human)).
 
@@ -58,8 +58,8 @@ The post is a Block Kit card ([slack.md](slack.md)) with an amber bar: the heade
 2 PRs need a human", then one compact section per repo, in manifest order, with a line per PR:
 
 ```text
-compliance-framework/mock-ui
-• compliance-framework/mock-ui#13 chore(deps): update typescript to v7 · labelled needs-human, open over 7d · 9d
+compliance-framework/ui
+• compliance-framework/ui#13 chore(deps): update typescript to v7 · labelled needs-human, open over 7d · 9d
 compliance-framework/workflows
 • compliance-framework/workflows#52 chore(main): release 2.0.0 · needs release:major-approved (.: v1.4.0 -> v2.0.0) · 3d
 ```
@@ -71,16 +71,15 @@ PR it could not read is listed under "Could not read" and fails the run, after p
 
 | Input (`workflow_dispatch`) | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.yaml` | The repos to read. Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the mocks. |
 | `dry_run` | `true` | Print the digest instead of posting it. Scheduled runs are dry runs until the repo variable `ATTENTION_DIGEST_LIVE` is `true` (the `RENOVATE_LIVE` pattern). |
 
-The job lists the manifest's repos, then mints a `ccf-release-bot` token scoped to exactly those
+It reads every active repo in `repos.yaml`. The job lists them, then mints a `ccf-release-bot` token scoped to exactly those
 (`repositories:`) with **read-only** permissions: Pull requests (open PRs), Checks (check runs) and
 Contents (release-please manifests). It refuses an empty selection, since an unscoped token would
 reach every org repo. Every GitHub call is a `GET`.
 
 ```sh
-GH_TOKEN=$(gh auth token) go run ./cmd/attention-digest post --manifest repos.mock.yaml --dry-run
+GH_TOKEN=$(gh auth token) go run ./cmd/attention-digest post --repos ui,workflows --dry-run
 ```
 
 ## Setting it up

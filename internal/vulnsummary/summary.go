@@ -76,7 +76,7 @@ type Failure struct {
 // Summary is the open alerts of a set of repos.
 type Summary struct {
 	Owner string
-	// Scope says which repos were read, e.g. "10 repos in repos.mock.yaml".
+	// Scope says which repos were read, e.g. "12 repo(s) in repos.yaml".
 	Scope string
 	// Checked is the number of repos read successfully.
 	Checked int
