@@ -102,13 +102,19 @@ func (e *Engine) releasePR(ctx context.Context, r *RepoState) error {
 	switch {
 	case err != nil:
 		return err
+	case run != nil && r.Rerun && run.ID == r.FailedRun && r.FailedAttempt > 0 && run.Attempt <= r.FailedAttempt:
+		// Right after /retry re-ran it, GitHub can still list the failed attempt.
+		r.wait("waiting for the re-run of release-please on %s: %s", short(sha), run.URL)
+		return nil
 	case run == nil || run.Status != "completed":
 		r.wait("waiting for release-please on %s", short(sha))
 		return nil
 	case run.Conclusion != "success":
-		r.hold(Blocked, false, "release-please failed on %s: %s", short(sha), run.URL)
+		r.FailedRun, r.FailedAttempt, r.Rerun = run.ID, run.Attempt, false
+		r.hold(Blocked, false, "release-please failed on %s: %s; re-run it, or `/retry %s`", short(sha), run.URL, r.Name)
 		return nil
 	}
+	r.FailedRun, r.FailedAttempt, r.Rerun = 0, 0, false
 	pr, err := e.Repos.OpenPR(ctx, r.Name, ReleaseBranchPrefix+branch)
 	switch {
 	case err != nil:

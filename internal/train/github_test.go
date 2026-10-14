@@ -136,7 +136,7 @@ func TestGitHubGate(t *testing.T) {
 		"GET /repos/o/workflows":                                                `{"default_branch":"main"}`,
 		"GET /repos/o/workflows/branches/main":                                  `{"commit":{"sha":"abc"}}`,
 		"POST /repos/o/workflows/actions/workflows/plugin-probe.yml/dispatches": `{"workflow_run_id":42,"run_url":"api","html_url":"https://run/42"}`,
-		"GET /repos/o/workflows/actions/runs/42":                                `{"id":42,"path":".github/workflows/plugin-probe.yml","status":"completed","conclusion":"failure","html_url":"https://run/42"}`,
+		"GET /repos/o/workflows/actions/runs/42":                                `{"id":42,"path":".github/workflows/plugin-probe.yml","status":"completed","conclusion":"failure","html_url":"https://run/42","run_attempt":2}`,
 		"GET /repos/o/workflows/actions/runs/42/jobs?per_page=100":              `{"jobs":[{"id":5},{"id":6}]}`,
 		"GET /repos/o/workflows/actions/jobs/5/logs":                            "line 1\n",
 		"GET /repos/o/workflows/actions/jobs/6/logs":                            "line 2\n",
@@ -149,7 +149,7 @@ func TestGitHubGate(t *testing.T) {
 	if want := `POST /repos/o/workflows/actions/workflows/plugin-probe.yml/dispatches {"inputs":{"plugins":"ghcr.io/o/p:v1.0.0"},"ref":"main","return_run_details":true}`; !slices.Contains(*bodies, want) {
 		t.Errorf("bodies = %q", *bodies)
 	}
-	if run, err := g.WorkflowRun(ctx, 42); err != nil || run.Status != "completed" || run.Conclusion != "failure" {
+	if run, err := g.WorkflowRun(ctx, 42); err != nil || run.Status != "completed" || run.Conclusion != "failure" || run.Attempt != 2 {
 		t.Errorf("WorkflowRun = %+v %v", run, err)
 	}
 	if log, err := g.RunLog(ctx, 42); err != nil || log != "line 1\nline 2\n" {

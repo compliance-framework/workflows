@@ -40,6 +40,7 @@ type Run struct {
 	Status     string
 	Conclusion string
 	URL        string
+	Attempt    int // run_attempt: 1, and one more after each re-run
 }
 
 // Issue is a tracking issue.
