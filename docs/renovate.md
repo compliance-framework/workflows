@@ -14,7 +14,7 @@ public repos.
 | Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. A repo's fixes go into one `[SECURITY]` PR per package manager, `renovate/security-<manager>` (e.g. `renovate/security-gomod`), outside the non-major group and the concurrent-PR limit; it auto-merges. A major fix gets its own, `renovate/major-security-<manager>`, for a human. See [Why security fixes are grouped](#why-security-fixes-are-grouped). Every fix is `fix(deps)` (`vulnerabilityAlerts.semanticCommitType: "fix"`), so it releases: Renovate forces the `vulnerabilityAlerts` settings onto each security update over the package rules, while the depType rules alone still let one through as `chore(deps)`, which release-please hides ([mock-plugin-2#14](https://github.com/compliance-framework/mock-plugin-2/pull/14)). |
 | Waiting period | `minimumReleaseAge: "7 days"` with `internalChecksFilter: "strict"`: no branch or PR before a release is a week old. An update with no release timestamp waits too (Renovate's default `minimumReleaseAgeBehaviour`). |
 | Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain and the `golang` image are in it. Majors get their own PRs. |
-| Auto-merge | The non-major group (and every non-major vulnerability fix) auto-merges, but Renovate merges it itself (`platformAutomerge: false`, `automergeType: "pr"`, `automergeStrategy: "squash"`): on its next run after the checks pass, Renovate squash-merges the PR through the API as `ccf-release-bot`. Majors wait for a human. See [Why Renovate merges, not GitHub](#why-renovate-merges-not-github). |
+| Auto-merge | The non-major group (and every non-major vulnerability fix) auto-merges, but Renovate merges it itself (`platformAutomerge: false`, `automergeType: "pr"`, `automergeStrategy: "squash"`): on its next run after the checks pass, Renovate squash-merges the PR through the API as `ccf-release-bot`. These PRs are also labelled `renovate:automerge` (one rule, `addLabels`), and `renovate.yml`'s [merge pass](#the-merge-pass) merges them right after each live run, since Renovate merges only one per repo per run. Majors and OPA wait for a human and don't get the label. See [Why Renovate merges, not GitHub](#why-renovate-merges-not-github). |
 | Rebasing | `rebaseWhen: "conflicted"`: a branch is rebased only when it conflicts with `main`, not every time it falls behind. See [Why security fixes are grouped](#why-security-fixes-are-grouped). |
 | Limits | `prHourlyLimit: 1`, `prConcurrentLimit: 8` per repo. With a live run's shard of at most 15 repos, that bounds the PRs across the org; see [The org-wide throttle](#the-org-wide-throttle). |
 | Commits | Semantic: `fix(deps)` for runtime dependencies (Go `require`, npm `dependencies`, a Dockerfile's final stage, the Go `toolchain` directive), which release-please releases, and `chore(deps)` for everything else (dev, CI, actions). A group takes the highest type of its updates, so a group with any runtime update is `fix(deps)`. Security fixes are always `fix(deps)`, whatever their dependency type (see Vulnerability fixes). |
@@ -35,9 +35,11 @@ A merge through the API as the bot does use the bypass. The `ccf-required` rules
 so the required check still gates every merge.
 
 The cost is merge lag: GitHub would merge as soon as the check passes, while Renovate merges on
-its next run that finds the checks green. `renovate.yml` runs hourly and visits each repo's shard in
-turn, so a PR merges up to one rotation (at most 5 runs with every batch active, about 5 hours when
-GitHub starts the runs on time) after its checks pass. The 8th/22nd `schedule` doesn't delay this:
+its next run that finds the checks green, and only one PR per repo. `renovate.yml` runs hourly and
+visits each repo's shard in turn, so without more a PR would merge up to one rotation (at most 5
+runs with every batch active, about 5 hours when GitHub starts the runs on time) after its checks
+pass. The [merge pass](#the-merge-pass) after each live run closes most of that gap: it waits up to
+20 minutes for the checks of the PRs Renovate just opened or rebased, and merges every green one. The 8th/22nd `schedule` doesn't delay this:
 it only limits when new branches are created, while Renovate keeps updating and merging existing PRs on the other days
 (its defaults `updateNotScheduled: true` and `automergeSchedule: ["at any time"]`, which the preset
 leaves alone). A PR whose checks fail stays open, and Renovate updates or recreates it
@@ -163,7 +165,12 @@ Runs hourly at minute 17 and on `workflow_dispatch`, as one job:
    Dependabot alerts read.
 4. `renovatebot/github-action` runs Renovate, pinned with its `renovate-version` input, with that config and token.
    This repo is in Renovate's list, so Renovate updates the action's SHA pin like any third-party
-   action; check that `renovate-version` moves with it, and bump it by hand if it doesn't.
+   action; check that `renovate-version` moves with it, and bump it by hand if it doesn't. The step
+   has 55 minutes, within the token's hour.
+5. A live run only, also after a failed or timed-out Renovate step: a second token, minted fresh
+   because Renovate may have used most of the first one's hour, for the same repos (Contents, Pull
+   requests and Workflows write, Checks read), then `go run ./cmd/renovate-config merge` with it:
+   the [merge pass](#the-merge-pass), with `--wait 20m` and 25 minutes. The job's limit is 90 minutes.
 
 | Input | Default | What |
 | --- | --- | --- |
@@ -176,7 +183,7 @@ A scheduled run has no inputs and uses these defaults, except `dry_run`: it is `
 repo variable `RENOVATE_LIVE` is `"true"`, and `full` otherwise. Scheduled runs read `repos.yaml`;
 dispatch with `manifest=repos.mock.yaml` for the mocks. With `RENOVATE_LIVE` set, a scheduled run is
 live on the product repos and this one, the same switch as `CCF_BUMP_SYNC_LIVE` and `TRAIN_LIVE`.
-A dispatch always follows its `dry_run` input. A live scheduled run is also what merges Renovate's green PRs (see above), so leave it on once
+A dispatch always follows its `dry_run` input. A live scheduled run is also what merges Renovate's green PRs (Renovate and the merge pass), so leave it on once
 Renovate is live. Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, from this repo's `release` environment (main only). Variable:
 `RENOVATE_LIVE`.
 
@@ -194,6 +201,37 @@ artifact update (`renovate/artifacts`) on the branch.
 A Renovate branch starts with `renovate/`, so when its CI fails, the repo's `notify-failure.yml`
 posts it to `#ccf-ci-failures` (rule (a)), and the failed check keeps Renovate from merging it.
 
+## The merge pass
+
+Renovate merges at most one PR per repo per run ([Why security fixes are
+grouped](#why-security-fixes-are-grouped)), and never one it has just pushed. So after each live
+run, `renovate.yml` runs `renovate-config merge` on the run's shard. It shares its logic with
+`ccf-bump merge` (`internal/automerge`; see [ccf-bump.md](ccf-bump.md#the-merge-pass) for how a
+PR's checks are read and what is pending), and merges each open PR that is all of:
+
+- labelled `renovate:automerge`: the preset adds it to what it auto-merges, the non-major group and
+  non-major security fixes, and never to majors or OPA;
+- from a `renovate/*` branch of the repo itself (not a fork), opened by `--author` (the workflow
+  passes the token's app, `ccf-release-bot[bot]`);
+- with every commit authored by `--author`: Renovate commits through the API as the app, so a commit
+  by anyone else means a person pushed to the branch, and the PR is left for them (Renovate's own
+  rule for a modified branch);
+- not labelled `needs-human` (a person can hold a PR by adding it);
+
+once the newest run of `ci / required` on its head succeeded and GitHub reports it mergeable. It
+squash-merges as the bot, with the PR title plus ` (#N)` as the commit title, so the `ccf-review`
+bypass applies as it does for Renovate's own merges. With `--wait 20m` it looks again every 30s at
+PRs whose check is still running, for up to 20 minutes, then leaves the rest to a later run. A
+failing or conflicting PR is a warning; Renovate rebases a conflicting one on its next visit.
+Sibling PRs that touch the same files can conflict once one merges, so the pass merges the first
+and the others wait for Renovate's rebase; that is why the security fixes are grouped too.
+
+A repo's own `renovate.json` that turns `automerge` off for an update doesn't remove the label, so
+it should add `needs-human` to that update as well.
+
+Locally, `GH_TOKEN=... go run ./cmd/renovate-config merge --manifest repos.mock.yaml --repos
+mock-plugin-1` prints what it would merge (`--dry-run` defaults to `full`; `off` merges).
+
 ## Running it
 
 - **Dry run of a batch before it is switched on**:
@@ -203,8 +241,9 @@ posts it to `#ccf-ci-failures` (rule (a)), and the failed check keeps Renovate f
 - **Dry run on the mocks**: Actions, `renovate`, Run workflow, or
   `gh workflow run renovate.yml -f manifest=repos.mock.yaml -f dry_run=full`. The log lists each
   `DRY-RUN: Would create PR` per repo; expect about one grouped PR per repo plus its majors.
-- **Live on the mocks**: the same with `-f dry_run=off`. Renovate opens the grouped PRs; a later
-  dispatch with `dry_run=off` merges the ones whose checks have passed. `repos.mock.yaml` lists this
+- **Live on the mocks**: the same with `-f dry_run=off`. Renovate opens the grouped PRs, and the
+  merge pass merges the ones whose checks pass within its 20 minutes; a later live dispatch merges
+  the rest. `repos.mock.yaml` lists this
   `workflows` repo too, so name the mocks with `-f repos=...` to leave it out.
 - **Scheduled runs live**: set the repo variable `RENOVATE_LIVE` to `true`
   (`gh variable set RENOVATE_LIVE --body true --repo compliance-framework/workflows`); unset it to go

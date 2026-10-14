@@ -2,15 +2,18 @@
 //
 //	renovate-config list   [--manifest repos.yaml] [--repos a,b] [--dry-run full] [--max-repos 15] [--slot N]
 //	renovate-config config [--manifest repos.yaml] [--repos a,b] [--dry-run full] [--max-repos 15] [--slot N] [--preset renovate/default.json] [--owner compliance-framework]
+//	renovate-config merge  --repos a,b [--manifest repos.yaml] [--dry-run full] [--wait 20m] [--author ccf-release-bot[bot]]
 //
 // list prints the selected repo names, comma-separated, to scope the token. config prints the
 // Renovate global config (internal/renovate) as JSON. Both select every active repo in the
 // manifest unless --repos names a subset; a dry run may name repos of an inactive batch. A live run
 // (--dry-run off) takes only one shard of at most --max-repos of them, picked by --slot, so pass
-// both commands the same --slot (renovate.yml passes its run number).
+// both commands the same --slot (renovate.yml passes its run number). merge merges the green
+// renovate:automerge PRs of --repos after a live run (merge.go), with GH_TOKEN.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,18 +22,32 @@ import (
 	"strings"
 	"time"
 
+	"github.com/compliance-framework/workflows/internal/bump"
 	"github.com/compliance-framework/workflows/internal/manifest"
 	"github.com/compliance-framework/workflows/internal/renovate"
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	var err error
+	if len(os.Args) > 1 && os.Args[1] == "merge" {
+		base := os.Getenv("GITHUB_API_URL")
+		if base == "" {
+			base = "https://api.github.com"
+		}
+		gh := func(owner string) mergeGitHub {
+			return &bump.GitHub{BaseURL: base, Token: os.Getenv("GH_TOKEN"), Owner: owner}
+		}
+		err = merge(context.Background(), os.Args[2:], mergeEnv{github: gh, stdout: os.Stdout, now: time.Now, sleep: time.Sleep})
+	} else {
+		err = run(os.Args[1:], os.Stdout, os.Stderr)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "::error::renovate-config: "+err.Error())
 		os.Exit(1)
 	}
 }
 
-const usage = "usage: renovate-config list|config [flags]"
+const usage = "usage: renovate-config list|config|merge [flags]"
 
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 || (args[0] != "list" && args[0] != "config") {

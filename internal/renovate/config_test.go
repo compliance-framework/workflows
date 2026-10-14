@@ -148,6 +148,8 @@ func TestSharedPreset(t *testing.T) {
 			SemanticCommitType string          `json:"semanticCommitType"`
 			GroupName          string          `json:"groupName"`
 			GroupSlug          string          `json:"groupSlug"`
+			Labels             []string        `json:"labels"`
+			AddLabels          []string        `json:"addLabels"`
 		} `json:"vulnerabilityAlerts"`
 		PackageRules []struct {
 			MatchManagers      []string `json:"matchManagers"`
@@ -160,6 +162,7 @@ func TestSharedPreset(t *testing.T) {
 			Automerge          *bool    `json:"automerge"`
 			AutomergeType      string   `json:"automergeType"`
 			Enabled            *bool    `json:"enabled"`
+			AddLabels          []string `json:"addLabels"`
 		} `json:"packageRules"`
 	}
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -214,9 +217,32 @@ func TestSharedPreset(t *testing.T) {
 		}
 	}
 
+	// Renovate forces vulnerabilityAlerts over the merged config (a plain override, not a merge), so
+	// labels there would replace a major fix's needs-human.
+	if va := p.VulnerabilityAlerts; va.Labels != nil || va.AddLabels != nil {
+		t.Errorf("vulnerabilityAlerts labels %v, addLabels %v: want none", va.Labels, va.AddLabels)
+	}
+
 	var internalOff, grouped, opaOff, opaAPI, indirectFix bool
+	var labelRules int
+	nonMajor := []string{"minor", "patch", "digest", "pin", "pinDigest"}
+	opaNames := []string{"github.com/open-policy-agent/opa", "open-policy-agent/opa", "openpolicyagent/opa"}
 	for _, r := range p.PackageRules {
 		off := r.Enabled != nil && !*r.Enabled
+		// renovate:automerge marks what the merge pass merges: exactly the auto-merged non-major
+		// updates (the group, and non-major security fixes through it), never a major or OPA (in the
+		// api its own needs-human PR). Renovate unions a group's labels, so one rule carries it.
+		if slices.Contains(r.AddLabels, AutomergeLabel) {
+			labelRules++
+			var notOPA []string
+			for _, n := range opaNames {
+				notOPA = append(notOPA, "!"+n)
+			}
+			if !slices.Equal(r.MatchUpdateTypes, nonMajor) || !slices.Equal(r.MatchPackageNames, notOPA) || r.GroupName != "" || r.Automerge != nil {
+				t.Errorf("the %s rule matches %v of %v: want only the non-major updates, OPA excluded, and nothing else set", AutomergeLabel, r.MatchUpdateTypes, r.MatchPackageNames)
+			}
+			continue
+		}
 		switch {
 		// Indirect modules are linked into the binary: their updates must release (fix), not
 		// chore(deps), which :semanticPrefixFixDepsChoreOthers gives depType indirect.
@@ -226,14 +252,17 @@ func TestSharedPreset(t *testing.T) {
 			internalOff = len(r.MatchRepositories) == 0
 		case r.GroupName != "" && slices.Contains(r.MatchPackageNames, "*"):
 			grouped = r.Automerge != nil && *r.Automerge && r.AutomergeType == "pr" && !slices.Contains(r.MatchUpdateTypes, "major") &&
-				slices.Equal(r.MatchUpdateTypes, []string{"minor", "patch", "digest", "pin", "pinDigest"})
-		case slices.Contains(r.MatchPackageNames, "github.com/open-policy-agent/opa"):
+				slices.Equal(r.MatchUpdateTypes, nonMajor)
+		case slices.Equal(r.MatchPackageNames, opaNames):
 			if off {
 				opaOff = slices.Equal(r.MatchRepositories, []string{"!compliance-framework/api", "!compliance-framework/mock-api"})
 			} else {
 				opaAPI = r.Automerge != nil && !*r.Automerge && r.GroupName != "" && slices.Contains(r.MatchRepositories, "compliance-framework/api")
 			}
 		}
+	}
+	if labelRules != 1 {
+		t.Errorf("%d rules add %s, want 1", labelRules, AutomergeLabel)
 	}
 	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix {
 		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v",

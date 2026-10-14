@@ -1,6 +1,6 @@
 # Bot PRs that need a human
 
-Most bot PRs merge on their own: Renovate merges its non-major group, `ccf-bump merge` merges the
+Most bot PRs merge on their own: Renovate and `renovate.yml`'s merge pass merge the non-major group and security fixes, `ccf-bump merge` merges the
 ccf-bump PRs labelled `ccf-bump:automerge`, and the train merges its bump and release PRs. The rest
 wait for a person: a major update, an OPA bump in the api, a ccf-bump PR it doesn't merge. Without a nudge they sit there until the
 next train trips over them (Renovate majors on `mock-ui`, #13 and #14, waited for weeks).
