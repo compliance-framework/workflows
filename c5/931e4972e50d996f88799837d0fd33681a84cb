@@ -1,0 +1,5 @@
+lisa-design:
+- Security fixes are grouped with vulnerabilityAlerts.groupName/groupSlug (one PR per manager): Renovate applies vulnerabilityAlerts as `force` after and over the package rules, so a package rule can't group them; groupSlug is mandatory or they join all-non-major.
+- OPA security fixes get their own slug (security-gomod-opa) via a handlebars containsString template on packageName: a Renovate group auto-merges only if every upgrade does (generate.ts: upgrades.every(automerge)) and unions labels, so in the api the OPA fix (automerge false, needs-human) would hold every Go fix. Accepted by renovate-config-validator --strict 44.145.1 (both invocations); branch names proven with Renovate 44.145.1's own applyPackageRules + generateBranchName + generateBranchConfig (local script, not in CI: CI has no node 24/renovate).
+- No labels are put in vulnerabilityAlerts: `force` is a plain spread over the merged config, so a forced addLabels would REPLACE a major fix's needs-human.
+- rebaseWhen stays conflicted; the docs now say it avoids CI churn, not that it lifts Renovate's one-merge-per-repo-per-run (+1 restart) limit.
