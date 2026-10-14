@@ -286,12 +286,12 @@ func TestBumpLatestFinal(t *testing.T) {
 			// The plan reads mock-api's release PR (release-please opens it on the tick) and plans
 			// nothing to release for mock-agent and mock-ui.
 			w.tick()
-			if err := e.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: repos, DryRun: true}); err != nil {
+			if err := e.Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: repos, DryRun: true}); err != nil {
 				t.Fatal(err)
 			}
 			want = append(want, "mock-ui mock-api=v0.2.0") // not skipped in the dry run
 		} else {
-			if err := e.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: repos}); err != nil {
+			if err := e.Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: repos}); err != nil {
 				t.Fatal(err)
 			}
 			w.say(1, "owner", "/skip mock-ui")
