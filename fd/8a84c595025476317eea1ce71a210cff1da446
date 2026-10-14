@@ -1,0 +1,6 @@
+lisa-design:
+- release-pr records the failed release-please run (FailedRun) and the attempt that failed (FailedAttempt, from run_attempt); /retry in release-pr calls RerunFailed on it, the same API publishing uses.
+- After /retry, Rerun makes release-pr wait ("waiting for the re-run of release-please") while GitHub still lists the failed attempt (same run ID, attempt <= FailedAttempt). Without it the reconcile that applies /retry can read the old failed attempt and block again, re-posting to Slack. FailedAttempt > 0 guards states/runs without an attempt from waiting forever.
+- The hold stays non-sticky: a re-run started by hand in GitHub, or a new commit on main, is still picked up without /retry.
+- /retry on a release-pr state written before this change (no FailedRun) only clears the hold, as before; the next reconcile records the run, so a second /retry re-runs it.
+- Not changed: publish's "release-please failed after merging" path does not record FailedRun; /retry there still only clears the hold (out of this task's scope).
