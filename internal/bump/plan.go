@@ -187,6 +187,40 @@ func (p *Plan) decideWorkflows(r Ref, target string) {
 	p.Changes = append(p.Changes, Change{Ref: r, To: target})
 }
 
+// Settle keeps, of the plan's changes, those that ApplyAll applied: after is a ScanAll of the
+// checkout once they were applied, and changed reports whether a file differs from the commit the
+// checkout was cloned at. A change is applied when its file changed and its pin moved (after has
+// one fewer pin identical to the one it moves). A pin whose current version can't be read (the ui
+// conformance script's, Current "") is applied when its file changed; when it didn't, the file
+// already matched the target and the pin is returned in unchanged and added to UpToDate. Any other
+// change that did not apply is returned in dropped, for a warning. Neither is in the settled plan,
+// so a PR lists, and is held for, only what its diff does.
+func (p Plan) Settle(after []Ref, changed func(file string) bool) (settled Plan, unchanged, dropped []Change) {
+	left := map[Ref]int{} // pins still as they were
+	for _, r := range after {
+		left[r]++
+	}
+	settled = p
+	settled.Changes, settled.UpToDate = nil, slices.Clone(p.UpToDate)
+	for _, c := range p.Changes {
+		switch {
+		case c.Current == "" && !changed(c.File):
+			unchanged = append(unchanged, c)
+			settled.UpToDate = append(settled.UpToDate, c.Ref)
+		case c.Current == "":
+			settled.Changes = append(settled.Changes, c)
+		case left[c.Ref] > 0:
+			left[c.Ref]-- // identical pins are interchangeable: count off one that stayed
+			dropped = append(dropped, c)
+		case !changed(c.File):
+			dropped = append(dropped, c)
+		default:
+			settled.Changes = append(settled.Changes, c)
+		}
+	}
+	return settled, unchanged, dropped
+}
+
 // Major reports whether the change may break callers: a new major version, or a move from a pin
 // that is not a version. Only changes that are not major are auto-merged.
 func (c Change) Major() bool {

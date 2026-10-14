@@ -48,7 +48,8 @@ func Updaters(c Config) []Updater {
 	return us
 }
 
-// ScanAll runs every updater's Scan.
+// ScanAll runs every updater's Scan. A ref whose version is a placeholder (Templated) is not a
+// pin and is left out: it is neither planned nor listed.
 func ScanAll(dir string, us []Updater) ([]Ref, error) {
 	var refs []Ref
 	for _, u := range us {
@@ -56,10 +57,16 @@ func ScanAll(dir string, us []Updater) ([]Ref, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", u.Name(), err)
 		}
-		refs = append(refs, r...)
+		refs = append(refs, slices.DeleteFunc(r, func(r Ref) bool { return Templated(r.Current) })...)
 	}
 	return refs, nil
 }
+
+// Templated reports whether a ref as written is a placeholder filled in when the file is used,
+// not a pin: a shell or Actions expansion (`${ref}`, `$VERSION`, `${{ inputs.v }}`, `$(cmd)`), a
+// Go, Helm or Jinja template (`{{ .Ref }}`), a printf verb (`%s`) or a `<version>` placeholder.
+// Versions, branches, SHAs and image tags never contain these characters.
+func Templated(v string) bool { return strings.ContainsAny(v, "${}%<>") }
 
 // ApplyAll hands each updater its changes.
 func ApplyAll(ctx context.Context, dir string, us []Updater, changes []Change) error {

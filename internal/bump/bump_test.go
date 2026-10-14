@@ -211,7 +211,7 @@ func TestUpdaters(t *testing.T) {
 			fixture:       "ui",
 			cfg:           Config{UIDep: "mock-api"},
 			targets:       map[string]string{"mock-api": "v0.1.0"},
-			changes:       []string{"ui sync scripts/sync-mock-api-version.sh scripts/sync-mock-api-version.sh: v0.0.0 -> v0.1.0"},
+			changes:       []string{"ui sync src/api-version.json scripts/sync-mock-api-version.sh: v0.0.0 -> v0.1.0"},
 			cmds:          []string{"bash scripts/sync-mock-api-version.sh v0.1.0"},
 			golden:        true,
 			reapplyStable: true,

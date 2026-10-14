@@ -67,11 +67,32 @@ product `agent` module; its releases are only read).
 | `go install github.com/<owner>/<repo>[/cmd/x]@<ver>` | `.github/workflows/*.y*ml` | the repo |
 | `FROM <image> AS source` | `Dockerfile` of an `action` repo; any image is replaced by `ghcr.io/<owner>/<dep>:<ver>` (no `v`) | the action's one `depends_on` |
 | `opa-version:` inputs | workflow files of a `policies` repo; expressions are left alone | the OPA version in the go.mod of its `go-service` dependency (else `agent`) at that repo's target tag |
-| ui sync script | `scripts/sync-agentconfig-conformance.sh <tag>` (ui) or `scripts/sync-mock-api-version.sh <tag>` (mock-ui) | the ui's `go-service` dependency |
+| ui sync script | `scripts/sync-agentconfig-conformance.sh <tag>` (ui; writes the conformance fixture, and its current version is unknown) or `scripts/sync-mock-api-version.sh <tag>` (mock-ui; writes `src/api-version.json`) | the ui's `go-service` dependency |
 | helm | `charts/*/values.yaml` image tags next to `repository: ghcr.io/<owner>/<repo>` (empty tags follow appVersion and stay empty); `Chart.yaml` `appVersion` | the image's repo; appVersion tracks the first org image whose tag is empty or equals appVersion |
 | `uses: <owner>/workflows/...@<ref>` in a job | workflow files; the job's `workflows-ref` input is deleted when its pin moves | the latest final release of the `kind: workflows` repo (sync), or `--set workflows=<ref>` |
 
 Files are edited in place, so comments and layout stay. Chart versions are left to release-please.
+
+### What counts as a pin
+
+A pin is a literal ref: a version (`v0.21.0`, `0.21.0`, a pseudo-version), or a ref that is not a
+version (a branch like `main`, a commit SHA, `latest`, an image like `alpine:3.20`), which the
+[rules](#rules) below replace. A ref that is a placeholder, filled in when the file is used, is
+not a pin and is skipped: it is neither planned, listed in the PR nor a reason to hold it. That is
+any ref with `$`, `{`, `}`, `%`, `<` or `>`: a shell or Actions expansion (`${ref}`, `$VERSION`,
+`${{ inputs.version }}`, `$(cat VERSION)`), a Go, Helm or Jinja template (`{{ .Ref }}`), a printf
+verb (`%s`) or a `<version>` placeholder. The ui sync scripts are not read for their refs: the
+updater runs the script, and the pin is the file the script writes.
+
+### Only applied changes count
+
+After applying the plan, ccf-bump scans the checkout again. A planned change is in the PR only
+when its file changed and its pin moved. A change that did not apply is dropped from the PR and
+printed as a warning, so the PR's title, table and auto-merge decision describe its diff and
+nothing else. A sync script whose current version is unknown (the ui conformance file) applies
+when it changes its file; when it leaves it as it was, the file already matched the target: the
+output says `unchanged`, and the PR neither lists it nor is held for it. With no change applied,
+nothing is pushed.
 
 ## Rules
 
@@ -85,12 +106,13 @@ Files are edited in place, so comments and layout stay. Chart versions are left 
   the repo when missing) and [`ccf-bump merge`](#the-merge-pass) merges it once `ci / required`
   passes. Never GitHub's auto-merge ([why](#why-ccf-bump-merges-not-github)); updating a PR that an
   older run left with GitHub's auto-merge on turns it off (a failure is a warning). A move from a
-  pin that is not a version, or whose current version is unknown (the ui conformance file), needs
-  a human. So does, in a `helm` repo, an app version (an org image tag in `values.yaml` or the
+  pin that is not a version, or whose current version is unknown (the ui conformance file when
+  the script changes it), needs a human. So does, in a `helm` repo, an app version (an org image tag in `values.yaml` or the
   `Chart.yaml` `appVersion`) moved by a minor or more, `0.21.0 → 0.22.0` as much as
   `2.12.1 → 2.13.0`: chart CI can't tell that the new app needs new values or templates, and on 0.x
   a minor is where breaking changes land; a patch is still auto-merged. The PR body and the output
-  say why it is held.
+  say why it is held. These reasons count only the changes applied to the PR's files
+  ([Only applied changes count](#only-applied-changes-count)).
 - **A PR that needs a human** gets the `needs-human` label instead (and loses
   `ccf-bump:automerge` if an earlier run the same day added it); so does a PR whose
   `ccf-bump:automerge` label could not be added. A failure is a warning. See
