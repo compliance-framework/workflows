@@ -195,3 +195,16 @@ func TestGitHubDispatchNoRunID(t *testing.T) {
 		})
 	}
 }
+
+func TestGitHubLatestFinal(t *testing.T) {
+	g, _ := fakeAPI(t, map[string]string{
+		"GET /repos/o/agent/releases?per_page=100&page=1": `[{"tag_name":"v0.10.0-rc1","prerelease":true},{"tag_name":"v0.9.3"},{"tag_name":"v0.10.0","draft":true},{"tag_name":"v0.9.10"},{"tag_name":"v0"}]`,
+		"GET /repos/o/new/releases?per_page=100&page=1":   `[]`,
+	})
+	if v, err := g.LatestFinal(ctx, "agent"); err != nil || v != "v0.9.10" {
+		t.Errorf("LatestFinal(agent) = %q %v", v, err)
+	}
+	if v, err := g.LatestFinal(ctx, "new"); err != nil || v != "" {
+		t.Errorf("LatestFinal(new) = %q %v", v, err)
+	}
+}

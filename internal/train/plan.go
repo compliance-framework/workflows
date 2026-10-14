@@ -76,7 +76,11 @@ func (e *Engine) planGate(st *State, b *strings.Builder) error {
 func (e *Engine) planRepo(ctx context.Context, st *State, r *RepoState, details *strings.Builder) error {
 	var notes []string
 	bumped := false
-	if sets := st.released(r.Stage); len(sets) > 0 {
+	sets, err := e.bumpSets(ctx, st, r)
+	if err != nil {
+		return err
+	}
+	if len(sets) > 0 {
 		res, err := e.Bumper.Bump(ctx, st.Manifest, r.Name, sets, true)
 		bumped = res.Changed || err != nil
 		switch {

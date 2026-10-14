@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/compliance-framework/workflows/internal/bump"
 	"github.com/compliance-framework/workflows/internal/manifest"
 	"github.com/compliance-framework/workflows/internal/slackkit"
@@ -70,6 +72,10 @@ type fakeRepo struct {
 	failChecks, failRelease bool
 	failReleasePlease       bool
 	bumped                  bool // ccf-bump finds pins to move
+	// finals are final releases made outside the train (LatestFinal also reads the tags); lookups
+	// counts the LatestFinal calls.
+	finals  []string
+	lookups int
 }
 
 func newWorld(t *testing.T) *world {
@@ -250,6 +256,21 @@ func (w *world) Tags(_ context.Context, repo string) (map[string]string, error) 
 
 func (w *world) Release(_ context.Context, repo, tag string) (string, string, error) {
 	return w.get(repo).notes[tag], "https://github.com/o/" + repo + "/releases/tag/" + tag, nil
+}
+
+// LatestFinal returns the highest final release among r.finals and r's tags.
+func (w *world) LatestFinal(_ context.Context, repo string) (string, error) {
+	r := w.get(repo)
+	r.lookups++
+	best := ""
+	for _, tags := range append(slices.Collect(maps.Values(r.tags)), r.finals) {
+		for _, tag := range tags {
+			if v := semver.Canonical(tag); v == tag && semver.Prerelease(v) == "" && (best == "" || semver.Compare(v, best) > 0) {
+				best = v
+			}
+		}
+	}
+	return best, nil
 }
 
 // RerunFailed re-runs the run, which passes this time (on the next tick, with lagReruns).

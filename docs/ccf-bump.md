@@ -15,7 +15,7 @@ ccf-bump list [--repos a,b] [--chunk 10] [--dry-run]
 
 - **sync** mode (the default; `ccf-bump sync`) targets each dependency's latest **final** release:
   the highest `vX.Y.Z` release that is neither a draft nor a prerelease, read from the GitHub API.
-- **train** mode targets only the `--set` versions (the release train passes what it released).
+- **train** mode targets only the `--set` versions (the release train passes what it released, and the latest final release of a dependency that released nothing in it).
 - `--set dep=version`: `dep` is a repo name, a `github.com/<owner>/...` module path, `opa` or
   `workflows`; it overrides the resolved target in either mode. Versions must be semver
   (`v1.2.3` or `1.2.3`); a `workflows` target can also be any other ref, used as given.

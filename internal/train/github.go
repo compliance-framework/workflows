@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/compliance-framework/workflows/internal/bump"
 )
 
 // GitHub is the REST client behind Repos, Tracker and Members. Repo is the tracking issues'
@@ -346,6 +348,11 @@ func (g *GitHub) Release(ctx context.Context, repo, tag string) (string, string,
 	}
 	err := g.do(ctx, http.MethodGet, g.repoPath(repo)+"/releases/tags/"+url.PathEscape(tag), nil, &r)
 	return r.Body, r.URL, err
+}
+
+// LatestFinal returns repo's highest final release tag, the way ccf-bump sync reads it.
+func (g *GitHub) LatestFinal(ctx context.Context, repo string) (string, error) {
+	return (&bump.GitHub{BaseURL: g.BaseURL, Token: g.Token, Owner: g.Owner, HTTP: g.HTTP}).LatestFinal(ctx, repo)
 }
 
 // RerunFailed re-runs the failed jobs of a workflow run.

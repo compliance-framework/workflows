@@ -3,20 +3,20 @@
 The release train (`train.yml`, `cmd/train`, logic in `internal/train`) releases the manifest's
 repos once a month, stage by stage in `Stages()` order: each stage starts once every repo of the
 earlier stages is released or skipped, and helm repos release last. Before a repo releases, the
-train bumps its internal dependencies to what the earlier stages released, with
-[`ccf-bump`](ccf-bump.md).
+train bumps its internal dependencies to what the earlier stages released (or, for one that released
+nothing, to its latest final release), with [`ccf-bump`](ccf-bump.md).
 
 ## A repo's way through the train
 
 | Status | What the train does, and what it waits for |
 | --- | --- |
 | `waiting` | An earlier stage isn't done. |
-| `bumping` | Runs `ccf-bump --repo <repo> --mode train --set <dep>=<version>... --pr` with every version the earlier stages released, then merges the bump PR once its required checks pass (see What gates a merge). No release in an earlier stage, or nothing to move, skips the bump. |
+| `bumping` | Runs `ccf-bump --repo <repo> --mode train --set <dep>=<version>... --pr` with every version the earlier stages released, and for each of its dependencies in the train that released nothing in it (or was skipped) that dependency's latest final release, the version `ccf-bump sync` would use (ccf-bump never downgrades a newer pin); then merges the bump PR once its required checks pass (see What gates a merge). No version to set, or nothing to move, skips the bump. |
 | `release-pr` | Waits for release-please's run on the default branch's head (the workflow file `release-please.yml`), then takes its PR (`release-please--branches--<default branch>`, from a branch of the repo itself: a fork's PR named like it is never taken, since anyone can name a fork's branch that way). No PR means nothing to release: the repo is `released` with no new version. The run is the signal because release-please leaves its PR behind the branch for commits that release nothing (`ci:`, `chore:`). |
 | `merging` | Merges the release PR (squash, as ccf-release-bot, the `ccf-review` bypass actor) once its required checks pass (`ci / required` and `release-checks / release-checks`), and unless `version-guard` would flag it: a major increase without the `release:major-approved` label. |
 | `publishing` | Waits for release-please's tags on the merge commit and for every release workflow run of each tag (`event: release`) to succeed. Only release tags count (`vX.Y.Z[-pre]` or `<component>-vX.Y.Z[-pre]` with a version the release PR proposed); floating tags a release workflow moves there (`v0`, `latest`) are ignored. |
 | `released` | Done. A released plugin or policies repo can still be `blocked` by the gate (see The gate). |
-| `skipped` | An org owner commented `/skip <repo>`. The next stage doesn't wait for it, and its version isn't bumped anywhere. |
+| `skipped` | An org owner commented `/skip <repo>`. The next stage doesn't wait for it, and no version of it from this train is bumped anywhere; later stages get its latest final release (see `bumping`). |
 | `blocked` | Something failed: the PR's required checks, ccf-bump, release-please, a merge or a release workflow. |
 | `needs-human` | A decision: a major version, a bump PR without the `ccf-bump:automerge` label (ccf-bump leaves it off for a major update, an unversioned pin, or an app update of a minor or more in a helm repo), or a closed bump PR. |
 
