@@ -263,13 +263,16 @@ func (d dockerfile) Apply(_ context.Context, dir string, changes []Change) error
 	return fromSource.rewrite(dir, "Dockerfile", func([]string) (string, bool) { return to, true })
 }
 
-// uiScript runs the ui repo's sync script with the API tag. The scripts are known by path;
-// versionFile/versionKey, when set, say where the script records the tag (the current version).
+// uiScript runs the ui repo's sync script with the API tag. The scripts are known by path. A
+// Ref's File is the file the script writes: what changes in the checkout when the script moves
+// the pin. versionKey, when set, says where in that JSON file the script records the tag (the
+// current version); without it the current version is unknown, and the change is applied only if
+// the script changes the file (Plan.Settle).
 type uiScript struct{ c Config }
 
-var uiScripts = []struct{ script, versionFile, versionKey string }{
-	{script: "scripts/sync-agentconfig-conformance.sh"},
-	{script: "scripts/sync-mock-api-version.sh", versionFile: "src/api-version.json", versionKey: "mockApi"},
+var uiScripts = []struct{ script, file, versionKey string }{
+	{script: "scripts/sync-agentconfig-conformance.sh", file: "src/utils/agent-config/__tests__/fixtures/agentconfig-conformance.json"},
+	{script: "scripts/sync-mock-api-version.sh", file: "src/api-version.json", versionKey: "mockApi"},
 }
 
 func (uiScript) Name() string { return "ui sync" }
@@ -283,20 +286,20 @@ func (u uiScript) Scan(dir string) ([]Ref, error) {
 			return nil, err
 		}
 		cur := ""
-		if s.versionFile != "" {
-			data, err := os.ReadFile(filepath.Join(dir, s.versionFile))
+		if s.versionKey != "" {
+			data, err := os.ReadFile(filepath.Join(dir, s.file))
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return nil, err
 			}
 			var m map[string]any
 			if len(data) > 0 {
 				if err := json.Unmarshal(data, &m); err != nil {
-					return nil, fmt.Errorf("%s: %w", s.versionFile, err)
+					return nil, fmt.Errorf("%s: %w", s.file, err)
 				}
 			}
 			cur, _ = m[s.versionKey].(string)
 		}
-		refs = append(refs, Ref{Updater: u.Name(), Dep: u.c.UIDep, Key: s.script, Current: cur, File: s.script})
+		refs = append(refs, Ref{Updater: u.Name(), Dep: u.c.UIDep, Key: s.script, Current: cur, File: s.file})
 	}
 	return refs, nil
 }

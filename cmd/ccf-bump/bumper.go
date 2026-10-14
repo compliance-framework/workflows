@@ -306,8 +306,15 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if diff == "" {
+	if plan, err = b.settle(ctx, name, dir, us, plan); err != nil {
+		return false, err
+	}
+	switch {
+	case diff == "":
 		fmt.Fprintln(out, "  no file changes")
+		return false, nil
+	case len(plan.Changes) == 0:
+		fmt.Fprintln(out, "  no planned change applied; nothing to push")
 		return false, nil
 	}
 	fmt.Fprint(out, indent(diff))
@@ -345,6 +352,29 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 		return false, err
 	}
 	return true, b.openPR(ctx, name, branch, title, body, held)
+}
+
+// settle returns the plan with only the changes applied to the checkout in dir (bump.Plan.Settle),
+// so the PR's title, table and needs-human decision follow its diff. A planned change that did
+// not apply is a warning; a script that left its file as it was found it already at the target.
+func (b *bumper) settle(ctx context.Context, name, dir string, us []bump.Updater, plan bump.Plan) (bump.Plan, error) {
+	files, err := b.git(ctx, dir, "diff", "--cached", "--name-only", "-z")
+	if err != nil {
+		return plan, err
+	}
+	changed := strings.Split(strings.TrimSuffix(files, "\x00"), "\x00")
+	after, err := bump.ScanAll(dir, us)
+	if err != nil {
+		return plan, fmt.Errorf("scan after the bump: %w", err)
+	}
+	plan, unchanged, dropped := plan.Settle(after, func(f string) bool { return slices.Contains(changed, f) })
+	for _, c := range unchanged {
+		fmt.Fprintf(b.e.stdout, "  unchanged %-12s %s left %s as it was (already %s)\n", c.Dep, c.Key, c.File, c.To)
+	}
+	for _, c := range dropped {
+		b.warn("%s: planned %s %s -> %s (%s %s) was not applied; it is left out of the PR", name, c.Dep, orDash(c.Pinned()), c.To, c.File, c.Key)
+	}
+	return plan, nil
 }
 
 // openPR opens or updates the bump PR and labels it: needs-human when held lists why it must not
