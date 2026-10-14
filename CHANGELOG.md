@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.7.0](https://github.com/compliance-framework/workflows/compare/v1.6.0...v1.7.0) (2026-10-14)
+
+
+### Features
+
+* **renovate:** group security fixes into one PR per manager ([#125](https://github.com/compliance-framework/workflows/issues/125)) ([913fa4b](https://github.com/compliance-framework/workflows/commit/913fa4bf599f1cc9077dede7847d453617572455))
+* **renovate:** merge green Renovate PRs after each run ([#129](https://github.com/compliance-framework/workflows/issues/129)) ([9d26388](https://github.com/compliance-framework/workflows/commit/9d2638893413c29013dcf79bf00499b1b5b60661))
+
+
+### Bug Fixes
+
+* **ccf-bump:** fetch org modules directly, not through the public proxy ([#140](https://github.com/compliance-framework/workflows/issues/140)) ([987851d](https://github.com/compliance-framework/workflows/commit/987851dfb9e64fb23b4b48747bc3560220c06840))
+* **ccf-bump:** ignore templated refs and hold only for applied changes ([#127](https://github.com/compliance-framework/workflows/issues/127)) ([1e897fc](https://github.com/compliance-framework/workflows/commit/1e897fc995272fb652374e9cfb5d5216c9888888))
+* **deps:** update module golang.org/x/net to v0.60.0 [security] ([#134](https://github.com/compliance-framework/workflows/issues/134)) ([504d18d](https://github.com/compliance-framework/workflows/commit/504d18d47f0d9e883c3c3776a01f99000ce59136))
+* **deps:** update module google.golang.org/grpc to v1.83.2 [security] ([#123](https://github.com/compliance-framework/workflows/issues/123)) ([40f3ffa](https://github.com/compliance-framework/workflows/commit/40f3ffaad5e0b5be7b992fad42fffd10c24415d2))
+* **train:** /retry re-runs a failed release-please run ([#139](https://github.com/compliance-framework/workflows/issues/139)) ([78b07c8](https://github.com/compliance-framework/workflows/commit/78b07c89cd23a63eb67e23b3cdc6bd963e52d820))
+* **train:** bump helm to the latest final release of each dependency ([#141](https://github.com/compliance-framework/workflows/issues/141)) ([224b0b9](https://github.com/compliance-framework/workflows/commit/224b0b94b62b33b0496a7c8b1c8bbf2a536da962))
+* **train:** check commenters' org role in the run that starts a train ([#135](https://github.com/compliance-framework/workflows/issues/135)) ([4286ab1](https://github.com/compliance-framework/workflows/commit/4286ab1de214ffcfb406ddb98544ef5707a00cc2))
+* **train:** re-probe a fix release only once it is published ([#133](https://github.com/compliance-framework/workflows/issues/133)) ([92edb34](https://github.com/compliance-framework/workflows/commit/92edb340410897f601f278a1bede78d7975385fe))
+* **train:** read the gate run ID from the dispatch response ([#131](https://github.com/compliance-framework/workflows/issues/131)) ([5986720](https://github.com/compliance-framework/workflows/commit/59867205d06be2e5b8a8cbcd0404293c620231fa))
+
 ## [1.6.0](https://github.com/compliance-framework/workflows/compare/v1.5.2...v1.6.0) (2026-10-13)
 
 
