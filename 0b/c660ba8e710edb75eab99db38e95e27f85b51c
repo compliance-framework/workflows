@@ -1,0 +1,2 @@
+lisa-selfreview:
+Self-review pass 1: 4-line test-only change (repos.mock.yaml -> mock.yaml in commands_test.go and engine_test.go), matching how #143 updated the other train tests and loadManifest in fake_test.go. No findings. Gate: go test -race ./... green, go vet clean, gofmt clean, actionlint v1.7.12 clean, go run ./cmd/manifest -manifest repos.yaml ok.
