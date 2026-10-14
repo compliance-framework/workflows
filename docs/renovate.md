@@ -11,18 +11,18 @@ public repos.
 | Rule | Setting |
 | --- | --- |
 | Schedule | `* * 8,22 * *` (UTC): normal updates only on the 8th and 22nd, away from the monthly train, so each one spends at least a week on `main` before the next release. |
-| Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. Each fix gets its own `[SECURITY]` PR, outside the group and the concurrent-PR limit, and auto-merges unless it is a major. Every fix is `fix(deps)` (`vulnerabilityAlerts.semanticCommitType: "fix"`), so it releases: Renovate forces the `vulnerabilityAlerts` settings onto each security update over the package rules, while the depType rules alone still let one through as `chore(deps)`, which release-please hides ([mock-plugin-2#14](https://github.com/compliance-framework/mock-plugin-2/pull/14)). |
+| Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. A repo's fixes go into one `[SECURITY]` PR per package manager, `renovate/security-<manager>` (e.g. `renovate/security-gomod`), outside the non-major group and the concurrent-PR limit; it auto-merges. A major fix gets its own, `renovate/major-security-<manager>`, for a human. See [Why security fixes are grouped](#why-security-fixes-are-grouped). Every fix is `fix(deps)` (`vulnerabilityAlerts.semanticCommitType: "fix"`), so it releases: Renovate forces the `vulnerabilityAlerts` settings onto each security update over the package rules, while the depType rules alone still let one through as `chore(deps)`, which release-please hides ([mock-plugin-2#14](https://github.com/compliance-framework/mock-plugin-2/pull/14)). |
 | Waiting period | `minimumReleaseAge: "7 days"` with `internalChecksFilter: "strict"`: no branch or PR before a release is a week old. An update with no release timestamp waits too (Renovate's default `minimumReleaseAgeBehaviour`). |
 | Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain and the `golang` image are in it. Majors get their own PRs. |
 | Auto-merge | The non-major group (and every non-major vulnerability fix) auto-merges, but Renovate merges it itself (`platformAutomerge: false`, `automergeType: "pr"`, `automergeStrategy: "squash"`): on its next run after the checks pass, Renovate squash-merges the PR through the API as `ccf-release-bot`. Majors wait for a human. See [Why Renovate merges, not GitHub](#why-renovate-merges-not-github). |
-| Rebasing | `rebaseWhen: "conflicted"`: a branch is rebased only when it conflicts with `main`, not every time it falls behind. See [One run merges every green PR](#one-run-merges-every-green-pr). |
+| Rebasing | `rebaseWhen: "conflicted"`: a branch is rebased only when it conflicts with `main`, not every time it falls behind. See [Why security fixes are grouped](#why-security-fixes-are-grouped). |
 | Limits | `prHourlyLimit: 1`, `prConcurrentLimit: 8` per repo. With a live run's shard of at most 15 repos, that bounds the PRs across the org; see [The org-wide throttle](#the-org-wide-throttle). |
 | Commits | Semantic: `fix(deps)` for runtime dependencies (Go `require`, npm `dependencies`, a Dockerfile's final stage, the Go `toolchain` directive), which release-please releases, and `chore(deps)` for everything else (dev, CI, actions). A group takes the highest type of its updates, so a group with any runtime update is `fix(deps)`. Security fixes are always `fix(deps)`, whatever their dependency type (see Vulnerability fixes). |
 | Go | `postUpdateOptions: ["gomodTidy"]`. Indirect modules are left to `go mod tidy` (Renovate's default). |
 | Indirect Go modules | When Renovate does update one, it is `fix(deps)`, not the `chore(deps)` that `depType: indirect` gets by default: indirect modules are linked into the binary, so the update must release (`matchManagers: ["gomod"], matchDepTypes: ["indirect"], semanticCommitType: "fix"`). A security fix to one is `fix(deps)` through `vulnerabilityAlerts` regardless of this rule. |
 | Actions | Pinned by digest (`helpers:pinGitHubActionDigests`). Dockerfile base images and images in helm values are tracked by Renovate's own managers. |
-| OPA | Off in every repo except `api` (and `mock-api`), so in agent, the policy repos and the plugins it follows the api through `ccf-bump`. In `api` it gets its own PR, `renovate/opa`, which never auto-merges, because a bump forces agent and the policies to follow. |
-| Needs a human | Majors and the api's `renovate/opa` PR get the `needs-human` label (`addLabels`). See [attention.md](attention.md). |
+| OPA | Off in every repo except `api` (and `mock-api`), so in agent, the policy repos and the plugins it follows the api through `ccf-bump`. In `api` it gets its own PR, `renovate/opa`, which never auto-merges, because a bump forces agent and the policies to follow. An OPA security fix gets its own security PR too, `renovate/security-gomod-opa`, so that in `api` it doesn't hold the other Go fixes (a group auto-merges only if every update in it does). Elsewhere Renovate still opens one, since it forces vulnerability fixes on over `enabled: false` (as for internal packages), and it auto-merges there. |
+| Needs a human | Majors and the api's `renovate/opa` and `renovate/security-gomod-opa` PRs get the `needs-human` label (`addLabels`). See [attention.md](attention.md). |
 | Internal packages | Off: `github.com/compliance-framework/**` (Go modules), `ghcr.io/compliance-framework/**` (images) and `compliance-framework/**` (actions and reusable workflows, such as this repo's). The mocks use the same prefixes. |
 
 ### Why Renovate merges, not GitHub
@@ -43,22 +43,41 @@ it only limits when new branches are created, while Renovate keeps updating and 
 leaves alone). A PR whose checks fail stays open, and Renovate updates or recreates it
 on later runs as usual. The repo's "allow auto-merge" setting is no longer used by Renovate.
 
-### One run merges every green PR
+### Why security fixes are grouped
 
-With auto-merge on, Renovate's default `rebaseWhen: "auto"` acts as `behind-base-branch`. Once it
-merges one PR, every other PR of that repo is behind `main`, so it rebases them instead of merging
-them, and their CI starts again. A run then merges at most one PR per repo: a repo with three
-security PRs takes three runs, and every rebase costs a CI run (seen on `mock-plugin-1` in
-run 37758663162). The preset sets `rebaseWhen: "conflicted"`, so Renovate merges every PR whose
-checks are green in the same run and rebases a branch only when it really conflicts with `main`
-(`go.mod` and `go.sum` conflicts are textual, so they are caught). This works because the
-`ccf-required` ruleset doesn't require branches to be up to date
-(`strict_required_status_checks_policy: false`), and a squash merge still checks for conflicts
-when it merges.
+Renovate (44.145.1) merges at most one PR per repo per run: once it merges a branch it stops
+working on that repo, then starts the repo over once, so a repo gets at most two merges in a run.
+Go security fixes all touch `go.mod` and `go.sum`, so after one merges the others conflict and
+are rebased, and Renovate never merges a branch it has just pushed. Each further fix then waits for
+the repo's next visit, about `n` hours with `n` shards, so `k` separate fixes need up to `k` visits:
+in October 2026 four fixes (`grpc`, `x/net`, `x/text`, `x/crypto`) opened 102 PRs across 74 repos,
+and a day later 74 were still open.
 
-The trade-off: a PR's CI may have run against an older `main` than the one it merges into. The
-push to `main` runs CI again on the merged result, and if that breaks, the repo's
-`notify-failure.yml` opens an incident, as for any red `main` (rule (b) in [notify](notify.md)).
+So the preset puts a repo's fixes into one PR per package manager (`vulnerabilityAlerts.groupName`
+and `groupSlug`): one PR, one CI run and one merge, on the first visit after its checks pass. Only
+`vulnerabilityAlerts` can do this: Renovate applies it to each security update after the package
+rules and over them (as with `semanticCommitType`), so a package rule's `groupName` can't. The
+`groupSlug` must be set too, or the fixes would join `renovate/all-non-major`. A major fix still gets
+its own PR (`renovate/major-security-<manager>`, `needs-human`). An OPA fix gets its own as well
+(`renovate/security-gomod-opa`, a `groupSlug` template on the package name): a group auto-merges
+only if every update in it does, and in `api` OPA never auto-merges, so it would hold every Go fix.
+
+The trade-off: one bad fix keeps the group's other fixes from merging until it is fixed or dropped.
+When the group changes (a fix added, or one no longer needed), Renovate updates the branch; PRs
+opened before the grouping, one per package, are closed by Renovate as `autoclosed` on the repo's
+next visit, since no update maps to their branches any more. The non-major group and the security
+group can still conflict with each other on the 8th and 22nd, and then merge on consecutive
+visits.
+
+`rebaseWhen: "conflicted"` keeps the other open PRs from being rebased, with a CI run each, every
+time `main` moves: Renovate's default `auto` acts as `behind-base-branch` with auto-merge on. A
+branch is rebased only when it really conflicts with `main` (`go.mod` and `go.sum` conflicts are
+textual, so they are caught). This works because the `ccf-required` ruleset doesn't require
+branches to be up to date (`strict_required_status_checks_policy: false`), and a squash merge still
+checks for conflicts when it merges. A PR's CI may then have run against an older `main` than the
+one it merges into; the push to `main` runs CI again on the merged result, and if that breaks, the
+repo's `notify-failure.yml` opens an incident, as for any red `main` (rule (b) in
+[notify](notify.md)).
 
 It extends `config:recommended`, which adds the Dependency Dashboard issue (where majors and pending
 updates are listed) and Renovate's standard monorepo groups.
