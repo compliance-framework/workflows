@@ -178,8 +178,10 @@ A train started while another is open only moves the open one on: one train at a
   manifest with `release: true`, in an active batch). Read-only for a dry run; otherwise contents, pull requests,
   issues (chart issues) and actions (`/retry`) write, workflows write (bumps edit workflow files),
   and checks and statuses read. Its commits are authored by the bot.
-- ccf-release-bot scoped to `workflows` with organization Members read, for comment commands. If
-  the app lacks that permission, minting fails without failing the run, and commands are refused.
+- ccf-release-bot scoped to `workflows` with organization Members read, for comment commands,
+  minted in every live run: one on an open train, and the one that starts a live train (it keeps
+  reconciling it, and reads commands, for up to 30 minutes). Dry runs don't mint it. If the app
+  lacks that permission, minting fails without failing the run, and commands are refused.
 
 ## Running it
 
