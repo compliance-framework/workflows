@@ -16,10 +16,11 @@ import (
 )
 
 type fakeGH struct {
-	failFor string // LatestFinal fails for this repo
-	finals  map[string]string
-	files   map[string]string // "repo@ref:path" -> content
-	commits map[string]string // "repo@tag" -> commit SHA
+	failFor  string // LatestFinal fails for this repo
+	finals   map[string]string
+	files    map[string]string // "repo@ref:path" -> content
+	commits  map[string]string // "repo@tag" -> commit SHA
+	tagReads []string          // TagCommit's "repo@tag", in order
 	// authors: "repo@tag" -> who published the release (default ccf-release-bot[bot]); offMain:
 	// commits that are not on the default branch.
 	authors  map[string]string
@@ -51,6 +52,7 @@ func (f *fakeGH) TagTime(context.Context, string, string) (time.Time, error) {
 	return time.Time{}, nil
 }
 func (f *fakeGH) TagCommit(_ context.Context, repo, tag string) (string, error) {
+	f.tagReads = append(f.tagReads, repo+"@"+tag)
 	c, ok := f.commits[repo+"@"+tag]
 	if !ok {
 		return "", fmt.Errorf("no tag %s %s", repo, tag)
@@ -651,15 +653,20 @@ func fakeGo(t *testing.T) (log string) {
 // goModRepo commits a go.mod requiring the org module mock-api to mock-agent's clone and returns
 // the args of a train dry run of mock-agent with mock-api v0.1.0.
 func goModRepo(t *testing.T, root string) []string {
-	dir := filepath.Join(root, "clones", "mock-agent")
+	addGoMod(t, root, "mock-agent")
+	return []string{"--repo", "mock-agent", "--manifest", filepath.Join(root, "repos.yaml"), "--mode", "train",
+		"--set", "mock-api=0.1.0", "--pr", "--dry-run", "--clones", filepath.Join(root, "clones")}
+}
+
+// addGoMod commits a go.mod requiring mock-api v0.0.9 to repo's clone.
+func addGoMod(t *testing.T, root, repo string) {
+	dir := filepath.Join(root, "clones", repo)
 	mod := "module github.com/compliance-framework/mock-agent\n\ngo 1.26.1\n\nrequire github.com/compliance-framework/mock-api v0.0.9\n"
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	git(t, dir, "add", "-A")
 	git(t, dir, "commit", "--quiet", "-m", "go.mod")
-	return []string{"--repo", "mock-agent", "--manifest", filepath.Join(root, "repos.yaml"), "--mode", "train",
-		"--set", "mock-api=0.1.0", "--pr", "--dry-run", "--clones", filepath.Join(root, "clones")}
 }
 
 // TestGoFetchesOrgModulesDirectly: go runs with the org's modules in GOPRIVATE (kept: one already
@@ -698,6 +705,26 @@ func TestDryRunUntaggedVersion(t *testing.T) {
 	}
 	if got, err := os.ReadFile(log); err == nil {
 		t.Errorf("go ran:\n%s", got)
+	}
+}
+
+// TestDryRunTagReadOnce: a dry run over several repos reads each Go module target's tag once.
+func TestDryRunTagReadOnce(t *testing.T) {
+	root, e, gh, out := setup(t)
+	log := fakeGo(t)
+	addGoMod(t, root, "mock-agent")
+	addGoMod(t, root, "mock-plugin-1")
+	gh.commits = map[string]string{"mock-api@v0.1.0": "0123456789abcdef0123456789abcdef01234567"}
+	args := []string{"sync", "--repos", "mock-agent,mock-plugin-1", "--manifest", filepath.Join(root, "repos.yaml"),
+		"--dry-run", "--clones", filepath.Join(root, "clones")}
+	if err := run(context.Background(), args, e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !slices.Equal(gh.tagReads, []string{"mock-api@v0.1.0"}) {
+		t.Errorf("tags read: %q, want mock-api@v0.1.0 once", gh.tagReads)
+	}
+	if got, err := os.ReadFile(log); err != nil || strings.Count(string(got), "get github.com/compliance-framework/mock-api@v0.1.0") != 2 {
+		t.Errorf("go get should run once per repo; go ran (%v):\n%s", err, got)
 	}
 }
 

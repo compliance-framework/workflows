@@ -24,7 +24,8 @@ type bumper struct {
 	o      options
 	m      *manifest.Manifest
 	finals map[string]string // repo -> latest final tag, cached across repos
-	// commits caches "repo@tag" -> the commit SHA the tag points at (shared-workflow pins).
+	// commits caches "repo@tag" -> the commit SHA the tag points at (shared-workflow pins, and the
+	// Go module targets a dry run checks).
 	commits map[string]string
 	// trust caches "repo@tag" -> why the shared-workflow release isn't trusted (nil: it is).
 	trust map[string]error
@@ -399,17 +400,17 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 // repo, before go get asks for it. The train's dry run plans versions its stages have not released
 // yet; asking proxy.golang.org or sum.golang.org about one makes them cache "unknown revision"
 // for about 30 minutes, which failed the live run that followed. Direct fetches (commandEnv) skip
-// them, and this skips go get altogether.
+// them, and this skips go get altogether. Found tags are cached in b.commits, across repos.
 func (b *bumper) tagged(ctx context.Context, changes []bump.Change) error {
-	seen := map[string]bool{}
 	for _, c := range changes {
-		if !c.GoModule() || seen[c.Dep+"@"+c.To] {
+		if _, ok := b.commits[c.Dep+"@"+c.To]; ok || !c.GoModule() {
 			continue
 		}
-		seen[c.Dep+"@"+c.To] = true
-		if _, err := b.e.gh.TagCommit(ctx, c.Dep, c.To); err != nil {
+		sha, err := b.e.gh.TagCommit(ctx, c.Dep, c.To)
+		if err != nil {
 			return fmt.Errorf("dry run: tag %s of %s not found (not tagged yet?), so go get was not run: %w", c.To, c.Dep, err)
 		}
+		b.commits[c.Dep+"@"+c.To] = sha
 	}
 	return nil
 }
