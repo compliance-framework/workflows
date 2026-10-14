@@ -1,0 +1,4 @@
+lisa-design:
+- Dispatch sets the documented body flag `return_run_details: true` (GitHub changelog 2026-02-19; gh CLI v2.87+ sends the same) and keeps the client-wide X-GitHub-Api-Version 2022-11-28; no per-request version switch, so no other call or the dispatch's error shapes change.
+- A 204/empty or unreadable dispatch response returns Run{ID: 0} with a nil error: the run started, so an error (which leaves the check pending and re-dispatches next run) would start duplicate runs. The gate's existing "no run ID" failure path handles it; a person /retry's.
+- A transport/HTTP error still returns the error (nothing was dispatched).
