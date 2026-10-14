@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/compliance-framework/workflows/internal/manifest"
@@ -238,13 +240,25 @@ func (e *Engine) runCheck(ctx context.Context, st *State, g *GateCheck) error {
 	case GatePassed, GateSkipped:
 		return nil
 	case GateFailed, GatePending:
-		// A new release of the repo (a fix) is probed instead.
+		// A new release of the repo (a fix) is probed instead, once it is published: its artifact
+		// is pushed by its release workflow, after the release PR merged and moved the manifest.
 		if g.Workflow == ProbeWorkflow && st.Repo(g.Name) != nil {
 			v, err := e.currentVersion(ctx, g.Name)
 			if err != nil {
 				return err
 			}
 			if v != "" && v != g.Version {
+				published, failed, detail, err := e.published(ctx, g.Name, v)
+				switch {
+				case err != nil:
+					return err
+				case failed:
+					e.failCheck(ctx, st, g, detail, "")
+					return nil
+				case !published:
+					g.Detail = detail
+					return nil
+				}
 				g.setVersion(v)
 				g.Result = GatePending
 			}
@@ -286,6 +300,33 @@ func (e *Engine) runCheck(ctx context.Context, st *State, g *GateCheck) error {
 	g.Result, g.Detail = GatePassed, ""
 	clearGateHold(st, g.Name)
 	return nil
+}
+
+// published reports whether version of repo is published, as publish decides a repo is released:
+// its release tag exists and the tag's release workflows succeeded. Otherwise detail says what it
+// waits for, or that the release workflow failed (failed).
+func (e *Engine) published(ctx context.Context, repo, version string) (published, failed bool, detail string, err error) {
+	all, err := e.Repos.Tags(ctx, repo)
+	if err != nil {
+		return false, false, "", err
+	}
+	tags := releaseTags(slices.Collect(maps.Keys(all)), map[string]string{RootPackage: version})
+	if len(tags) == 0 {
+		return false, false, fmt.Sprintf("v%s found; waiting for its release tag", version), nil
+	}
+	slices.Sort(tags)
+	sha := all[tags[0]]
+	tags = slices.DeleteFunc(tags, func(t string) bool { return all[t] != sha })
+	pending, run, err := e.releaseWorkflows(ctx, repo, sha, tags)
+	switch {
+	case err != nil:
+		return false, false, "", err
+	case run != nil:
+		return false, true, fmt.Sprintf("the release workflow of v%s failed: %s; re-run it and the gate probes v%s", version, run.URL, version), nil
+	case len(pending) > 0:
+		return false, false, fmt.Sprintf("v%s found; waiting for its release workflow", version), nil
+	}
+	return true, false, "", nil
 }
 
 // failCheck fails g, blocks its repo, and posts the output tail in the train's thread.

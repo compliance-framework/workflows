@@ -46,7 +46,9 @@ The gate holds the helm stage until every check has passed or been skipped:
   stack-smoke check has no repo: only the message and the gate table say it failed.
 - **A fix** is picked up on its own: on every run, a failed probe whose repo's default branch has
   a newer release-please version is dispatched again at that version (the version the train
-  released stays in the table and the digest). `/retry <repo>` (or `/retry stack-smoke`) runs the
+  released stays in the table and the digest), once that version is published as `publishing`
+  decides it (its tag exists and the tag's release workflow succeeded): until then the check
+  stays as it is and its detail says what it waits for, and a failed release workflow fails it. `/retry <repo>` (or `/retry stack-smoke`) runs the
   check again as it is; `/skip <repo>` (or `/skip stack-smoke`) passes it.
 - **A protocol v1 plugin** (the probe report's `protocol: 1`, read from the run's log) is posted
   once as a deprecation candidate. It never blocks.

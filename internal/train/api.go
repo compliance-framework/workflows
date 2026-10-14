@@ -75,6 +75,8 @@ type Repos interface {
 	// Runs returns the workflow runs of event at head commit sha.
 	Runs(ctx context.Context, repo, event, sha string) ([]Run, error)
 	TagsAt(ctx context.Context, repo, sha string) ([]string, error)
+	// Tags returns every tag of repo and the commit it points at.
+	Tags(ctx context.Context, repo string) (map[string]string, error)
 	Release(ctx context.Context, repo, tag string) (body, url string, err error)
 	RerunFailed(ctx context.Context, repo string, runID int64) error
 	// EnsureIssue opens an issue unless an open one with the same title exists.

@@ -87,18 +87,81 @@ func TestGateFailureBlocksHelmUntilAFix(t *testing.T) {
 		t.Errorf("board %q", u)
 	}
 
-	// A fix: mock-plugin-1 v0.1.2 is released on its default branch.
-	r := w.get("mock-plugin-1")
-	r.main = "mock-plugin-1-fix"
-	r.manifests[r.main] = map[string]string{RootPackage: "0.1.2"}
+	// A fix: mock-plugin-1's release PR for v0.1.2 merges. Its image isn't pushed until its release
+	// workflow succeeds, so the gate waits for the tag, then for the run, without dispatching.
+	runs := len(w.gateRuns)
 	delete(w.probeFail, "mock-plugin-1")
+	release := fixRelease(w, "mock-plugin-1", "0.1.2", "in_progress", "")
+	tags := w.get("mock-plugin-1").tags
+	delete(tags, "mock-plugin-1-fix")
+	waitingFor := func(detail string) {
+		t.Helper()
+		drive(t, w, e, 3)
+		g := w.state(1).GateCheck("mock-plugin-1")
+		if len(w.gateRuns) != runs || g.Result != GateFailed || g.Version != "0.1.1" || g.Detail != detail || !w.issues[0].Open {
+			t.Fatalf("%d runs -> %d, mock-plugin-1 = %+v", runs, len(w.gateRuns), g)
+		}
+	}
+	waitingFor("v0.1.2 found; waiting for its release tag")
+	tags["mock-plugin-1-fix"] = []string{"v0.1.2"}
+	waitingFor("v0.1.2 found; waiting for its release workflow")
+	// The release workflow succeeds: the fix is probed once, and passes.
+	release.Status, release.Conclusion = "completed", "success"
 	drive(t, w, e, 30)
 	st = w.state(1)
+	if len(w.gateRuns) != runs+1 {
+		t.Errorf("%d runs -> %d: %q", runs, len(w.gateRuns), w.dispatched())
+	}
 	if w.issues[0].Open || st.Repo("mock-helm-charts").Phase != Released || st.Repo("mock-plugin-1").Hold != NoHold {
 		t.Fatalf("after the fix: open=%v\n%s", w.issues[0].Open, w.issues[0].Body)
 	}
 	if d := w.dispatched(); d[len(d)-1] != "plugin-probe.yml plugins=ghcr.io/compliance-framework/mock-plugin-1:v0.1.2" {
 		t.Errorf("dispatched %q", d)
+	}
+}
+
+// fixRelease merges a release PR for version on repo's default branch and tags it, with a release
+// workflow run of the tag in status (conclusion when completed); tick doesn't replace the run.
+func fixRelease(w *world, repo, version, status, conclusion string) *Run {
+	r := w.get(repo)
+	r.main = repo + "-fix"
+	r.manifests[r.main] = map[string]string{RootPackage: version}
+	r.tags[r.main] = []string{"v" + version}
+	r.runs["release"+r.main] = []Run{{ID: w.nextID(), Path: ".github/workflows/release.yml", HeadBranch: "v" + version,
+		Status: status, Conclusion: conclusion, URL: "https://release-run"}}
+	return &r.runs["release"+r.main][0]
+}
+
+// A fix release whose release workflow failed is never probed: the check stays failed and says
+// why, until the workflow is re-run and succeeds.
+func TestGateWaitsForTheFixReleaseWorkflow(t *testing.T) {
+	w := mockWorld(t)
+	w.probeFail["mock-plugin-1"] = true
+	e := w.engine(trainDay)
+	open(t, w, e, StartOptions{Manifest: "repos.mock.yaml"})
+	drive(t, w, e, 30)
+	runs := len(w.gateRuns)
+	delete(w.probeFail, "mock-plugin-1")
+	release := fixRelease(w, "mock-plugin-1", "0.1.2", "completed", "failure")
+	drive(t, w, e, 3)
+	st := w.state(1)
+	g, p1 := st.GateCheck("mock-plugin-1"), st.Repo("mock-plugin-1")
+	want := "the release workflow of v0.1.2 failed: https://release-run; re-run it and the gate probes v0.1.2"
+	if len(w.gateRuns) != runs || g.Result != GateFailed || g.Version != "0.1.1" || g.Detail != want ||
+		p1.Hold != Blocked || !strings.Contains(p1.Detail, want) || !w.issues[0].Open {
+		t.Fatalf("%d runs -> %d, check %+v, repo %+v", runs, len(w.gateRuns), g, p1)
+	}
+	// A pending check (after /retry) fails on the same release rather than probing.
+	w.say(1, "owner", "/retry mock-plugin-1")
+	drive(t, w, e, 3)
+	if g := w.state(1).GateCheck("mock-plugin-1"); len(w.gateRuns) != runs || g.Result != GateFailed || g.Detail != want {
+		t.Fatalf("after /retry: %d runs -> %d, check %+v", runs, len(w.gateRuns), g)
+	}
+	release.Conclusion = "success" // re-run
+	drive(t, w, e, 30)
+	st = w.state(1)
+	if g := st.GateCheck("mock-plugin-1"); len(w.gateRuns) != runs+1 || g.Result != GatePassed || g.Version != "0.1.2" || w.issues[0].Open {
+		t.Fatalf("after the re-run: %d runs -> %d, check %+v\n%s", runs, len(w.gateRuns), g, w.issues[0].Body)
 	}
 }
 
