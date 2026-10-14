@@ -14,7 +14,7 @@ public repos.
 | Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. A repo's fixes go into one `[SECURITY]` PR per package manager, `renovate/security-<manager>` (e.g. `renovate/security-gomod`), outside the non-major group and the concurrent-PR limit; it auto-merges. A major fix gets its own, `renovate/major-security-<manager>`, for a human. See [Why security fixes are grouped](#why-security-fixes-are-grouped). Every fix is `fix(deps)` (`vulnerabilityAlerts.semanticCommitType: "fix"`), so it releases: Renovate forces the `vulnerabilityAlerts` settings onto each security update over the package rules, while the depType rules alone still let one through as `chore(deps)`, which release-please hides ([mock-plugin-2#14](https://github.com/compliance-framework/mock-plugin-2/pull/14)). |
 | Waiting period | `minimumReleaseAge: "7 days"` with `internalChecksFilter: "strict"`: no branch or PR before a release is a week old. An update with no release timestamp waits too (Renovate's default `minimumReleaseAgeBehaviour`). |
 | Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain and the `golang` image are in it. Majors get their own PRs. |
-| Auto-merge | The non-major group (and every non-major vulnerability fix) auto-merges, but Renovate merges it itself (`platformAutomerge: false`, `automergeType: "pr"`, `automergeStrategy: "squash"`): on its next run after the checks pass, Renovate squash-merges the PR through the API as `ccf-release-bot`. These PRs are also labelled `renovate:automerge` (one rule, `addLabels`), and `renovate.yml`'s [merge pass](#the-merge-pass) merges them right after each live run, since Renovate merges only one per repo per run. Majors and OPA wait for a human and don't get the label. See [Why Renovate merges, not GitHub](#why-renovate-merges-not-github). |
+| Auto-merge | The non-major group (and every non-major vulnerability fix) auto-merges, but Renovate merges it itself (`platformAutomerge: false`, `automergeType: "pr"`, `automergeStrategy: "squash"`): on its next run after the checks pass, Renovate squash-merges the PR through the API as `ccf-release-bot`. These PRs are also labelled `renovate:automerge` (one rule, `addLabels`), and `renovate.yml`'s [merge pass](#the-merge-pass) merges them right after each live run, since Renovate merges only one per repo per run (it squash-merges with the same commit title and message Renovate's merge gets). Majors and OPA updates don't get the label: majors, and OPA in the api, wait for a human. See [Why Renovate merges, not GitHub](#why-renovate-merges-not-github). |
 | Rebasing | `rebaseWhen: "conflicted"`: a branch is rebased only when it conflicts with `main`, not every time it falls behind. See [Why security fixes are grouped](#why-security-fixes-are-grouped). |
 | Limits | `prHourlyLimit: 1`, `prConcurrentLimit: 8` per repo. With a live run's shard of at most 15 repos, that bounds the PRs across the org; see [The org-wide throttle](#the-org-wide-throttle). |
 | Commits | Semantic: `fix(deps)` for runtime dependencies (Go `require`, npm `dependencies`, a Dockerfile's final stage, the Go `toolchain` directive), which release-please releases, and `chore(deps)` for everything else (dev, CI, actions). A group takes the highest type of its updates, so a group with any runtime update is `fix(deps)`. Security fixes are always `fix(deps)`, whatever their dependency type (see Vulnerability fixes). |
@@ -39,8 +39,9 @@ its next run that finds the checks green, and only one PR per repo. `renovate.ym
 visits each repo's shard in turn, so without more a PR would merge up to one rotation (at most 5
 runs with every batch active, about 5 hours when GitHub starts the runs on time) after its checks
 pass. The [merge pass](#the-merge-pass) after each live run closes most of that gap: it waits up to
-20 minutes for the checks of the PRs Renovate just opened or rebased, and merges every green one. The 8th/22nd `schedule` doesn't delay this:
-it only limits when new branches are created, while Renovate keeps updating and merging existing PRs on the other days
+20 minutes for the checks of the PRs Renovate just opened or rebased, and merges every green one.
+The 8th/22nd `schedule` doesn't delay this: it only limits when new branches are created, while
+Renovate keeps updating and merging existing PRs on the other days
 (its defaults `updateNotScheduled: true` and `automergeSchedule: ["at any time"]`, which the preset
 leaves alone). A PR whose checks fail stays open, and Renovate updates or recreates it
 on later runs as usual. The repo's "allow auto-merge" setting is no longer used by Renovate.
@@ -210,7 +211,7 @@ run, `renovate.yml` runs `renovate-config merge` on the run's shard. It shares i
 PR's checks are read and what is pending), and merges each open PR that is all of:
 
 - labelled `renovate:automerge`: the preset adds it to what it auto-merges, the non-major group and
-  non-major security fixes, and never to majors or OPA;
+  non-major security fixes, and never to majors or OPA updates;
 - from a `renovate/*` branch of the repo itself (not a fork), opened by `--author` (the workflow
   passes the token's app, `ccf-release-bot[bot]`);
 - with every commit authored by `--author`: Renovate commits through the API as the app, so a commit
