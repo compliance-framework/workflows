@@ -280,6 +280,33 @@ func (g *GitHub) PullRequest(ctx context.Context, repo string, number int) (*PR,
 	return &pr, err
 }
 
+// PRCommitAuthors returns the author login of each commit of PR number, oldest first; "" for a
+// commit whose author GitHub can't link to an account. GitHub lists at most 250 commits.
+func (g *GitHub) PRCommitAuthors(ctx context.Context, repo string, number int) ([]string, error) {
+	var out []string
+	for page := 1; page <= 3; page++ {
+		var commits []struct {
+			Author *struct {
+				Login string `json:"login"`
+			} `json:"author"`
+		}
+		if err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d/commits?per_page=100&page=%d", g.Owner, repo, number, page), nil, &commits); err != nil {
+			return nil, err
+		}
+		for _, c := range commits {
+			login := ""
+			if c.Author != nil {
+				login = c.Author.Login
+			}
+			out = append(out, login)
+		}
+		if len(commits) < 100 {
+			break
+		}
+	}
+	return out, nil
+}
+
 // CheckRun is a run of a check on a commit.
 type CheckRun struct {
 	ID         int64     `json:"id"`

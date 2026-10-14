@@ -184,7 +184,8 @@ start time, then ID) decides.
 Any other merge GitHub refuses is a warning; failing to list a repo's PRs, or to read a PR or its check,
 fails the run (the other repos still run). It removes no label. `--dry-run` prints what it would
 merge and doesn't wait. The train merges its own train-mode bump PRs; one merge pass merging
-them first is harmless.
+them first is harmless. `renovate.yml` runs the same logic (`internal/automerge`) on Renovate's
+PRs with `renovate-config merge` ([renovate.md](renovate.md#the-merge-pass)).
 
 ## The `ccf-bump-sync` workflow
 

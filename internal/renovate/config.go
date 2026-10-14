@@ -34,6 +34,11 @@ type Options struct {
 // repos the token reaches and whether anything is written.
 var runnerKeys = []string{"platform", "autodiscover", "repositories", "onboarding", "requireConfig", "dryRun", "statusCheckWhen"}
 
+// AutomergeLabel marks the PRs the preset auto-merges (the non-major group and non-major
+// vulnerability fixes), which `renovate-config merge` merges after each live run, so a repo gets
+// more than Renovate's one merge per run (docs/renovate.md#the-merge-pass).
+const AutomergeLabel = "renovate:automerge"
+
 // MaxLiveRepos is the most repos one live run works on (Shard). With the preset's prHourlyLimit of 1,
 // it bounds the non-vulnerability PRs one renovate.yml run opens across the org
 // (docs/renovate.md#the-org-wide-throttle).

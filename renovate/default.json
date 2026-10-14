@@ -48,6 +48,16 @@
       "automergeType": "pr"
     },
     {
+      "description": "What the preset auto-merges (the non-major group and non-major security fixes) is labelled renovate:automerge, so renovate.yml's merge pass merges it right after the run: Renovate merges at most one PR per repo per run. Not majors or OPA, which wait for a human (docs/renovate.md#the-merge-pass).",
+      "matchPackageNames": [
+        "!github.com/open-policy-agent/opa",
+        "!open-policy-agent/opa",
+        "!openpolicyagent/opa"
+      ],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "addLabels": ["renovate:automerge"]
+    },
+    {
       "description": "Majors open a PR for a human, labelled needs-human (docs/attention.md).",
       "matchUpdateTypes": ["major"],
       "automerge": false,

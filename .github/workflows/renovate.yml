@@ -8,6 +8,8 @@ name: renovate
 # one non-vulnerability PR per repo an hour, so one run opens at most about 15, and two runs close
 # together about 30 (docs/renovate.md#the-org-wide-throttle). A scheduled run uses the dispatch
 # defaults below, except that it runs live when the repo variable RENOVATE_LIVE is "true".
+# After a live run, a merge pass merges the shard's green renovate:automerge PRs as the bot: Renovate
+# itself merges at most one PR per repo per run (docs/renovate.md#the-merge-pass).
 
 on:
   schedule:
@@ -48,8 +50,9 @@ jobs:
     # This repo's release environment holds the ccf-release-bot secrets; only main may use it
     # (repo-settings), so a workflow on another branch can't read them.
     environment: release
-    # The app token lasts an hour, which is why a live run takes at most 15 repos.
-    timeout-minutes: 60
+    # The app token lasts an hour, which is why a live run takes at most 15 repos. Renovate gets 55
+    # minutes of it, the merge pass a fresh token and 25 minutes (its 20-minute wait plus setup).
+    timeout-minutes: 90
     env:
       # A scheduled run has no inputs: keep these fallbacks equal to the dispatch defaults.
       MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
@@ -105,9 +108,34 @@ jobs:
           permission-checks: read # branch status
           permission-vulnerability-alerts: read # Dependabot alerts, for vulnerability fixes
       - uses: renovatebot/github-action@230ce922b08968d0a4f6f70f295601daff09ef1d # v46.3.7
+        timeout-minutes: 55 # within the token's hour
         with:
           configurationFile: ${{ steps.config.outputs.path }}
           token: ${{ steps.token.outputs.token }}
           renovate-version: 44.145.1
         env:
           LOG_LEVEL: ${{ inputs.log_level || 'info' }}
+      # A fresh token: Renovate may have used most of the first one's hour. Scoped to the same
+      # shard, and only after the select step succeeded: an empty list would mint a token for every
+      # repo the app is installed on (all of them). After a failed or timed-out Renovate step too:
+      # the PRs it opened earlier are still there.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: merge-token
+        if: ${{ !cancelled() && env.DRY_RUN == 'off' && steps.select.outcome == 'success' && steps.select.outputs.repos != '' }}
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ steps.select.outputs.repos }}
+          permission-contents: write # merges
+          permission-pull-requests: write # merges; lists PRs and their commits
+          permission-workflows: write # merging a PR that edits .github/workflows files
+          permission-checks: read # ci / required
+      - name: Merge green Renovate PRs
+        if: ${{ !cancelled() && steps.merge-token.outcome == 'success' }}
+        timeout-minutes: 25
+        env:
+          GH_TOKEN: ${{ steps.merge-token.outputs.token }}
+          SLUG: ${{ steps.merge-token.outputs.app-slug }}
+          REPOS: ${{ steps.select.outputs.repos }}
+        run: go run ./cmd/renovate-config merge --manifest "$MANIFEST" --repos "$REPOS" --author "${SLUG}[bot]" --dry-run "$DRY_RUN" --wait 20m

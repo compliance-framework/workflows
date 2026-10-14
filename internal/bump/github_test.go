@@ -310,3 +310,36 @@ func TestExpectsCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubPRCommitAuthors(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.URL.RequestURI())
+		switch r.URL.Path {
+		case "/repos/o/ui/pulls/3/commits":
+			if r.URL.Query().Get("page") == "2" {
+				fmt.Fprint(w, `[{"author":{"login":"someone"}}]`)
+				return
+			}
+			commits := []string{`{"author":{"login":"ccf-release-bot[bot]"}}`, `{"author":null}`}
+			for len(commits) < 100 {
+				commits = append(commits, `{"author":{"login":"ccf-release-bot[bot]"}}`)
+			}
+			fmt.Fprintf(w, `[%s]`, strings.Join(commits, ","))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	g := &GitHub{BaseURL: srv.URL, Owner: "o"}
+	authors, err := g.PRCommitAuthors(context.Background(), "ui", 3)
+	if err != nil || len(authors) != 101 || authors[0] != "ccf-release-bot[bot]" || authors[1] != "" || authors[100] != "someone" {
+		t.Errorf("PRCommitAuthors = %d authors %.3q…, %v; want both pages, \"\" for an unlinked author", len(authors), authors, err)
+	}
+	if want := "/repos/o/ui/pulls/3/commits?per_page=100&page=1\n/repos/o/ui/pulls/3/commits?per_page=100&page=2"; strings.Join(got, "\n") != want {
+		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
+	}
+	if _, err := g.PRCommitAuthors(context.Background(), "ui", 4); err == nil {
+		t.Error("PRCommitAuthors of a missing PR: want an error")
+	}
+}
