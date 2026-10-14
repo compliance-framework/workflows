@@ -1,2 +1,5 @@
 lisa-addressed:
 - 7088fef21043 uncached-dry-run-tag-lookup: tagged() now uses and fills b.commits; TestDryRunTagReadOnce asserts one tag read for two repos.
+
+lisa-selfreview:
+pass 2 (strict): approve, no findings. Gate green: gofmt, go vet, go test -race ./..., actionlint v1.7.12, cmd/manifest on repos.yaml and repos.mock.yaml.
