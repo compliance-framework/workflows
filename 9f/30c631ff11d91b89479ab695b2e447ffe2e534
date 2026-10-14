@@ -1,0 +1,7 @@
+lisa-design:
+- Root cause of ui#355 is the uiScript updater, not a regex on the url line: it emits a ref whenever scripts/sync-agentconfig-conformance.sh exists, with Current "" (unknown), so every sync planned api -> target and held the PR, even when running the script changed nothing.
+- Templated refs are filtered once, centrally, in ScanAll (any of $ { } % < > in Current) rather than in each updater's regexp, so every current and future updater gets it.
+- "Applied" is decided by re-scanning the checkout after ApplyAll (Plan.Settle): file changed AND pin moved (multiset count, since identical refs in two jobs are interchangeable). Chosen over changing the Updater.Apply interface to return applied changes (7 implementations, the parallel merge.go work).
+- A pin whose current version can't be read (Current "") is applied iff its file changed; unchanged means already at target -> UpToDate + "unchanged" line, NOT a warning (otherwise every ui sync would warn). Only other unapplied changes warn.
+- uiScript Ref.File is now the file the script writes (the conformance fixture / src/api-version.json), not the script path, so "file changed" is meaningful; Key stays the script path (Apply runs it).
+- merge.go and openPR label handling untouched: a same-day re-run of a PR left with needs-human does not remove it (by design: a person may have added it).
