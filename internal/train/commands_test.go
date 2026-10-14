@@ -75,7 +75,7 @@ func TestRetryReleasePlease(t *testing.T) {
 	w.repo("mock-api", "0.1.0").pending("0.2.0").failReleasePlease = true
 	w.lagReruns = true
 	e := w.engine(trainDay)
-	if err := e.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api"}}); err != nil {
+	if err := e.Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api"}}); err != nil {
 		t.Fatal(err)
 	}
 	drive(t, w, e, 3)
@@ -116,7 +116,7 @@ func TestRetryReleasePleaseWithoutARecordedRun(t *testing.T) {
 	w := newWorld(t)
 	w.repo("mock-api", "0.1.0").pending("0.2.0").failReleasePlease = true
 	e := w.engine(trainDay)
-	if err := e.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api"}}); err != nil {
+	if err := e.Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api"}}); err != nil {
 		t.Fatal(err)
 	}
 	drive(t, w, e, 3)
