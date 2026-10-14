@@ -4,3 +4,8 @@ open == true, or mode == start and the run is not a dry run, so it equals the sp
 `open == 'true' || (mode == 'start' && write == 'true')` with one fewer term and no second source of truth.
 Dry-run starts never read commands: Start() runs plan() which sets StatusFinished and save() closes the issue
 without train:open, so the --watch loop finds no open train and run() skips commands() for DryRun states.
+
+lisa-selfreview:
+Pass 1 (lenient, single-change PR): no blocker/must-fix. Considered: a live start with an empty repo selection
+now mints a members token that the skipped "Run the train" step never uses (harmless, scoped to workflows,
+members read). Deferred, not worth a third term in the condition.
