@@ -7,3 +7,10 @@ lisa-design:
 - The cmd-level "planned change not applied" warning test is dropped: only the mock script's no-op could reach it. Plan.Settle's dropped path stays unit-tested in internal/bump TestSettle.
 - Historical evidence references in docs (mock-plugin-2#14, mock-ui #13/#14, "seen on the mocks in run ...") are kept: they explain past decisions, not instructions.
 - Commit type chore: no consumer-facing change needs a release; plugin-release.yml has no callers (default-branch scan of all 99 non-archived org repos).
+
+lisa-selfreview:
+Pass 1 (gate green: go test -race, go vet, gofmt, actionlint v1.7.12, cmd/manifest on repos.yaml):
+- question deleted-workflow-not-breaking (.github/workflows/plugin-release.yml): chore: vs a breaking/released change for deleting a reusable workflow with no callers. Listed for reviewers.
+- question plan-doc-manifest-input (.github/workflows/repo-settings.yml): local-dev's W3 plan dispatches repo-settings with manifest=repos.yaml, which fails once the input is gone. Out of this repo; listed for reviewers.
+- nit dropped-warning-untested (cmd/ccf-bump/settle_test.go TestSettledPR): dismissed/deferred. No real updater can no-op after a known version; Plan.Settle's dropped path stays unit-tested in internal/bump.
+Verdict: approve (no fix-worthy findings).
