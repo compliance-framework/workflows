@@ -66,7 +66,7 @@ func (b *bumper) summary() {
 
 // config derives the updaters' settings for repo from its kind and dependencies.
 func (b *bumper) config(r manifest.Repo) bump.Config {
-	c := bump.Config{Owner: b.o.owner, Run: run1}
+	c := bump.Config{Owner: b.o.owner, Run: runner(b.o.owner)}
 	service := ""
 	for _, d := range r.DependsOn {
 		i := slices.IndexFunc(b.m.Repos, func(x manifest.Repo) bool { return x.Name == d })
@@ -90,15 +90,51 @@ func (b *bumper) config(r manifest.Repo) bump.Config {
 	return c
 }
 
-// run1 runs a command in dir (go, or the repo's own sync script), with its output on stderr and
-// without the GitHub token in its environment.
-func run1(ctx context.Context, dir, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir, cmd.Stdout, cmd.Stderr, cmd.Env = dir, os.Stderr, os.Stderr, withoutTokens(os.Environ())
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+// runner returns the bump.Runner that runs a command in dir (go, or the repo's own sync script),
+// with its output on stderr and the environment of commandEnv.
+func runner(owner string) bump.Runner {
+	return func(ctx context.Context, dir, name string, args ...string) error {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Dir, cmd.Stdout, cmd.Stderr, cmd.Env = dir, os.Stderr, os.Stderr, commandEnv(os.Environ(), owner)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+		}
+		return nil
 	}
-	return nil
+}
+
+// commandEnv returns env without the GitHub token (withoutTokens) and with owner's modules in
+// GOPRIVATE, so go fetches them from GitHub directly, never through proxy.golang.org or
+// sum.golang.org (docs/ccf-bump.md#why-org-modules-are-fetched-directly). The pattern is appended
+// to a GOPRIVATE already set, and to GONOPROXY and GONOSUMDB when they are set (they override
+// GOPRIVATE).
+func commandEnv(env []string, owner string) []string {
+	pattern := "github.com/" + owner + "/*"
+	vals := map[string]string{} // the last value of each, as exec uses
+	env = slices.DeleteFunc(withoutTokens(env), func(kv string) bool {
+		k, v, _ := strings.Cut(kv, "=")
+		if k == "GOPRIVATE" || k == "GONOPROXY" || k == "GONOSUMDB" {
+			vals[k] = v
+			return true
+		}
+		return false
+	})
+	add := func(list string) string {
+		if list == "" {
+			return pattern
+		}
+		if slices.Contains(strings.Split(list, ","), pattern) {
+			return list
+		}
+		return list + "," + pattern
+	}
+	env = append(env, "GOPRIVATE="+add(vals["GOPRIVATE"]))
+	for _, k := range []string{"GONOPROXY", "GONOSUMDB"} {
+		if vals[k] != "" {
+			env = append(env, k+"="+add(vals[k]))
+		}
+	}
+	return env
 }
 
 // withoutTokens drops GH_TOKEN and GITHUB_TOKEN from env.
@@ -296,6 +332,11 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	if len(plan.Changes) == 0 {
 		return false, nil
 	}
+	if b.o.dryRun {
+		if err := b.tagged(ctx, plan.Changes); err != nil {
+			return false, err
+		}
+	}
 	if err := bump.ApplyAll(ctx, dir, us, plan.Changes); err != nil {
 		return false, err
 	}
@@ -352,6 +393,25 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 		return false, err
 	}
 	return true, b.openPR(ctx, name, branch, title, body, held)
+}
+
+// tagged checks, for a dry run, that the version each Go module change moves to is tagged in its
+// repo, before go get asks for it. The train's dry run plans versions its stages have not released
+// yet; asking proxy.golang.org or sum.golang.org about one makes them cache "unknown revision"
+// for about 30 minutes, which failed the live run that followed. Direct fetches (commandEnv) skip
+// them, and this skips go get altogether.
+func (b *bumper) tagged(ctx context.Context, changes []bump.Change) error {
+	seen := map[string]bool{}
+	for _, c := range changes {
+		if !c.GoModule() || seen[c.Dep+"@"+c.To] {
+			continue
+		}
+		seen[c.Dep+"@"+c.To] = true
+		if _, err := b.e.gh.TagCommit(ctx, c.Dep, c.To); err != nil {
+			return fmt.Errorf("dry run: tag %s of %s not found (not tagged yet?), so go get was not run: %w", c.To, c.Dep, err)
+		}
+	}
+	return nil
 }
 
 // settle returns the plan with only the changes applied to the checkout in dir (bump.Plan.Settle),

@@ -149,7 +149,9 @@ the issue comment is posted either way.
 (a bump alone means a patch), runs `ccf-bump --pr --dry-run` with those planned versions, and
 comments the plan on the issue and in the Slack thread, with the chart issues it would open. It
 merges, pushes and opens nothing, and closes the issue in the same run. ccf-bump can't plan a pin
-that needs the planned tag to exist (a pseudo-version, an OPA version); the plan says so.
+that needs the planned tag to exist (a pseudo-version, an OPA version, a Go module: a dry run never
+runs `go get` for an untagged version, see
+[ccf-bump.md](ccf-bump.md#why-org-modules-are-fetched-directly)); the plan says so.
 
 ## `train.yml`
 

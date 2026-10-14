@@ -52,7 +52,9 @@ ccf-bump list [--repos a,b] [--chunk 10] [--dry-run]
   them as JSON chunks of at most N repos, in stage order:
   `[{"index":1,"of":4,"repos":"api,gooci,..."},...]`.
 - Environment: `GH_TOKEN` (API, clone and push), `GITHUB_API_URL`, and the git identity in
-  `GIT_AUTHOR_*`/`GIT_COMMITTER_*`.
+  `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. The commands it runs (`go`, the ui sync script) get neither
+  token, and get `GOPRIVATE=github.com/<owner>/*`
+  ([why](#why-org-modules-are-fetched-directly)).
 
 ## Updaters
 
@@ -154,6 +156,25 @@ inside a flow mapping
 (`with: {...}`) fails the repo's bump, for a human to remove. A ref that is not a release
 (`--set workflows=main`, a SHA) is used as given: every other pin moves to it, needing a human,
 and its version comment is dropped.
+
+## Why org modules are fetched directly
+
+Every command ccf-bump runs gets `github.com/<owner>/*` in `GOPRIVATE` (appended to a value
+already set, and to `GONOPROXY` and `GONOSUMDB` when those are set, since they override it). So
+`go get` and `go mod tidy` fetch the org's modules from GitHub with git and skip
+proxy.golang.org and sum.golang.org; `go.sum` is still checked. The repos are public, so the fetch
+needs no credentials, and ccf-bump passes it none.
+
+Through the public proxy, a version asked for before its tag exists is cached as "unknown
+revision" (404) for about 30 minutes. On 2026-10-14 a train dry run asked for `api` v0.21.1,
+`gooci` v0.0.9 and `agent` v0.9.2 before they were released; the live train's bumps then failed
+with `go get ... exit status 1` for half an hour, while a direct fetch of the same versions
+worked at once.
+
+A dry run (`--dry-run`) also checks that each Go module version it would move to is tagged in its
+repo, and fails that repo, after printing its plan, without running `go get` when one isn't. The
+train's dry run plans versions its stages haven't released yet, so it never asks for them; its
+plan says ccf-bump couldn't plan the repo.
 
 ## Why ccf-bump merges, not GitHub
 

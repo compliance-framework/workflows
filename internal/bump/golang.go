@@ -18,6 +18,9 @@ type goMod struct{ c Config }
 
 func (goMod) Name() string { return "go.mod" }
 
+// GoModule reports whether c moves a Go module requirement: applying it runs go get for c.To.
+func (c Change) GoModule() bool { return c.Updater == goMod{}.Name() }
+
 // repoOf returns the repo a github.com/<owner>/<repo>[/...] path is in, or "".
 func repoOf(owner, path string) string {
 	rest, ok := strings.CutPrefix(path, "github.com/"+owner+"/")

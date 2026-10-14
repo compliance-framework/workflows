@@ -603,6 +603,104 @@ func TestWithoutTokens(t *testing.T) {
 	}
 }
 
+func TestCommandEnv(t *testing.T) {
+	const org = "github.com/compliance-framework/*"
+	for name, tc := range map[string]struct{ env, want []string }{
+		"unset": {
+			env:  []string{"PATH=/bin", "GH_TOKEN=x", "GITHUB_TOKEN=y"},
+			want: []string{"PATH=/bin", "GOPRIVATE=" + org},
+		},
+		"empty": {env: []string{"GOPRIVATE="}, want: []string{"GOPRIVATE=" + org}},
+		"appended": {
+			env:  []string{"GOPRIVATE=example.com/*", "PATH=/bin"},
+			want: []string{"PATH=/bin", "GOPRIVATE=example.com/*," + org},
+		},
+		"already there": {
+			env:  []string{"GOPRIVATE=example.com/*," + org},
+			want: []string{"GOPRIVATE=example.com/*," + org},
+		},
+		"last value wins": {
+			env:  []string{"GOPRIVATE=a.com/*", "GOPRIVATE=b.com/*"},
+			want: []string{"GOPRIVATE=b.com/*," + org},
+		},
+		// Set explicitly, they override GOPRIVATE, so they get the pattern too; unset, they follow it.
+		"GONOPROXY and GONOSUMDB": {
+			env:  []string{"GONOPROXY=example.com/*", "GONOSUMDB=other.com/*", "GOFLAGS=-mod=mod"},
+			want: []string{"GOFLAGS=-mod=mod", "GOPRIVATE=" + org, "GONOPROXY=example.com/*," + org, "GONOSUMDB=other.com/*," + org},
+		},
+	} {
+		if got := commandEnv(tc.env, "compliance-framework"); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: commandEnv = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// fakeGo puts a go on PATH that logs its arguments and the environment it got to the returned
+// file, and changes nothing.
+func fakeGo(t *testing.T) (log string) {
+	bin := t.TempDir()
+	log = filepath.Join(t.TempDir(), "go.log")
+	script := "#!/bin/sh\nprintf '%s|GOPRIVATE=%s|GONOSUMDB=%s|GH_TOKEN=%s\\n' \"$*\" \"$GOPRIVATE\" \"$GONOSUMDB\" \"$GH_TOKEN\" >> " + log + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+// goModRepo commits a go.mod requiring the org module mock-api to mock-agent's clone and returns
+// the args of a train dry run of mock-agent with mock-api v0.1.0.
+func goModRepo(t *testing.T, root string) []string {
+	dir := filepath.Join(root, "clones", "mock-agent")
+	mod := "module github.com/compliance-framework/mock-agent\n\ngo 1.26.1\n\nrequire github.com/compliance-framework/mock-api v0.0.9\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "--quiet", "-m", "go.mod")
+	return []string{"--repo", "mock-agent", "--manifest", filepath.Join(root, "repos.yaml"), "--mode", "train",
+		"--set", "mock-api=0.1.0", "--pr", "--dry-run", "--clones", filepath.Join(root, "clones")}
+}
+
+// TestGoFetchesOrgModulesDirectly: go runs with the org's modules in GOPRIVATE (kept: one already
+// set) and without the token.
+func TestGoFetchesOrgModulesDirectly(t *testing.T) {
+	root, e, gh, out := setup(t)
+	log := fakeGo(t)
+	t.Setenv("GOPRIVATE", "example.com/*")
+	t.Setenv("GONOSUMDB", "")
+	t.Setenv("GH_TOKEN", "secret")
+	gh.commits = map[string]string{"mock-api@v0.1.0": "0123456789abcdef0123456789abcdef01234567"}
+	if err := run(context.Background(), goModRepo(t, root), e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	got, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const env = "|GOPRIVATE=example.com/*,github.com/compliance-framework/*|GONOSUMDB=|GH_TOKEN=\n"
+	if want := "get github.com/compliance-framework/mock-api@v0.1.0" + env + "mod tidy" + env; string(got) != want {
+		t.Errorf("go ran:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestDryRunUntaggedVersion: a dry run doesn't run go get for a version that isn't tagged yet (the
+// train plans versions before they are released); it prints the plan and fails the repo.
+func TestDryRunUntaggedVersion(t *testing.T) {
+	root, e, _, out := setup(t)
+	log := fakeGo(t)
+	err := run(context.Background(), goModRepo(t, root), e)
+	if err == nil || !strings.Contains(err.Error(), "dry run: tag v0.1.0 of mock-api not found (not tagged yet?), so go get was not run") {
+		t.Errorf("err = %v", err)
+	}
+	if !strings.Contains(out.String(), "bump      mock-api     v0.0.9 -> v0.1.0") {
+		t.Errorf("output lacks the plan:\n%s", out)
+	}
+	if got, err := os.ReadFile(log); err == nil {
+		t.Errorf("go ran:\n%s", got)
+	}
+}
+
 func TestLabels(t *testing.T) {
 	automerge := []bump.PRLabel{{Name: bump.AutomergeLabel}}
 	for name, tc := range map[string]struct {
