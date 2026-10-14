@@ -4,3 +4,6 @@ lisa-design:
 - While the fix is unpublished the check keeps its Result (failed stays failed, pending stays pending) and only its Detail changes: no flip-flopping, no dispatch of the old version.
 - A failed release workflow of the fix goes through failCheck (repo blocked, detail says so); for an already-failed check the Slack key (run ID + old version) is unchanged so nothing is re-posted.
 - First-probe path: gateChecks are only built once StageOpen(gs), i.e. every earlier repo is Released (publish() already required tag + release workflow success) or Skipped, so it had no race; it now also goes through the same check if a newer version appears before dispatch.
+
+lisa-selfreview:
+- pass 1: approve, no findings. Checked: publish() behaviour unchanged after extracting releaseWorkflows (publish_test passes); TagsAt now sorted (publish sorts anyway); tests fail against the old gate logic (mutation check: both new/updated gate tests dispatch v0.1.2 early); failCheck dedupe key unchanged so an already-failed check isn't re-posted.
