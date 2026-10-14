@@ -1,0 +1,6 @@
+lisa-design:
+- "Published" for a fix release reuses publish()'s rule via the extracted releaseWorkflows helper: the version's release tag exists and the latest release-event run of each workflow for that tag on the tag's commit succeeded. No new notion of "published".
+- The fix's commit is found from the tag (new Repos.Tags: tag -> commit), not from the default branch head: other commits may land after the release PR, so the head need not be the tagged commit.
+- While the fix is unpublished the check keeps its Result (failed stays failed, pending stays pending) and only its Detail changes: no flip-flopping, no dispatch of the old version.
+- A failed release workflow of the fix goes through failCheck (repo blocked, detail says so); for an already-failed check the Slack key (run ID + old version) is unchanged so nothing is re-posted.
+- First-probe path: gateChecks are only built once StageOpen(gs), i.e. every earlier repo is Released (publish() already required tag + release workflow success) or Skipped, so it had no race; it now also goes through the same check if a newer version appears before dispatch.
