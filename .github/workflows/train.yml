@@ -127,9 +127,12 @@ jobs:
           permission-workflows: ${{ steps.plan.outputs.write == 'true' && 'write' || '' }}
       # Comment commands need the commenter's org role. The app may lack Members read: then the
       # step fails, the token is empty and the train refuses commands instead of failing.
+      # Every live run may read commands: one on an open train, and one that starts a live train
+      # and keeps reconciling it (--watch). A dry run closes its train in the run that starts it
+      # and reads none, so write (open, or a live start) is the condition.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: members
-        if: steps.plan.outputs.open == 'true'
+        if: steps.plan.outputs.write == 'true'
         continue-on-error: true
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
