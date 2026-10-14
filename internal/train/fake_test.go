@@ -30,8 +30,12 @@ type world struct {
 	merges   []string           // "repo#n"
 	releases []string           // repos, in the order their release PRs merged
 	reruns   []int64
-	external []string // issues opened in repos
-	id       int64
+	// lagReruns: a re-run shows up on the next tick, not right after RerunFailed (GitHub lists the
+	// failed attempt for a while); lagged holds those re-runs.
+	lagReruns bool
+	lagged    []int64
+	external  []string // issues opened in repos
+	id        int64
 	// manualBumps: ccf-bump leaves the automerge label off; closedBumps: someone closes the bump PRs.
 	manualBumps, closedBumps bool
 	mergeErrs                []error // returned by the first merges
@@ -81,7 +85,7 @@ func (w *world) repo(name, version string) *fakeRepo {
 		checks: map[string][]Check{}, runs: map[string][]Run{}, tags: map[string][]string{}, notes: map[string]string{}}
 	r.manifests[r.main] = map[string]string{RootPackage: version}
 	r.rpDone = r.main
-	r.runs["push"+r.main] = []Run{{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: "success"}}
+	r.runs["push"+r.main] = []Run{{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: "success", Attempt: 1}}
 	w.repos[name] = r
 	return r
 }
@@ -115,6 +119,10 @@ func (w *world) green(r *fakeRepo, sha string, ok bool) {
 // tick plays release-please on every repo whose main moved, the release workflows of
 // tagged releases, and the gate's runs.
 func (w *world) tick() {
+	for _, id := range w.lagged {
+		w.rerun(id)
+	}
+	w.lagged = nil
 	for _, g := range w.gateRuns {
 		if g.run.Status != "completed" {
 			w.finishGateRun(g)
@@ -127,7 +135,7 @@ func (w *world) tick() {
 			if r.failReleasePlease {
 				c = "failure"
 			}
-			r.runs["push"+r.main] = append(r.runs["push"+r.main], Run{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: c})
+			r.runs["push"+r.main] = append(r.runs["push"+r.main], Run{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: c, Attempt: 1})
 			if r.next == "" {
 				r.next = "0.1.1" // a patch: the repos the tests bump start at 0.1.0
 			}
@@ -244,17 +252,29 @@ func (w *world) Release(_ context.Context, repo, tag string) (string, string, er
 	return w.get(repo).notes[tag], "https://github.com/o/" + repo + "/releases/tag/" + tag, nil
 }
 
-// RerunFailed re-runs the run, which passes this time.
+// RerunFailed re-runs the run, which passes this time (on the next tick, with lagReruns).
 func (w *world) RerunFailed(_ context.Context, repo string, id int64) error {
 	w.reruns = append(w.reruns, id)
-	for _, runs := range w.get(repo).runs {
-		for i := range runs {
-			if runs[i].ID == id {
-				runs[i].Conclusion = "success"
+	if w.lagReruns {
+		w.lagged = append(w.lagged, id)
+		return nil
+	}
+	w.rerun(id)
+	return nil
+}
+
+// rerun makes run id's next attempt pass.
+func (w *world) rerun(id int64) {
+	for _, r := range w.repos {
+		for _, runs := range r.runs {
+			for i := range runs {
+				if runs[i].ID == id {
+					runs[i].Status, runs[i].Conclusion = "completed", "success"
+					runs[i].Attempt++
+				}
 			}
 		}
 	}
-	return nil
 }
 
 func (w *world) EnsureIssue(_ context.Context, repo, title, body string) (string, error) {

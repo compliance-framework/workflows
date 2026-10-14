@@ -78,7 +78,12 @@ type RepoState struct {
 	BumpPR    int               `json:"bump_pr,omitempty"`
 	ReleasePR int               `json:"release_pr,omitempty"`
 	MergeSHA  string            `json:"merge_sha,omitempty"`
-	FailedRun int64             `json:"failed_run,omitempty"` // a failed release run, re-run by /retry
+	// FailedRun is a failed run that /retry re-runs: a release workflow's (publishing), or
+	// release-please's (release-pr), whose failed attempt is FailedAttempt. Rerun: /retry re-ran
+	// release-please, so release-pr waits for a later attempt of it.
+	FailedRun     int64 `json:"failed_run,omitempty"`
+	FailedAttempt int   `json:"failed_attempt,omitempty"`
+	Rerun         bool  `json:"rerun,omitempty"`
 }
 
 // Status is the repo's displayed status: its hold if any, else its phase.

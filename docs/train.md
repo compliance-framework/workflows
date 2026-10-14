@@ -115,7 +115,7 @@ on an open train's issue:
 | Command | Effect |
 | --- | --- |
 | `/skip <repo>` | Skips the repo; the next stage can start without it. For a released repo with a gate check, or `stack-smoke`: passes that check. |
-| `/retry <repo>` | Clears the repo's hold and tries again: runs ccf-bump again (`bumping`), re-runs the failed jobs of a failed release workflow (`publishing`), or un-skips a skipped repo. For a released repo with a gate check, or `stack-smoke`: runs that check again. |
+| `/retry <repo>` | Clears the repo's hold and tries again: runs ccf-bump again (`bumping`), re-runs the failed jobs of a failed release-please run (`release-pr`, which then waits for the new attempt) or release workflow (`publishing`), or un-skips a skipped repo. For a released repo with a gate check, or `stack-smoke`: runs that check again. |
 | `/abort` | Stops the train and closes the issue. Nothing is reverted. |
 
 The train replies to each command. Commands from anyone else are refused, and so is every command

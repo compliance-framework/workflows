@@ -471,10 +471,11 @@ type ghRun struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	URL        string `json:"html_url"`
+	Attempt    int    `json:"run_attempt"`
 }
 
 func (x ghRun) run() Run {
-	return Run{ID: x.ID, Path: x.Path, HeadBranch: x.HeadBranch, Status: x.Status, Conclusion: x.Conclusion, URL: x.URL}
+	return Run{ID: x.ID, Path: x.Path, HeadBranch: x.HeadBranch, Status: x.Status, Conclusion: x.Conclusion, URL: x.URL, Attempt: x.Attempt}
 }
 
 // Dispatch runs workflow on the tracker repo's default branch with inputs (the gate). With
