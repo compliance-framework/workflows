@@ -27,7 +27,7 @@ const (
 // Ref is one pinned version of a dependency, as found in a repo.
 type Ref struct {
 	Updater string // the updater that found it, and rewrites it
-	Dep     string // the repo it pins (e.g. "mock-api"), DepOPA or DepWorkflows
+	Dep     string // the repo it pins (e.g. "api"), DepOPA or DepWorkflows
 	Key     string // what is pinned: a module path, an image, a YAML path, a workflow path
 	Current string // as written: "v0.1.0", "0.1.0", "alpine:3.20"; "" when unknown
 	File    string // path relative to the repo root

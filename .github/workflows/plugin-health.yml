@@ -8,11 +8,6 @@ name: plugin-health
 on:
   workflow_dispatch:
     inputs:
-      manifest:
-        description: Manifest to read the plugins from (repos.mock.yaml writes its own issue)
-        type: choice
-        options: [repos.yaml, repos.mock.yaml]
-        default: repos.yaml
       dry_run:
         description: Print the table only; don't write the issue or post
         type: boolean
@@ -56,7 +51,7 @@ jobs:
         id: plan
         env:
           ISSUE_TOKEN: ${{ github.token }}
-          MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
+          MANIFEST: repos.yaml
           EVENT: ${{ github.event_name }}
           WORKFLOW: ${{ github.event.workflow_run.name }}
         run: |
@@ -108,7 +103,7 @@ jobs:
           ISSUE_TOKEN: ${{ github.token }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ vars.SLACK_CHANNEL_RELEASES }}
-          MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
+          MANIFEST: repos.yaml
           DRY_RUN: ${{ inputs.dry_run == true }}
         run: |
           set -o pipefail

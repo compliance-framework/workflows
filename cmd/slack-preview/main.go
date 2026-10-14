@@ -129,11 +129,11 @@ func (p *previewer) reply(at slackkit.Posted, m slackkit.Message) error {
 // ciFailures posts a failing incident and a failure reply, then resolves it in place.
 func (p *previewer) ciFailures(channel string) error {
 	in := slackkit.Incident{
-		Repo: "compliance-framework/mock-api", Ref: "compliance-framework/mock-api#12", RefURL: gh + "mock-api/pull/12",
-		Title: "fix(deps): update module github.com/compliance-framework/mock-gooci to v0.4.0", Workflow: "ci",
-		Status: slackkit.Failing, SHA: "2222222", SHAURL: gh + "mock-api/commit/2222222",
+		Repo: "compliance-framework/api", Ref: "compliance-framework/api#12", RefURL: gh + "api/pull/12",
+		Title: "fix(deps): update module github.com/compliance-framework/gooci to v0.4.0", Workflow: "ci",
+		Status: slackkit.Failing, SHA: "2222222", SHAURL: gh + "api/commit/2222222",
 		FailedJobs: []string{"ci / go / test", "ci / required"}, OpenedAt: p.now.Add(-time.Hour),
-		PRURL: gh + "mock-api/pull/12", RunURL: gh + "mock-api/actions", UpdatedAt: p.now,
+		PRURL: gh + "api/pull/12", RunURL: gh + "api/actions", UpdatedAt: p.now,
 	}
 	card, err := p.api.Post(p.ctx, channel, slackkit.IncidentCard(in).Preview())
 	if err != nil {
@@ -153,8 +153,8 @@ func (p *previewer) ciFailures(channel string) error {
 // needsHuman posts a Renovate major's card, then marks it handled in place.
 func (p *previewer) needsHuman(channel string) error {
 	n := slackkit.NeedsHuman{
-		Repo: "compliance-framework/mock-agent", Ref: "compliance-framework/mock-agent#34", URL: gh + "mock-agent/pull/34",
-		Title: "fix(deps): update module github.com/compliance-framework/mock-api to v2", Why: "Renovate major update",
+		Repo: "compliance-framework/agent", Ref: "compliance-framework/agent#34", URL: gh + "agent/pull/34",
+		Title: "fix(deps): update module github.com/compliance-framework/api to v2", Why: "Renovate major update",
 		CI: ":white_check_mark: Passing", OpenedBy: "ccf-release-bot[bot]", OpenedAt: p.now.Add(-51 * time.Hour), Now: p.now,
 	}
 	card, err := p.api.Post(p.ctx, channel, slackkit.NeedsHumanCard(n).Preview())
@@ -175,10 +175,10 @@ func (p *previewer) releases(channel string) error {
 	done, run, wait := slackkit.PillDone, slackkit.PillRunning, slackkit.PillPending
 	t := slackkit.Train{Title: "Release train " + p.now.Format("2006-01"), Stage: 1, IssueURL: gh + "workflows/issues", UpdatedAt: p.now,
 		Stages: [][]slackkit.TrainRepo{
-			{repo("mock-api", run, "publishing", "v1.4.0"), repo("mock-gooci", done, "released", "v0.4.0")},
-			{repo("mock-agent", wait, "waiting", ""), repo("mock-ui", wait, "waiting", "")},
-			{repo("mock-agent-action", wait, "waiting", ""), repo("mock-plugin-1", wait, "waiting", "")},
-			{repo("mock-helm-charts", wait, "waiting", "")},
+			{repo("api", run, "publishing", "v1.4.0"), repo("gooci", done, "released", "v0.4.0")},
+			{repo("agent", wait, "waiting", ""), repo("ui", wait, "waiting", "")},
+			{repo("agent-action", wait, "waiting", ""), repo("plugin-github-settings", wait, "waiting", "")},
+			{repo("helm-charts", wait, "waiting", "")},
 		}}
 	board, err := p.api.Post(p.ctx, channel, slackkit.TrainBoard(t).Preview())
 	if err != nil {
@@ -188,19 +188,19 @@ func (p *previewer) releases(channel string) error {
 		event string
 		apply func()
 	}{
-		{":large_green_circle: `mock-api` released `v1.4.0`; stage 2 started", func() {
-			t.Stage, t.Stages[0][0] = 2, repo("mock-api", done, "released", "v1.4.0")
-			t.Stages[1] = []slackkit.TrainRepo{repo("mock-agent", run, "merging", "v0.9.0"), repo("mock-ui", run, "release-pr", "")}
+		{":large_green_circle: `api` released `v1.4.0`; stage 2 started", func() {
+			t.Stage, t.Stages[0][0] = 2, repo("api", done, "released", "v1.4.0")
+			t.Stages[1] = []slackkit.TrainRepo{repo("agent", run, "merging", "v0.9.0"), repo("ui", run, "release-pr", "")}
 		}},
-		{":large_green_circle: `mock-agent` and `mock-ui` released; stage 3 started", func() {
+		{":large_green_circle: `agent` and `ui` released; stage 3 started", func() {
 			t.Stage = 3
-			t.Stages[1] = []slackkit.TrainRepo{repo("mock-agent", done, "released", "v0.9.0"), repo("mock-ui", done, "released", "v0.2.0")}
-			t.Stages[2] = []slackkit.TrainRepo{repo("mock-agent-action", run, "bumping", ""), repo("mock-plugin-1", run, "publishing", "v0.3.0")}
+			t.Stages[1] = []slackkit.TrainRepo{repo("agent", done, "released", "v0.9.0"), repo("ui", done, "released", "v0.2.0")}
+			t.Stages[2] = []slackkit.TrainRepo{repo("agent-action", run, "bumping", ""), repo("plugin-github-settings", run, "publishing", "v0.3.0")}
 		}},
 		{":checkered_flag: Train finished: 6 repos released", func() {
 			t.Stage, t.Finished = 4, true
-			t.Stages[2] = []slackkit.TrainRepo{repo("mock-agent-action", done, "released", "v0.5.0"), repo("mock-plugin-1", done, "released", "v0.3.0")}
-			t.Stages[3] = []slackkit.TrainRepo{repo("mock-helm-charts", done, "released", "v2.1.0")}
+			t.Stages[2] = []slackkit.TrainRepo{repo("agent-action", done, "released", "v0.5.0"), repo("plugin-github-settings", done, "released", "v0.3.0")}
+			t.Stages[3] = []slackkit.TrainRepo{repo("helm-charts", done, "released", "v2.1.0")}
 		}},
 	}
 	for _, s := range steps {
@@ -224,14 +224,14 @@ func (p *previewer) digests(channel string) error {
 	}
 	d := slackkit.Digest{Title: "Release digest " + p.now.Format("2006-01"), Draft: true, IssueURL: gh + "workflows/issues",
 		Repos: []slackkit.DigestRepo{
-			release("mock-api", "v1.3.2", "v1.4.0"), release("mock-gooci", "v0.3.1", "v0.4.0"),
-			release("mock-agent", "v0.8.4", "v0.9.0"), release("mock-ui", "v0.1.3", "v0.2.0"),
-			release("mock-helm-charts", "v2.0.1", "v2.1.0"),
+			release("api", "v1.3.2", "v1.4.0"), release("gooci", "v0.3.1", "v0.4.0"),
+			release("agent", "v0.8.4", "v0.9.0"), release("ui", "v0.1.3", "v0.2.0"),
+			release("helm-charts", "v2.0.1", "v2.1.0"),
 		},
 		Highlights: []string{
-			"*mock-api*: evidence can be streamed in batches",
-			"*mock-agent*: plugins report the agent library they were built with",
-			"*mock-ui*: the dashboard shows each control's latest evidence",
+			"*api*: evidence can be streamed in batches",
+			"*agent*: plugins report the agent library they were built with",
+			"*ui*: the dashboard shows each control's latest evidence",
 		}}
 	_, err := p.api.Post(p.ctx, channel, slackkit.DigestCard(d).Preview())
 	return err

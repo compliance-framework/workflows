@@ -49,17 +49,17 @@ func TestPreviewAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"post CCI  :red_circle: CI failing · mock-api",
+		"post CCI  :red_circle: CI failing · api",
 		"reply CCI 1.000001 [Preview] :x: Failed: `ci / go / test`, `ci / required` at `2222222`",
 		"reply CCI 1.000001 [Preview] :white_check_mark: Passing again at `4444444`",
-		"update CCI 1.000001 :large_green_circle: CI resolved · mock-api",
-		"post CNH  :raising_hand: Needs a human · mock-agent",
-		"update CNH 1.000005 :white_check_mark: Handled · mock-agent",
+		"update CCI 1.000001 :large_green_circle: CI resolved · api",
+		"post CNH  :raising_hand: Needs a human · agent",
+		"update CNH 1.000005 :white_check_mark: Handled · agent",
 		"post CREL  :steam_locomotive: Release train 2026-10",
 		"update CREL 1.000007 :steam_locomotive: Release train 2026-10",
-		"reply CREL 1.000007 [Preview] :large_green_circle: `mock-api` released `v1.4.0`; stage 2 started",
+		"reply CREL 1.000007 [Preview] :large_green_circle: `api` released `v1.4.0`; stage 2 started",
 		"update CREL 1.000007 :steam_locomotive: Release train 2026-10",
-		"reply CREL 1.000007 [Preview] :large_green_circle: `mock-agent` and `mock-ui` released; stage 3 started",
+		"reply CREL 1.000007 [Preview] :large_green_circle: `agent` and `ui` released; stage 3 started",
 		"update CREL 1.000007 :steam_locomotive: Release train 2026-10",
 		"reply CREL 1.000007 [Preview] :checkered_flag: Train finished: 6 repos released",
 		"post CDIG  :memo: Release digest 2026-10 (draft)",

@@ -16,11 +16,6 @@ on:
     - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
-      manifest:
-        description: Manifest to read the repos from
-        type: choice
-        options: [repos.mock.yaml, repos.yaml]
-        default: repos.yaml
       repos:
         description: Comma-separated subset of repos (default every active repo in the manifest); a dry run may name repos of an inactive batch
         type: string
@@ -55,7 +50,7 @@ jobs:
     timeout-minutes: 90
     env:
       # A scheduled run has no inputs: keep these fallbacks equal to the dispatch defaults.
-      MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
+      MANIFEST: repos.yaml
       REPOS: ${{ inputs.repos }}
       # Scheduled runs are full dry runs until RENOVATE_LIVE is "true"; manual ones follow the input.
       DRY_RUN: ${{ github.event_name == 'schedule' && vars.RENOVATE_LIVE == 'true' && 'off' || inputs.dry_run || 'full' }}

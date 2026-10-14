@@ -2,7 +2,6 @@ package bump
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -265,14 +264,12 @@ func (d dockerfile) Apply(_ context.Context, dir string, changes []Change) error
 
 // uiScript runs the ui repo's sync script with the API tag. The scripts are known by path. A
 // Ref's File is the file the script writes: what changes in the checkout when the script moves
-// the pin. versionKey, when set, says where in that JSON file the script records the tag (the
-// current version); without it the current version is unknown, and the change is applied only if
-// the script changes the file (Plan.Settle).
+// the pin. The script records no tag, so the current version is unknown, and the change is
+// applied only if the script changes the file (Plan.Settle).
 type uiScript struct{ c Config }
 
-var uiScripts = []struct{ script, file, versionKey string }{
+var uiScripts = []struct{ script, file string }{
 	{script: "scripts/sync-agentconfig-conformance.sh", file: "src/utils/agent-config/__tests__/fixtures/agentconfig-conformance.json"},
-	{script: "scripts/sync-mock-api-version.sh", file: "src/api-version.json", versionKey: "mockApi"},
 }
 
 func (uiScript) Name() string { return "ui sync" }
@@ -285,21 +282,7 @@ func (u uiScript) Scan(dir string) ([]Ref, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		cur := ""
-		if s.versionKey != "" {
-			data, err := os.ReadFile(filepath.Join(dir, s.file))
-			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return nil, err
-			}
-			var m map[string]any
-			if len(data) > 0 {
-				if err := json.Unmarshal(data, &m); err != nil {
-					return nil, fmt.Errorf("%s: %w", s.file, err)
-				}
-			}
-			cur, _ = m[s.versionKey].(string)
-		}
-		refs = append(refs, Ref{Updater: u.Name(), Dep: u.c.UIDep, Key: s.script, Current: cur, File: s.file})
+		refs = append(refs, Ref{Updater: u.Name(), Dep: u.c.UIDep, Key: s.script, File: s.file})
 	}
 	return refs, nil
 }

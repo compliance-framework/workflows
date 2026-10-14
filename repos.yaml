@@ -1,6 +1,5 @@
 # Manifest of the CCF repos that the shared workflows and tools (ccf-bump, train,
 # plugin-probe, repo-settings) operate on. Schema: internal/manifest/manifest.go.
-# The mock repos used to develop and test the workflows live in repos.mock.yaml.
 
 # ISO dates (YYYY-MM-DD) that are not working days; see manifest.NextWorkingWeekday.
 holidays:

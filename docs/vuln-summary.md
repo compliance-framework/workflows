@@ -7,9 +7,9 @@ read, and links to the org's alerts page and the run. The logic is `cmd/vuln-sum
 rules in `internal/vulnsummary`.
 
 ```text
-:shield: 5 open Dependabot alerts in compliance-framework (10 repo(s) in repos.mock.yaml): 1 critical, 1 high, 1 medium, 2 low
-• mock-api: 2 (1 critical, 1 medium)
-• mock-ui: 3 (1 high, 2 low)
+:shield: 5 open Dependabot alerts in compliance-framework (10 repo(s) in repos.yaml): 1 critical, 1 high, 1 medium, 2 low
+• api: 2 (1 critical, 1 medium)
+• ui: 3 (1 high, 2 low)
 8 other repos have no open alerts.
 All Dependabot alerts · run
 ```
@@ -21,11 +21,9 @@ Severity is the advisory's (`critical`, `high`, `medium`, `low`); anything else 
 
 - **Schedule**: Mondays at 08:00 UTC, on `repos.yaml`.
 - **`workflow_dispatch`**: Actions, `vuln-summary`, Run workflow, or
-  `gh workflow run vuln-summary.yml -f manifest=repos.mock.yaml`.
+  `gh workflow run vuln-summary.yml`. It has no inputs.
 
-| Input | Default | What |
-| --- | --- | --- |
-| `manifest` | `repos.yaml` | The repos to summarise: every active repo in the manifest ([manifest.md](manifest.md)). Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the mocks. |
+Both summarise every active repo in `repos.yaml` ([manifest.md](manifest.md)).
 
 ## Secrets and variables
 
@@ -67,8 +65,8 @@ alerts on for the manifest's repos (see the README, "Repo settings").
 ## Running it locally
 
 ```sh
-go run ./cmd/vuln-summary list --manifest repos.mock.yaml
-GH_TOKEN=<token> go run ./cmd/vuln-summary post --manifest repos.mock.yaml [--repos mock-api,mock-ui]
+go run ./cmd/vuln-summary list
+GH_TOKEN=<token> go run ./cmd/vuln-summary post [--repos api,ui]
 ```
 
 Without `SLACK_BOT_TOKEN` it only prints the message. `--owner` defaults to

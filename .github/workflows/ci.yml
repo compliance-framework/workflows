@@ -40,10 +40,8 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test -race ./...
-      - name: Validate manifests
-        run: |
-          go run ./cmd/manifest --manifest repos.yaml
-          go run ./cmd/manifest --manifest repos.mock.yaml
+      - name: Validate the manifest
+        run: go run ./cmd/manifest --manifest repos.yaml
 
   # Advisory: checks repos.yaml against the organisation's repos (docs/manifest.md). Not in
   # `required`'s needs, so a new or archived plugin-* repo, or a GitHub API error, doesn't block

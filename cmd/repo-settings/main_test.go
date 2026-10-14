@@ -48,7 +48,7 @@ func noClient(func(string) string) reposettings.Client { panic("no client expect
 
 func TestRunList(t *testing.T) {
 	var out bytes.Buffer
-	args := []string{"list", "--manifest", "../../repos.mock.yaml", "--repos", "mock-ui,mock-api"}
+	args := []string{"list", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-ui,mock-api"}
 	if err := run(context.Background(), args, func(string) string { return "" }, &out, noClient); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestRunSyncFailedStepFailsRun(t *testing.T) {
 	client := func(func(string) string) reposettings.Client {
 		return &reposettings.GitHub{BaseURL: srv.URL, Token: "t"}
 	}
-	args := []string{"sync", "--manifest", "../../repos.mock.yaml", "--repos", "mock-api", "--bypass-app-id", "42", "--check-token-scope=false", "--apply"}
+	args := []string{"sync", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-api", "--bypass-app-id", "42", "--check-token-scope=false", "--apply"}
 	var out bytes.Buffer
 	err = run(context.Background(), args, func(string) string { return "t" }, &out, client)
 	if err == nil || !strings.Contains(err.Error(), "repo merge settings") {

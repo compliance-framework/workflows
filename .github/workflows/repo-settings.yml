@@ -10,11 +10,6 @@ name: repo-settings
 on:
   workflow_dispatch:
     inputs:
-      manifest:
-        description: Manifest to read the repos from
-        type: choice
-        options: [repos.yaml, repos.mock.yaml]
-        default: repos.yaml
       repos:
         description: Comma-separated subset of repos (default every active repo in the manifest; may name inactive batches)
         type: string
@@ -67,7 +62,7 @@ jobs:
       - name: Select repos
         id: select
         env:
-          MANIFEST: ${{ inputs.manifest }}
+          MANIFEST: repos.yaml
           REPOS: ${{ inputs.repos }}
         run: |
           repos="$(go run ./cmd/repo-settings list --manifest "$MANIFEST" --repos "$REPOS")"
@@ -90,7 +85,7 @@ jobs:
       - name: Sync repo settings
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          MANIFEST: ${{ inputs.manifest }}
+          MANIFEST: repos.yaml
           REPOS: ${{ steps.select.outputs.repos }}
           APPLY: ${{ inputs.apply }}
           BYPASS_APP_ID: ${{ inputs.release-bot-app-id || vars.RELEASE_BOT_APP_ID }}

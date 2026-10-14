@@ -12,7 +12,7 @@ func TestCommands(t *testing.T) {
 	w.repo("mock-gooci", "0.1.0").pending("0.1.1").failRelease = true
 	w.repo("mock-agent", "0.1.0").bumped = true
 	e := w.engine(trainDay)
-	if err := e.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api", "mock-gooci", "mock-agent"}}); err != nil {
+	if err := e.Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api", "mock-gooci", "mock-agent"}}); err != nil {
 		t.Fatal(err)
 	}
 	drive(t, w, e, 4)
@@ -56,7 +56,7 @@ func TestAbort(t *testing.T) {
 	w.repo("mock-api", "0.1.0").pending("0.2.0")
 	w.get("mock-api").failChecks = true
 	e := w.engine(trainDay)
-	if err := e.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api"}}); err != nil {
+	if err := e.Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api"}}); err != nil {
 		t.Fatal(err)
 	}
 	w.say(1, "owner", "/abort")

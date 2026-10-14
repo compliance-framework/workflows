@@ -70,10 +70,7 @@
         "open-policy-agent/opa",
         "openpolicyagent/opa"
       ],
-      "matchRepositories": [
-        "!compliance-framework/api",
-        "!compliance-framework/mock-api"
-      ],
+      "matchRepositories": ["!compliance-framework/api"],
       "enabled": false
     },
     {
@@ -83,10 +80,7 @@
         "open-policy-agent/opa",
         "openpolicyagent/opa"
       ],
-      "matchRepositories": [
-        "compliance-framework/api",
-        "compliance-framework/mock-api"
-      ],
+      "matchRepositories": ["compliance-framework/api"],
       "groupName": "opa",
       "groupSlug": "opa",
       "automerge": false,

@@ -34,8 +34,8 @@ workflow of this repo, dispatched by the train (`workflow_dispatch` on the defau
 
 | Check | Runs |
 | --- | --- |
-| each `go-plugin` and `policies` repo of the earlier stages | [`plugin-probe.yml`](plugin-probe.md) on `ghcr.io/compliance-framework/<repo>:v<version>` (a plugin in `plugins`, a bundle in `policies`), at the version this train released, or its version when the train started if it released nothing. `agent-ref` is the version of the `agent` repo this train released (or its version when the train started), so the probe loads plugins and compiles policies as that agent and its OPA would; a train without the `agent` repo (the mocks, or a `repos` selection) probes with the agent in this repo's `go.mod`. |
-| `stack-smoke` | [`stack-smoke.yml`](stack-smoke.md) with the train's versions of `api`, `ui` and `agent` (`api-tag`, `ui-tag`, `agent-tag`), and of `plugin-file-attestation` and `plugin-file-attestation-policies` (`plugin-tag`, `policy-tag`) when the train holds them, else the workflow's defaults. Only when the train holds `api`, `ui` and `agent`: a mock train has no smoke check. |
+| each `go-plugin` and `policies` repo of the earlier stages | [`plugin-probe.yml`](plugin-probe.md) on `ghcr.io/compliance-framework/<repo>:v<version>` (a plugin in `plugins`, a bundle in `policies`), at the version this train released, or its version when the train started if it released nothing. `agent-ref` is the version of the `agent` repo this train released (or its version when the train started), so the probe loads plugins and compiles policies as that agent and its OPA would; a train without the `agent` repo (a `repos` selection) probes with the agent in this repo's `go.mod`. |
+| `stack-smoke` | [`stack-smoke.yml`](stack-smoke.md) with the train's versions of `api`, `ui` and `agent` (`api-tag`, `ui-tag`, `agent-tag`), and of `plugin-file-attestation` and `plugin-file-attestation-policies` (`plugin-tag`, `policy-tag`) when the train holds them, else the workflow's defaults. Only when the train holds `api`, `ui` and `agent`. |
 
 The gate reads only the train's repos: the release-bot token reaches no others.
 
@@ -96,7 +96,7 @@ month gets ` (2)`, a dry run ` (dry run)`), labelled `train` and `train:open` wh
 `train:done`, `train:aborted` or `train:dry-run` when closed. The body has a table of every repo's
 stage, status, versions and PRs, and the train's state as JSON in a hidden comment at the end.
 Don't edit that comment. Every PR reference, in the issue, its comments and the Slack thread, is a
-link labelled `<repo>#<n>` (e.g. `mock-agent#14`): a bare `#14` would link to this repo's own #14.
+link labelled `<repo>#<n>` (e.g. `agent#14`): a bare `#14` would link to this repo's own #14.
 
 When every repo is done the train:
 
@@ -155,11 +155,11 @@ that needs the planned tag to exist (a pseudo-version, an OPA version); the plan
 
 | Trigger | Runs |
 | --- | --- |
-| `schedule` `0 8 1-7 * *` | `start --scheduled`: starts a train only on `NextWorkingWeekday` of the 1st (holidays from the manifest), once per month, over `repos.yaml` (dispatch with `manifest=repos.mock.yaml` for the mocks). A dry run unless the repo variable `TRAIN_LIVE` is `true`. |
+| `schedule` `0 8 1-7 * *` | `start --scheduled`: starts a train only on `NextWorkingWeekday` of the 1st (holidays from the manifest), once per month, over `repos.yaml`. A dry run unless the repo variable `TRAIN_LIVE` is `true`. |
 | `schedule` `17 * * * *` | `reconcile`; nothing to do when no train is open. |
 | `repository_dispatch` `release-finished`, `bump-merged` | `reconcile`. `release-finished.yml` sends `release-finished` at the end of every release. |
 | `issue_comment` | `reconcile`, for a comment starting with `/` on an open train's issue. |
-| `workflow_dispatch` | `action` (`start` or `reconcile`), `manifest` (default `repos.yaml`, or `repos.mock.yaml`), `repos` and `dry_run` (default `true`). |
+| `workflow_dispatch` | `action` (`start` or `reconcile`), `repos` and `dry_run` (default `true`). Every run reads `repos.yaml`. |
 
 Runs share one concurrency group (at the job level, so comments that aren't commands don't
 queue). A run with an open train keeps reconciling every minute for up
@@ -187,8 +187,8 @@ A train started while another is open only moves the open one on: one train at a
 
 ```sh
 go build -o /tmp/ccf-bump ./cmd/ccf-bump
-# Plan a train over the mocks (GH_TOKEN reads the repos; TRACKER_TOKEN writes issues here):
-GH_TOKEN=... TRACKER_TOKEN=... go run ./cmd/train start --manifest repos.mock.yaml --dry-run --ccf-bump /tmp/ccf-bump
+# Plan a dry-run train over two repos (GH_TOKEN reads the repos; TRACKER_TOKEN writes issues here):
+GH_TOKEN=... TRACKER_TOKEN=... go run ./cmd/train start --repos api,ui --dry-run --ccf-bump /tmp/ccf-bump
 go run ./cmd/train select --for reconcile   # the open train's manifest and repos
 ```
 

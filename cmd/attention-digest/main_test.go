@@ -67,21 +67,21 @@ func runCmd(env map[string]string, args ...string) (string, error) {
 }
 
 func TestList(t *testing.T) {
-	out, err := runCmd(nil, "list", "--manifest", "../../repos.mock.yaml")
+	out, err := runCmd(nil, "list", "--manifest", "../../internal/manifest/testdata/mock.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(out, "mock-api,") || !strings.HasSuffix(out, ",workflows\n") || strings.Count(out, ",") != 10 {
 		t.Errorf("list = %q, want every mock repo and workflows", out)
 	}
-	if out, err := runCmd(nil, "list", "--manifest", "../../repos.mock.yaml", "--repos", "mock-ui, workflows"); err != nil || out != "mock-ui,workflows\n" {
+	if out, err := runCmd(nil, "list", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-ui, workflows"); err != nil || out != "mock-ui,workflows\n" {
 		t.Errorf("list --repos = %q, %v", out, err)
 	}
 }
 
 func TestPost(t *testing.T) {
 	env, posts := setup(t, map[string]string{"mock-ui": majorPR})
-	out, err := runCmd(env, "post", "--manifest", "../../repos.mock.yaml")
+	out, err := runCmd(env, "post", "--manifest", "../../internal/manifest/testdata/mock.yaml")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -107,7 +107,7 @@ func TestPostNothing(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		"no PR needs a human": {nil, nil, nil, "no PR needs a human in 11 repo(s) of ../../repos.mock.yaml; nothing posted"},
+		"no PR needs a human": {nil, nil, nil, "no PR needs a human in 11 repo(s) of ../../internal/manifest/testdata/mock.yaml; nothing posted"},
 		"dry run":             {map[string]string{"mock-ui": majorPR}, []string{"--dry-run"}, nil, "dry run: nothing posted"},
 		"no channel":          {map[string]string{"mock-ui": majorPR}, nil, map[string]string{"SLACK_CHANNEL": ""}, "is not set; nothing posted"},
 		"no Slack token":      {map[string]string{"mock-ui": majorPR}, nil, map[string]string{"SLACK_BOT_TOKEN": ""}, "is not set; nothing posted"},
@@ -117,7 +117,7 @@ func TestPostNothing(t *testing.T) {
 			for k, v := range tc.env {
 				env[k] = v
 			}
-			out, err := runCmd(env, append([]string{"post", "--manifest", "../../repos.mock.yaml"}, tc.args...)...)
+			out, err := runCmd(env, append([]string{"post", "--manifest", "../../internal/manifest/testdata/mock.yaml"}, tc.args...)...)
 			if err != nil || len(*posts) != 0 || !strings.Contains(out, tc.want) {
 				t.Errorf("err %v, posts %v, output:\n%s", err, *posts, out)
 			}
@@ -127,7 +127,7 @@ func TestPostNothing(t *testing.T) {
 
 func TestPostFailsAfterPosting(t *testing.T) {
 	env, posts := setup(t, map[string]string{"mock-ui": majorPR, "mock-api": `not json`})
-	out, err := runCmd(env, "post", "--manifest", "../../repos.mock.yaml")
+	out, err := runCmd(env, "post", "--manifest", "../../internal/manifest/testdata/mock.yaml")
 	if err == nil || !strings.Contains(err.Error(), "could not read mock-api") {
 		t.Errorf("err = %v", err)
 	}
@@ -151,14 +151,14 @@ func TestErrors(t *testing.T) {
 	} {
 		a := strings.Fields(args)
 		if len(a) > 0 && !strings.Contains(args, "--manifest") {
-			a = append(a, "--manifest", "../../repos.mock.yaml")
+			a = append(a, "--manifest", "../../internal/manifest/testdata/mock.yaml")
 		}
 		if _, err := runCmd(env, a...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: err %v, want %q", args, err, want)
 		}
 	}
 	env["GH_TOKEN"] = ""
-	if _, err := runCmd(env, "post", "--manifest", "../../repos.mock.yaml"); err == nil || !strings.Contains(err.Error(), "GH_TOKEN") {
+	if _, err := runCmd(env, "post", "--manifest", "../../internal/manifest/testdata/mock.yaml"); err == nil || !strings.Contains(err.Error(), "GH_TOKEN") {
 		t.Errorf("no GH_TOKEN: err %v", err)
 	}
 }

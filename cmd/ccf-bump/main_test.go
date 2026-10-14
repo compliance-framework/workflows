@@ -268,7 +268,7 @@ func TestSyncAllPR(t *testing.T) {
 	}
 	want := []string{
 		`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
-		"label mock-ui#1 ccf-bump:automerge",
+		"label mock-ui#1 needs-human", // the ui sync script records no version: a human checks it
 		`create mock-agent-action main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-agent to v0.2.0"`,
 		"label mock-agent-action#2 needs-human",
 		`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0"`,
@@ -288,7 +288,7 @@ func TestSyncAllPR(t *testing.T) {
 	}
 	for repo, line := range map[string]string{
 		"mock-agent-action:Dockerfile":                         "FROM ghcr.io/compliance-framework/mock-agent:0.2.0 AS source",
-		"mock-ui:src/api-version.json":                         `"mockApi": "v0.1.0"`,
+		"mock-ui:" + conformanceFixture:                        `"api": "v0.1.0"`,
 		"mock-plugin-1:.github/workflows/release.yml":          "mock-gooci/cmd/mock-gooci@v0.3.0",
 		"mock-plugin-policies-1:.github/workflows/release.yml": `opa-version: "1.15.0"`,
 		"mock-plugin-policies-1:.github/workflows/preview.yml": "opa-version: ${{ vars.OPA_VERSION }}",
@@ -310,7 +310,7 @@ func TestSyncAllPR(t *testing.T) {
 	if err := run(context.Background(), []string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}, e); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{`update mock-ui#1 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#1 ccf-bump:automerge"}; !slices.Equal(gh.calls, want) {
+	if want := []string{`update mock-ui#1 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#1 needs-human"}; !slices.Equal(gh.calls, want) {
 		t.Errorf("rerun calls %q, want %q", gh.calls, want)
 	}
 	if got, err := os.ReadFile(output); err != nil || string(got) != "prs=4\nprs=1\n" {
@@ -499,7 +499,7 @@ func TestLabelFailureWarns(t *testing.T) {
 	if n := strings.Count(strings.Join(gh.calls, "\n"), "create "); n != 4 {
 		t.Errorf("created %d PRs, want 4: %q", n, gh.calls)
 	}
-	want := "mock-ui#1: label ccf-bump:automerge: 403 Forbidden"
+	want := "mock-plugin-1#3: label ccf-bump:automerge: 403 Forbidden"
 	if !strings.Contains(out.String(), "::warning::ccf-bump: "+want) {
 		t.Errorf("no ::warning:: line:\n%s", out)
 	}
@@ -534,7 +534,7 @@ func TestSupersededPRsClosed(t *testing.T) {
 		`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
 		`close mock-ui#50 "Superseded by #100."`,
 		"delete mock-ui ccf-bump/sync-2026-09-22",
-		"label mock-ui#100 ccf-bump:automerge",
+		"label mock-ui#100 needs-human",
 	}
 	if !slices.Equal(gh.calls, want) {
 		t.Errorf("calls:\n%s\nwant:\n%s\noutput:\n%s", strings.Join(gh.calls, "\n"), strings.Join(want, "\n"), out)
@@ -554,12 +554,12 @@ func TestSupersededPRsWarnings(t *testing.T) {
 			fake: func(f *fakeGH) { f.closeErr = fmt.Errorf("403 Forbidden") },
 			warn: "mock-ui#50: close superseded PR: 403 Forbidden",
 			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
-				`close mock-ui#50 "Superseded by #100."`, "label mock-ui#100 ccf-bump:automerge"},
+				`close mock-ui#50 "Superseded by #100."`, "label mock-ui#100 needs-human"},
 		},
 		"author unknown": {
 			fake:  func(f *fakeGH) { f.anon = true },
 			warn:  "mock-ui#100: author unknown; earlier ccf-bump PRs left open",
-			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#100 ccf-bump:automerge"},
+			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#100 needs-human"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -613,12 +613,12 @@ func TestLabels(t *testing.T) {
 		out   string
 	}{
 		"eligible": {
-			repo: "mock-ui", calls: []string{"label mock-ui#1 ccf-bump:automerge"}, out: "  label: ccf-bump:automerge\n",
+			repo: "mock-plugin-1", calls: []string{"label mock-plugin-1#1 ccf-bump:automerge"}, out: "  label: ccf-bump:automerge\n",
 		},
 		"label fails": {
-			repo: "mock-ui", fake: func(f *fakeGH) { f.labelErr = fmt.Errorf("403 Forbidden") },
-			calls: []string{"label mock-ui#1 ccf-bump:automerge", "label mock-ui#1 needs-human"},
-			out:   "::warning::ccf-bump: mock-ui#1: label needs-human: 403 Forbidden",
+			repo: "mock-plugin-1", fake: func(f *fakeGH) { f.labelErr = fmt.Errorf("403 Forbidden") },
+			calls: []string{"label mock-plugin-1#1 ccf-bump:automerge", "label mock-plugin-1#1 needs-human"},
+			out:   "::warning::ccf-bump: mock-plugin-1#1: label needs-human: 403 Forbidden",
 		},
 		"major": {
 			repo: "mock-agent-action", calls: []string{"label mock-agent-action#1 needs-human"}, out: "auto-merge: off",
@@ -628,14 +628,14 @@ func TestLabels(t *testing.T) {
 			calls: []string{"unlabel mock-agent-action#7 ccf-bump:automerge", "label mock-agent-action#7 needs-human"},
 		},
 		"GitHub auto-merge from an older run": {
-			repo: "mock-ui", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
-			calls: []string{"disable-automerge PR_7", "label mock-ui#7 ccf-bump:automerge"}, out: "GitHub auto-merge: disabled",
+			repo: "mock-plugin-1", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
+			calls: []string{"disable-automerge PR_7", "label mock-plugin-1#7 ccf-bump:automerge"}, out: "GitHub auto-merge: disabled",
 		},
 		"disabling GitHub auto-merge fails": {
-			repo: "mock-ui", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
+			repo: "mock-plugin-1", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
 			fake:  func(f *fakeGH) { f.autoErr = fmt.Errorf("disable auto-merge: nope") },
-			calls: []string{"disable-automerge PR_7", "label mock-ui#7 ccf-bump:automerge"},
-			out:   "::warning::ccf-bump: mock-ui#7: disable auto-merge: nope",
+			calls: []string{"disable-automerge PR_7", "label mock-plugin-1#7 ccf-bump:automerge"},
+			out:   "::warning::ccf-bump: mock-plugin-1#7: disable auto-merge: nope",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

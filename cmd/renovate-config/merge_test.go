@@ -89,7 +89,7 @@ func runMerge(t *testing.T, gh *fakeGH, args ...string) (string, int, error) {
 		stdout: &out, now: func() time.Time { return now },
 		sleep: func(d time.Duration) { slept++; now = now.Add(d) },
 	}
-	err := merge(context.Background(), append([]string{"--manifest", "../../repos.mock.yaml"}, args...), e)
+	err := merge(context.Background(), append([]string{"--manifest", "../../internal/manifest/testdata/mock.yaml"}, args...), e)
 	return out.String(), slept, err
 }
 

@@ -1,5 +1,5 @@
-// Package manifest loads and validates the repo manifest (repos.yaml or
-// repos.mock.yaml) that the shared workflows and tools operate on.
+// Package manifest loads and validates the repo manifest (repos.yaml) that the shared
+// workflows and tools operate on.
 package manifest
 
 import (

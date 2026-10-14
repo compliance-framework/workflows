@@ -371,12 +371,21 @@ func (w *world) state(n int) *State {
 	return st
 }
 
-// engine returns an Engine on w at now, with the manifest files of the repo root.
+// loadManifest loads repos.yaml from the repo root, and any other manifest (mock.yaml) from
+// internal/manifest/testdata.
+func loadManifest(p string) (*manifest.Manifest, error) {
+	if p == manifest.DefaultPath {
+		return manifest.Load("../../" + p)
+	}
+	return manifest.Load("../manifest/testdata/" + p)
+}
+
+// engine returns an Engine on w at now, with loadManifest.
 func (w *world) engine(now time.Time) *Engine {
 	return &Engine{
 		Repos: w, Tracker: w, Members: w, Slack: w, Bumper: w, Gate: w,
 		Registry:              "ghcr.io/compliance-framework",
-		Load:                  func(p string) (*manifest.Manifest, error) { return manifest.Load("../../" + p) },
+		Load:                  loadManifest,
 		ReposURL:              "https://github.com/compliance-framework",
 		Channel:               "C1",
 		DigestChannel:         "CDIG",

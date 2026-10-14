@@ -4,20 +4,14 @@ name: ccf-bump-sync
 # (cmd/ccf-bump, docs/ccf-bump.md), then merges the green ccf-bump:automerge ones (live runs only;
 # ccf-bump-merge.yml merges the rest daily). The repos are split into chunks of 10, one job (and one
 # app token, which lasts an hour) each, run one after another; a live chunk that pushed PRs waits
-# out its hour before the next starts, so the org gets at most 10 bump PRs an hour. Scheduled runs
-# read repos.yaml (dispatch with manifest=repos.mock.yaml for the mocks) and are dry runs until the
-# repo variable CCF_BUMP_SYNC_LIVE is "true".
+# out its hour before the next starts, so the org gets at most 10 bump PRs an hour. Runs read
+# repos.yaml; scheduled ones are dry runs until the repo variable CCF_BUMP_SYNC_LIVE is "true".
 
 on:
   schedule:
     - cron: "0 4 8,22 * *"
   workflow_dispatch:
     inputs:
-      manifest:
-        description: Manifest to read the repos from
-        type: choice
-        options: [repos.mock.yaml, repos.yaml]
-        default: repos.yaml
       repos:
         description: Comma-separated subset of repos (default every active repo with release true); a dry run may name repos of an inactive batch
         type: string
@@ -54,7 +48,7 @@ jobs:
         id: select
         env:
           # A scheduled run has no inputs: keep these fallbacks equal to the inputs' defaults.
-          MANIFEST: ${{ inputs.manifest || 'repos.yaml' }}
+          MANIFEST: repos.yaml
           REPOS: ${{ inputs.repos }}
           DRY_RUN: ${{ github.event_name == 'schedule' && vars.CCF_BUMP_SYNC_LIVE != 'true' || github.event_name != 'schedule' && inputs.dry_run }}
         run: |

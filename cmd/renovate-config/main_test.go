@@ -14,7 +14,7 @@ import (
 
 func TestRunList(t *testing.T) {
 	var out bytes.Buffer
-	if err := run([]string{"list", "--manifest", "../../repos.mock.yaml"}, &out, io.Discard); err != nil {
+	if err := run([]string{"list", "--manifest", "../../internal/manifest/testdata/mock.yaml"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	want := "mock-api,mock-gooci,mock-agent,mock-ui,mock-agent-action,mock-plugin-1,mock-plugin-2,mock-plugin-policies-1,mock-plugin-policies-2,mock-helm-charts,workflows\n"
@@ -49,7 +49,7 @@ func TestRunList(t *testing.T) {
 
 func TestRunConfig(t *testing.T) {
 	var out bytes.Buffer
-	args := []string{"config", "--manifest", "../../repos.mock.yaml", "--repos", "mock-ui,mock-api", "--preset", "../../renovate/default.json"}
+	args := []string{"config", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-ui,mock-api", "--preset", "../../renovate/default.json"}
 	if err := run(args, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -84,11 +84,11 @@ func TestRunErrors(t *testing.T) {
 		{[]string{"sync"}, "usage"},
 		{[]string{"list", "extra"}, "unexpected arguments"},
 		{[]string{"list", "--manifest", "missing.yaml"}, "read manifest"},
-		{[]string{"list", "--manifest", "../../repos.mock.yaml", "--repos", "api"}, "not in the manifest: api"},
-		{[]string{"config", "--manifest", "../../repos.mock.yaml", "--preset", "missing.json"}, "read preset"},
-		{[]string{"config", "--manifest", "../../repos.mock.yaml", "--preset", "../../renovate/default.json", "--dry-run", "true"}, "dry run"},
-		{[]string{"list", "--manifest", "../../repos.mock.yaml", "--dry-run", "of"}, "dry run"},
-		{[]string{"list", "--manifest", "../../repos.mock.yaml", "--dry-run", "off", "--max-repos", "-1"}, "--max-repos -1"},
+		{[]string{"list", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "api"}, "not in the manifest: api"},
+		{[]string{"config", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--preset", "missing.json"}, "read preset"},
+		{[]string{"config", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--preset", "../../renovate/default.json", "--dry-run", "true"}, "dry run"},
+		{[]string{"list", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--dry-run", "of"}, "dry run"},
+		{[]string{"list", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--dry-run", "off", "--max-repos", "-1"}, "--max-repos -1"},
 		// A live run never takes a repo of an inactive batch (batches.yaml has none active; every batch of
 		// repos.yaml is).
 		{[]string{"list", "--manifest", batchesYAML, "--repos", "plugin-two", "--dry-run", "off"}, "not active"},
@@ -131,7 +131,7 @@ func TestRunDryRunInactive(t *testing.T) {
 // TestRunLiveShard: a live run takes one shard of at most --max-repos repos, picked by --slot, and list and config
 // agree on it; a dry run takes every selected repo.
 func TestRunLiveShard(t *testing.T) {
-	base := []string{"--manifest", "../../repos.mock.yaml", "--max-repos", "4"}
+	base := []string{"--manifest", "../../internal/manifest/testdata/mock.yaml", "--max-repos", "4"}
 	// 11 mock repos, at most 4 per run: 3 shards, repo i in shard i mod 3.
 	want := map[int64]string{
 		0: "mock-api,mock-ui,mock-plugin-2,mock-helm-charts",

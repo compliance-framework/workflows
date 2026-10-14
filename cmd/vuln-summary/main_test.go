@@ -55,14 +55,14 @@ func runCmd(env map[string]string, args ...string) (string, error) {
 }
 
 func TestList(t *testing.T) {
-	out, err := runCmd(nil, "list", "--manifest", "../../repos.mock.yaml")
+	out, err := runCmd(nil, "list", "--manifest", "../../internal/manifest/testdata/mock.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(out, "mock-api,mock-gooci,mock-agent,") || strings.Count(out, ",") != 9 {
 		t.Errorf("list = %q", out)
 	}
-	out, err = runCmd(nil, "list", "--manifest", "../../repos.mock.yaml", "--repos", "mock-ui mock-api")
+	out, err = runCmd(nil, "list", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-ui mock-api")
 	if err != nil || out != "mock-api,mock-ui\n" {
 		t.Errorf("list subset = %q, %v", out, err)
 	}
@@ -70,7 +70,7 @@ func TestList(t *testing.T) {
 
 func TestPost(t *testing.T) {
 	env, posts := setup(t)
-	out, err := runCmd(env, "post", "--manifest", "../../repos.mock.yaml", "--repos", "mock-api,mock-gooci")
+	out, err := runCmd(env, "post", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-api,mock-gooci")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestPost(t *testing.T) {
 	}
 	text, _ := (*posts)[0]["text"].(string)
 	for _, want := range []string{
-		"*2 open Dependabot alerts* in compliance-framework (2 repo(s) in ../../repos.mock.yaml): 1 critical, 1 high",
+		"*2 open Dependabot alerts* in compliance-framework (2 repo(s) in ../../internal/manifest/testdata/mock.yaml): 1 critical, 1 high",
 		"<https://github.com/compliance-framework/mock-api/security/dependabot|mock-api>: 2 (1 critical, 1 high)",
 		"1 other repo has no open alerts.",
 		"<https://github.com/compliance-framework/workflows/actions/runs/7|run>",
@@ -98,7 +98,7 @@ func TestPost(t *testing.T) {
 
 func TestPostFailsAfterPostingWhenARepoCantBeRead(t *testing.T) {
 	env, posts := setup(t)
-	_, err := runCmd(env, "post", "--manifest", "../../repos.mock.yaml", "--repos", "mock-api,mock-ui")
+	_, err := runCmd(env, "post", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-api,mock-ui")
 	if err == nil || !strings.Contains(err.Error(), "mock-ui") {
 		t.Fatalf("err = %v", err)
 	}
@@ -114,7 +114,7 @@ func TestPostWithoutSlackTokenOnlyPrints(t *testing.T) {
 	env, posts := setup(t)
 	delete(env, "SLACK_BOT_TOKEN")
 	delete(env, "SLACK_CHANNEL")
-	out, err := runCmd(env, "post", "--manifest", "../../repos.mock.yaml", "--repos", "mock-api")
+	out, err := runCmd(env, "post", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-api")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,10 +131,10 @@ func TestErrors(t *testing.T) {
 	}{
 		{args: nil, err: "usage"},
 		{args: []string{"sync"}, err: "usage"},
-		{args: []string{"list", "--manifest", "../../repos.mock.yaml", "extra"}, err: "unexpected arguments"},
-		{args: []string{"list", "--manifest", "../../repos.mock.yaml", "--repos", "api"}, err: "not in the manifest: api"},
-		{args: []string{"post", "--manifest", "../../repos.mock.yaml"}, err: "GH_TOKEN"},
-		{args: []string{"post", "--manifest", "../../repos.mock.yaml", "--repos", "mock-gooci"},
+		{args: []string{"list", "--manifest", "../../internal/manifest/testdata/mock.yaml", "extra"}, err: "unexpected arguments"},
+		{args: []string{"list", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "api"}, err: "not in the manifest: api"},
+		{args: []string{"post", "--manifest", "../../internal/manifest/testdata/mock.yaml"}, err: "GH_TOKEN"},
+		{args: []string{"post", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-gooci"},
 			env: map[string]string{"SLACK_CHANNEL": ""}, err: "SLACK_CHANNEL is empty"},
 	} {
 		env := map[string]string{}

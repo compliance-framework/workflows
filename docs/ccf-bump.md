@@ -44,7 +44,7 @@ ccf-bump list [--repos a,b] [--chunk 10] [--dry-run]
   `Superseded by #N.` and its branch is deleted. Other PRs, including a `sync` PR during a `train`
   run, are never touched. A failure to close one is a warning. `--dry-run` only lists the PRs it
   would close; with nothing opened to tell who it runs as, it lists any bot's.
-- `--manifest` (default `repos.yaml`; `repos.mock.yaml` for the mocks) gives the repos, their kinds
+- `--manifest` (default `repos.yaml`) gives the repos, their kinds
   and the dependency edges. `sync --all` takes every active repo with `release: true` ([manifest.md](manifest.md)), in stage order.
 - `--clones DIR` reads `DIR/<repo>` (its committed `HEAD`) instead of cloning from GitHub, for dry
   runs against local clones.
@@ -58,8 +58,8 @@ ccf-bump list [--repos a,b] [--chunk 10] [--dry-run]
 
 Each repo is scanned for the pins below; the Dockerfile, OPA and ui pins only in repos of that kind
 (`action`, `policies`, `ui`). A dependency is internal when it lives under
-`github.com/compliance-framework/`, inside or outside the manifest (the mock plugins also pin the
-product `agent` module; its releases are only read).
+`github.com/compliance-framework/`, inside or outside the manifest (a module outside it is only read
+for its releases).
 
 | Pin | Where | Target |
 | --- | --- | --- |
@@ -67,7 +67,7 @@ product `agent` module; its releases are only read).
 | `go install github.com/<owner>/<repo>[/cmd/x]@<ver>` | `.github/workflows/*.y*ml` | the repo |
 | `FROM <image> AS source` | `Dockerfile` of an `action` repo; any image is replaced by `ghcr.io/<owner>/<dep>:<ver>` (no `v`) | the action's one `depends_on` |
 | `opa-version:` inputs | workflow files of a `policies` repo; expressions are left alone | the OPA version in the go.mod of its `go-service` dependency (else `agent`) at that repo's target tag |
-| ui sync script | `scripts/sync-agentconfig-conformance.sh <tag>` (ui; writes the conformance fixture, and its current version is unknown) or `scripts/sync-mock-api-version.sh <tag>` (mock-ui; writes `src/api-version.json`) | the ui's `go-service` dependency |
+| ui sync script | `scripts/sync-agentconfig-conformance.sh <tag>` (writes the conformance fixture; its current version is unknown) | the ui's `go-service` dependency |
 | helm | `charts/*/values.yaml` image tags next to `repository: ghcr.io/<owner>/<repo>` (empty tags follow appVersion and stay empty); `Chart.yaml` `appVersion` | the image's repo; appVersion tracks the first org image whose tag is empty or equals appVersion |
 | `uses: <owner>/workflows/...@<ref>` in a job | workflow files; the job's `workflows-ref` input is deleted when its pin moves | the latest final release of the `kind: workflows` repo (sync), or `--set workflows=<ref>` |
 
@@ -190,10 +190,9 @@ PRs with `renovate-config merge` ([renovate.md](renovate.md#the-merge-pass)).
 ## The `ccf-bump-sync` workflow
 
 `ccf-bump-sync.yml` runs `ccf-bump sync --pr` on the 8th and 22nd at 04:00 UTC, and on
-`workflow_dispatch` with inputs `manifest` (default `repos.yaml`, or `repos.mock.yaml`), `repos`
-(default every active repo with `release: true`; a dry run may name repos of an inactive batch) and
-`dry_run` (default `true`). Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml` for the
-mocks. They are dry runs until the repo variable `CCF_BUMP_SYNC_LIVE` is `true`.
+`workflow_dispatch` with inputs `repos` (default every active repo with `release: true`; a dry run
+may name repos of an inactive batch) and `dry_run` (default `true`). Every run reads `repos.yaml`.
+Scheduled runs are dry runs until the repo variable `CCF_BUMP_SYNC_LIVE` is `true`.
 
 The `select` job runs `ccf-bump list --chunk 10` and fails on an empty selection. The chunks are in
 stage order. One `sync` job per chunk runs, one at a time (`max-parallel: 1`), and a failed chunk
@@ -220,12 +219,11 @@ Worst case, with every repo getting a PR:
 A chunk that pushed nothing (every repo current) doesn't wait, and a dry run never does.
 
 `ccf-bump-merge.yml` runs the merge pass alone (`--wait 0`) daily at 05:41 UTC, for PRs whose CI
-finished later, and on `workflow_dispatch` with inputs `manifest` (default `repos.yaml`) and
-`dry_run` (default `true`). Scheduled runs read `repos.yaml`; dispatch with `manifest=repos.mock.yaml`
-for the mocks. A scheduled run is a dry run until `CCF_BUMP_SYNC_LIVE` is `true`. Its token has the
+finished later, and on `workflow_dispatch` with the input `dry_run` (default `true`). Every run
+reads `repos.yaml`. A scheduled run is a dry run until `CCF_BUMP_SYNC_LIVE` is `true`. Its token has the
 same permissions as the sync's (merging a PR that edits workflow files needs workflows write).
 
 ```sh
-# Dry run against local clones of the mocks (DIR/mock-*):
-GH_TOKEN=$(gh auth token) go run ./cmd/ccf-bump sync --all --manifest repos.mock.yaml --clones DIR --pr --dry-run
+# Dry run against local clones of the selected repos (DIR/<repo>):
+GH_TOKEN=$(gh auth token) go run ./cmd/ccf-bump sync --repos api,ui --clones DIR --pr --dry-run
 ```
