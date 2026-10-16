@@ -1,0 +1,5 @@
+lisa-design:
+- factory is kind go-service (Go binary embedding the web/ app), core (no batch: only go-plugin/policies take one).
+- release: false, not true: with true the train's release-pr step waits on release-please.yml, which factory doesn't have; flip to true in the PR that adds factory's release workflow.
+- Consequence (intended, documented): ccf-bump sync skips release: false repos, so factory's compliance-framework/workflows pins stay manual until then; Renovate ignores compliance-framework/** by design.
+- The batches fixture (internal/manifest/testdata/batches.yaml) is left without factory: a second release: false core repo adds no coverage over workflows; only the repos.yaml-backed tests change.
