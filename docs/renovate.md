@@ -98,8 +98,8 @@ npx --yes --package renovate -- renovate-config-validator --strict renovate/defa
 ## The org-wide throttle
 
 `prHourlyLimit` is per repo in Renovate (each repo counts the PRs it opened since the top of the
-hour), so on its own it can't hold the org to the plan's ~15 PRs an hour: with 37 repos active
-after batch 1, even `1` would allow 37. Renovate 44.145.1 (the pinned version) has one global
+hour), so on its own it can't hold the org to the plan's ~15 PRs an hour: with 38 repos active
+after batch 1, even `1` would allow 38. Renovate 44.145.1 (the pinned version) has one global
 limit, the self-hosted `prCommitsPerRunLimit`, but it counts commits per run rather than PRs per
 hour, counts vulnerability fixes and rebases, and when it is reached Renovate stops processing the
 remaining repos for that run. Those repos then get no vulnerability fixes and no auto-merges until a
@@ -126,15 +126,15 @@ instead:
   visit opens every fix a repo needs. They wait at most one rotation for their repo's shard.
 - Dry runs write nothing, so they aren't sharded and take every selected repo.
 
-Worst case for non-vulnerability PRs opened across the org, from `repos.yaml` (7 core repos, this
-one included; batch 1 has 30 repos, batch 2 27, batch 3 10):
+Worst case for non-vulnerability PRs opened across the org, from `repos.yaml` (8 core repos, this
+one and factory included; batch 1 has 30 repos, batch 2 27, batch 3 10):
 
 | Active batches | Active repos | Shards | Repos per shard | PRs in one run | Two runs close together | Each repo visited every |
 | --- | --- | --- | --- | --- | --- | --- |
-| none (today) | 7 | 1 | 7 | 7 | 7 (14 across the top of the hour) | 1 run |
-| 1 | 37 | 3 | 13, 12, 12 | 13 | 25 | 3 runs |
-| 1, 2 | 64 | 5 | 13, 13, 13, 13, 12 | 13 | 26 | 5 runs |
-| 1, 2, 3 | 74 | 5 | 15, 15, 15, 15, 14 | 15 | 30 | 5 runs |
+| none | 8 | 1 | 8 | 8 | 8 (16 across the top of the hour) | 1 run |
+| 1 | 38 | 3 | 13, 13, 12 | 13 | 26 | 3 runs |
+| 1, 2 | 65 | 5 | 13, 13, 13, 13, 13 | 13 | 26 | 5 runs |
+| 1, 2, 3 (today) | 75 | 5 | 15, 15, 15, 15, 15 | 15 | 30 | 5 runs |
 
 One run opens at most about 15, and a repo at most one per clock hour. Runs don't overlap (the `renovate`
 concurrency group queues the next one), but GitHub can start two of them close together: a late

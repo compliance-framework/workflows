@@ -78,6 +78,14 @@ repos:
     kind: workflows
     release: false
 
+  # The CCF Factory (Go service with a web/ Vue app built by its own CI job). Core, so always
+  # active: Renovate and repo-settings act on it. release: false until it has a release workflow
+  # (release-please.yml): with true the train would wait on a release PR that never comes, and
+  # ccf-bump sync takes only release: true repos, so its shared-workflow pins move by hand until then.
+  - name: factory
+    kind: go-service
+    release: false
+
   # Plugins and their policy repos, by rollout batch (workstream 3). Plugins and policy repos
   # depend on agent (its runner and OPA version), so they release in agent-action's stage. The
   # tools act on a batch only once it is in active_batches (docs/manifest.md). Default branches

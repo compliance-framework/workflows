@@ -232,10 +232,10 @@ Worst case, with every repo getting a PR:
 
 | Active batches | Repos (`release: true`) | Chunks | PRs per hour | Run length (live) |
 | --- | --- | --- | --- | --- |
-| none (today) | 6 | 1 | 6 | under an hour |
+| none | 6 | 1 | 6 | under an hour |
 | 1 | 33 | 4 | 10 | about 3 to 4 hours |
 | 1, 2 | 60 | 6 | 10 | about 5 to 6 hours |
-| 1, 2, 3 | 70 | 7 | 10 | about 6 to 7 hours |
+| 1, 2, 3 (today) | 70 | 7 | 10 | about 6 to 7 hours |
 
 A chunk that pushed nothing (every repo current) doesn't wait, and a dry run never does.
 
