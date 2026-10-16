@@ -1,0 +1,4 @@
+lisa-selfreview:
+- pass 1: comment in internal/manifest/batches_test.go overlong and unclear -> fixed.
+- checked: ccf-release-bot and ccf-repo-admin are installed on all org repos, so token minting for factory works; Renovate needs no per-repo config (requireConfig optional).
+- deferred (out of scope): docs/ccf-bump.md's table still labels "none" as today although active_batches is [1, 2, 3].
