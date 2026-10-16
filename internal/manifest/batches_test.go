@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// batchesFixture has repos.yaml's core repos but factory (a second release: false core repo adds nothing
-// to workflows'), plus plugin and policy repos in batches 1 to 3.
+// batchesFixture has repos.yaml's core repos (all but factory, a release: false repo like workflows)
+// plus plugin and policy repos in batches 1 to 3.
 const batchesFixture = "testdata/batches.yaml"
 
 var coreRepos = []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts", "workflows"}
@@ -180,8 +180,8 @@ func TestReposYAMLBatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Every batch is active: the core repos (the fixture's and factory) plus batch 1's 30 repos, batch 2's 27 and batch 3's 10, in manifest
-	// order. The inactive-batch paths are covered on testdata/batches.yaml.
+	// Every batch is active: the core repos (the fixture's and factory) plus batch 1's 30 repos, batch 2's
+	// 27 and batch 3's 10, in manifest order. The inactive-batch paths are covered on testdata/batches.yaml.
 	active := append(slices.Clone(coreRepos), "factory")
 	for _, r := range m.Repos {
 		if r.Batch != 0 {
