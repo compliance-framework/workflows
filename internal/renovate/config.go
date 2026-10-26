@@ -39,9 +39,10 @@ var runnerKeys = []string{"platform", "autodiscover", "repositories", "onboardin
 // more than Renovate's one merge per run (docs/renovate.md#the-merge-pass).
 const AutomergeLabel = "renovate:automerge"
 
-// MaxLiveRepos is the most repos one live run works on (Shard). With the preset's prHourlyLimit of 1,
-// it bounds the non-vulnerability PRs one renovate.yml run opens across the org
-// (docs/renovate.md#the-org-wide-throttle).
+// MaxLiveRepos is the most repos one live run works on (Shard). With the preset's prHourlyLimit of 4
+// (non-vulnerability PRs per repo per visit, at most one of them a major), it bounds what one
+// renovate.yml run opens across the org at MaxLiveRepos x 4; vulnerability fixes are not capped
+// (docs/renovate.md#the-org-wide-throttle). It also keeps a live run within the app token's hour.
 const MaxLiveRepos = 15
 
 // CheckDryRun returns an error unless mode is one of Renovate's dryRun values or DryRunOff.
