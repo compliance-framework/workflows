@@ -10,13 +10,13 @@ public repos.
 
 | Rule | Setting |
 | --- | --- |
-| Schedule | `* * 8,22 * *` (UTC): normal updates only on the 8th and 22nd, away from the monthly train, so each one spends at least a week on `main` before the next release. |
-| Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. A repo's fixes go into one `[SECURITY]` PR per package manager, `renovate/security-<manager>` (e.g. `renovate/security-gomod`), outside the non-major group and the concurrent-PR limit; it auto-merges. A major fix gets its own, `renovate/major-security-<manager>`, for a human. See [Why security fixes are grouped](#why-security-fixes-are-grouped). Every fix is `fix(deps)` (`vulnerabilityAlerts.semanticCommitType: "fix"`), so it releases: Renovate forces the `vulnerabilityAlerts` settings onto each security update over the package rules, while the depType rules alone still let one through as `chore(deps)`, which release-please hides ([mock-plugin-2#14](https://github.com/compliance-framework/mock-plugin-2/pull/14)). |
+| Schedule | `at any time`: normal updates every day, on every visit. Until October 2026 they ran only on the 8th and 22nd (`* * 8,22 * *`), away from the monthly train (which starts on the month's first working weekday), so each update spent at least a week on `main` before the next release. But a repo then opened about one PR per visit on two days a month, and updates piled up "Awaiting Schedule" in its Dependency Dashboard ([ui#354](https://github.com/compliance-framework/ui/issues/354) had ~28, ~20 of them majors). With a daily schedule the remaining guard is the waiting period below: no update before its release is 7 days old, though an update merged the day before a train now ships in it. `ccf-bump`'s internal updates keep their own 8th/22nd schedule ([ccf-bump](ccf-bump.md)). |
+| Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. A repo's fixes go into one `[SECURITY]` PR per package manager, `renovate/security-<manager>` (e.g. `renovate/security-gomod`), outside the non-major group; it auto-merges. A fix is never held by a PR limit: Renovate skips `prHourlyLimit` for vulnerability fixes, and `vulnerabilityAlerts` sets `prConcurrentLimit: 0` and `branchConcurrentLimit: 0` (no limit). Without these a fix would take the top-level `prConcurrentLimit: 8` (against the security PRs' own count), and a major fix, which also matches the majors rule, its `prConcurrentLimit: 3`: Renovate applies `vulnerabilityAlerts` over the package rules, and a branch takes the lowest limit of its updates, `0` meaning none. A major fix gets its own, `renovate/major-security-<manager>`, for a human. See [Why security fixes are grouped](#why-security-fixes-are-grouped). Every fix is `fix(deps)` (`vulnerabilityAlerts.semanticCommitType: "fix"`), so it releases: Renovate forces the `vulnerabilityAlerts` settings onto each security update over the package rules, while the depType rules alone still let one through as `chore(deps)`, which release-please hides ([mock-plugin-2#14](https://github.com/compliance-framework/mock-plugin-2/pull/14)). |
 | Waiting period | `minimumReleaseAge: "7 days"` with `internalChecksFilter: "strict"`: no branch or PR before a release is a week old. An update with no release timestamp waits too (Renovate's default `minimumReleaseAgeBehaviour`). |
 | Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain and the `golang` image are in it. Majors get their own PRs. |
 | Auto-merge | The non-major group (and every non-major vulnerability fix) auto-merges, but Renovate merges it itself (`platformAutomerge: false`, `automergeType: "pr"`, `automergeStrategy: "squash"`): on its next run after the checks pass, Renovate squash-merges the PR through the API as `ccf-release-bot`. These PRs are also labelled `renovate:automerge` (one rule, `addLabels`), and `renovate.yml`'s [merge pass](#the-merge-pass) merges them right after each live run, since Renovate merges only one per repo per run (it squash-merges with the same commit title and message Renovate's merge gets). Majors and OPA updates don't get the label: majors, and OPA in the api, wait for a human. See [Why Renovate merges, not GitHub](#why-renovate-merges-not-github). |
 | Rebasing | `rebaseWhen: "conflicted"`: a branch is rebased only when it conflicts with `main`, not every time it falls behind. See [Why security fixes are grouped](#why-security-fixes-are-grouped). |
-| Limits | `prHourlyLimit: 1`, `prConcurrentLimit: 8` per repo. With a live run's shard of at most 15 repos, that bounds the PRs across the org; see [The org-wide throttle](#the-org-wide-throttle). |
+| Limits | `prHourlyLimit: 4`, `prConcurrentLimit: 8` per repo, and on the majors rule `prConcurrentLimit: 3` and `prHourlyLimit: 1`: at most 2 open majors next to the non-major group, and at most one new major per visit. Capped updates wait under "Rate-Limited" in the Dependency Dashboard, where a checkbox creates one past the limits. Vulnerability fixes are never capped. With a live run's shard of at most 15 repos, that bounds the PRs across the org; see [The org-wide throttle](#the-org-wide-throttle). |
 | Commits | Semantic: `fix(deps)` for runtime dependencies (Go `require`, npm `dependencies`, a Dockerfile's final stage, the Go `toolchain` directive), which release-please releases, and `chore(deps)` for everything else (dev, CI, actions). A group takes the highest type of its updates, so a group with any runtime update is `fix(deps)`. Security fixes are always `fix(deps)`, whatever their dependency type (see Vulnerability fixes). |
 | Go | `postUpdateOptions: ["gomodTidy"]`. Indirect modules are left to `go mod tidy` (Renovate's default). |
 | Indirect Go modules | When Renovate does update one, it is `fix(deps)`, not the `chore(deps)` that `depType: indirect` gets by default: indirect modules are linked into the binary, so the update must release (`matchManagers: ["gomod"], matchDepTypes: ["indirect"], semanticCommitType: "fix"`). A security fix to one is `fix(deps)` through `vulnerabilityAlerts` regardless of this rule. |
@@ -40,11 +40,11 @@ visits each repo's shard in turn, so without more a PR would merge up to one rot
 runs with every batch active, about 5 hours when GitHub starts the runs on time) after its checks
 pass. The [merge pass](#the-merge-pass) after each live run closes most of that gap: it waits up to
 20 minutes for the checks of the PRs Renovate just opened or rebased, and merges every green one.
-The 8th/22nd `schedule` doesn't delay this: it only limits when new branches are created, while
-Renovate keeps updating and merging existing PRs on the other days
-(its defaults `updateNotScheduled: true` and `automergeSchedule: ["at any time"]`, which the preset
-leaves alone). A PR whose checks fail stays open, and Renovate updates or recreates it
-on later runs as usual. The repo's "allow auto-merge" setting is no longer used by Renovate.
+The `schedule` doesn't delay this: it is `at any time` now, and even when it was the 8th and 22nd
+it only limited when new branches were created, while Renovate kept updating and merging existing
+PRs on the other days (its defaults `updateNotScheduled: true` and
+`automergeSchedule: ["at any time"]`, which the preset leaves alone). A PR whose checks fail stays
+open, and Renovate updates or recreates it on later runs as usual. The repo's "allow auto-merge" setting is no longer used by Renovate.
 
 ### Why security fixes are grouped
 
@@ -69,7 +69,7 @@ The trade-off: one bad fix keeps the group's other fixes from merging until it i
 When the group changes (a fix added, or one no longer needed), Renovate updates the branch; PRs
 opened before the grouping, one per package, are closed by Renovate as `autoclosed` on the repo's
 next visit, since no update maps to their branches any more. The non-major group and the security
-group can still conflict with each other on the 8th and 22nd, and then merge on consecutive
+group can still conflict with each other when both are open, and then merge on consecutive
 visits.
 
 `rebaseWhen: "conflicted"` keeps the other open PRs from being rebased, with a CI run each, every
@@ -98,11 +98,12 @@ npx --yes --package renovate -- renovate-config-validator --strict renovate/defa
 ## The org-wide throttle
 
 `prHourlyLimit` is per repo in Renovate (each repo counts the PRs it opened since the top of the
-hour), so on its own it can't hold the org to the plan's ~15 PRs an hour: with 38 repos active
-after batch 1, even `1` would allow 38. Renovate 44.145.1 (the pinned version) has one global
-limit, the self-hosted `prCommitsPerRunLimit`, but it counts commits per run rather than PRs per
-hour, counts vulnerability fixes and rebases, and when it is reached Renovate stops processing the
-remaining repos for that run. Those repos then get no vulnerability fixes and no auto-merges until a
+hour), so on its own it can't bound the org's PRs an hour: with 75 repos active, even `1` would
+allow 75 (the original plan aimed at ~15 an hour with `prHourlyLimit: 1`; the daily schedule
+trades that for `4`, with majors capped apart, see below). Renovate 44.145.1 (the pinned version)
+has one global limit, the self-hosted `prCommitsPerRunLimit`, but it counts commits per run rather
+than PRs per hour, counts vulnerability fixes and rebases, and when it is reached Renovate stops
+processing the remaining repos for that run. Those repos then get no vulnerability fixes and no auto-merges until a
 later run, and the same repos at the head of the list would always go first. So the workflow shards
 instead:
 
@@ -118,35 +119,57 @@ instead:
 - A dispatch takes a run number too. A live dispatch on every active repo is simply the next step of
   the rotation. A dry run, or a live run with `repos` set, leaves the shard of its number unvisited,
   so that shard waits one more rotation.
-- The preset's `prHourlyLimit: 1` lets each repo of the shard open at most one non-vulnerability
-  PR per visit, and at most one per clock hour. The non-major group comes first, then majors one
-  per visit.
+- The preset's `prHourlyLimit: 4` lets each repo of the shard open at most 4 non-vulnerability
+  PRs per visit, and at most 4 per clock hour. Renovate (44.145.1) compares every limit with a
+  repo-wide count: `prHourlyLimit` with every Renovate PR the repo opened since the top of the hour,
+  vulnerability fixes included, and `prConcurrentLimit` with every open non-vulnerability Renovate
+  PR. A limit set in a package rule applies to the branches it matches (a branch takes the lowest
+  limit of its updates, `0` meaning none). Renovate works the non-major branches before the majors
+  in each visit, so the non-major group comes first.
+- **Majors are capped.** The majors rule sets `prHourlyLimit: 1`, so a major opens only in a clock
+  hour in which the repo has opened no other Renovate PR yet: at most one per visit, and none in the
+  visit that opens the non-major group or a security PR (it waits for the next visit). It also sets
+  `prConcurrentLimit: 3`, so a major opens only while the repo has fewer than 3 open
+  non-vulnerability Renovate PRs: at most 2 open majors while the non-major group is open (3 once
+  it merges), one fewer in the api while its `renovate/opa` PR is open. A human merging or closing
+  a major frees a slot for the next one. The top-level `prHourlyLimit: 4` leaves the non-major group
+  room even when a major and security PRs were opened earlier in the same hour (a dispatch next to
+  a scheduled run). Capped updates are listed under "Rate-Limited" in the repo's Dependency
+  Dashboard, with a checkbox that creates the PR on the next visit, past the limits.
 - **Vulnerability fixes keep flowing.** Renovate exempts them from `prHourlyLimit` (and from
-  `schedule` and `prCommitsPerRunLimit`; docs: "vulnerability alerts skip the line"), so each
-  visit opens every fix a repo needs. They wait at most one rotation for their repo's shard.
+  `schedule` and `prCommitsPerRunLimit`; docs: "vulnerability alerts skip the line") and counts
+  their open PRs apart from the others, and the preset's `vulnerabilityAlerts` sets
+  `prConcurrentLimit` and `branchConcurrentLimit` to `0` (no limit), so a major fix doesn't take the
+  majors rule's cap. Each visit opens every fix a repo needs. They wait at most one rotation for
+  their repo's shard.
 - Dry runs write nothing, so they aren't sharded and take every selected repo.
 
 Worst case for non-vulnerability PRs opened across the org, from `repos.yaml` (8 core repos, this
 one and factory included; batch 1 has 30 repos, batch 2 27, batch 3 10):
 
-| Active batches | Active repos | Shards | Repos per shard | PRs in one run | Two runs close together | Each repo visited every |
+| Active batches | Active repos | Shards | Repos per shard | PRs in one run (of them majors) | Two runs close together | Each repo visited every |
 | --- | --- | --- | --- | --- | --- | --- |
-| none | 8 | 1 | 8 | 8 | 8 (16 across the top of the hour) | 1 run |
-| 1 | 38 | 3 | 13, 13, 12 | 13 | 26 | 3 runs |
-| 1, 2 | 65 | 5 | 13, 13, 13, 13, 13 | 13 | 26 | 5 runs |
-| 1, 2, 3 (today) | 75 | 5 | 15, 15, 15, 15, 15 | 15 | 30 | 5 runs |
+| none | 8 | 1 | 8 | 32 (8) | 32 (64 across the top of the hour) | 1 run |
+| 1 | 38 | 3 | 13, 13, 12 | 52 (13) | 104 | 3 runs |
+| 1, 2 | 65 | 5 | 13, 13, 13, 13, 13 | 52 (13) | 104 | 5 runs |
+| 1, 2, 3 (today) | 75 | 5 | 15, 15, 15, 15, 15 | 60 (15) | 120 | 5 runs |
 
-One run opens at most about 15, and a repo at most one per clock hour. Runs don't overlap (the `renovate`
-concurrency group queues the next one), but GitHub can start two of them close together: a late
-run followed by an on-time one, or a manual live dispatch next to a scheduled run. Two such runs
-take different shards, so a short window can see about two shards' worth, ~30 with every batch
-active. With one shard, both runs take the same repos: `prHourlyLimit` stops the second within the
-same clock hour, but not across the top of the hour. Vulnerability PRs come on top of these and are
-deliberately not capped. A live run's shard also keeps it within the app token's one-hour life.
+These are bounds: `prHourlyLimit` (4) per repo of the shard, at most one of them a major. Since a
+major opens only in an hour with no other Renovate PR, a visit in practice opens either the
+non-major group (with, in the api, `renovate/opa`) or one major, so a run opens about one PR per
+repo with an update due. Runs don't overlap (the `renovate` concurrency group queues the next one),
+but GitHub can start two of them close together: a late run followed by an on-time one, or a
+manual live dispatch next to a scheduled run. Two such runs take different shards, so a short
+window can see two shards' worth. With one shard, both runs take the same repos: `prHourlyLimit`
+stops the second within the same clock hour, but not across the top of the hour. Vulnerability PRs
+come on top of these and are deliberately not capped. A live run's shard also keeps it within the
+app token's one-hour life.
 
-On the 8th and 22nd (the preset's `schedule`), a repo gets its non-major group PR on its first visit
-that day and a major on each later one. With 5 shards and 24 runs, that is about five visits a day,
-fewer when GitHub delays or drops runs.
+Every day, a repo gets its non-major group PR on the first visit that finds a non-major update due
+(its release 7 days old), and a major on each later visit while fewer than 3 of its
+non-vulnerability Renovate PRs are open. With 5 shards and 24 runs, that is about five visits a
+day, fewer when GitHub delays or drops runs. On the old 8th/22nd `schedule` a repo had about ten
+visits a month to open anything, one PR each.
 
 ## The workflow: `renovate.yml`
 

@@ -143,13 +143,15 @@ func TestSharedPreset(t *testing.T) {
 		PostUpdateOptions      []string `json:"postUpdateOptions"`
 		Extends                []string `json:"extends"`
 		VulnerabilityAlerts    struct {
-			Schedule           []string        `json:"schedule"`
-			MinimumReleaseAge  json.RawMessage `json:"minimumReleaseAge"`
-			SemanticCommitType string          `json:"semanticCommitType"`
-			GroupName          string          `json:"groupName"`
-			GroupSlug          string          `json:"groupSlug"`
-			Labels             []string        `json:"labels"`
-			AddLabels          []string        `json:"addLabels"`
+			Schedule              []string        `json:"schedule"`
+			MinimumReleaseAge     json.RawMessage `json:"minimumReleaseAge"`
+			PrConcurrentLimit     *int            `json:"prConcurrentLimit"`
+			BranchConcurrentLimit *int            `json:"branchConcurrentLimit"`
+			SemanticCommitType    string          `json:"semanticCommitType"`
+			GroupName             string          `json:"groupName"`
+			GroupSlug             string          `json:"groupSlug"`
+			Labels                []string        `json:"labels"`
+			AddLabels             []string        `json:"addLabels"`
 		} `json:"vulnerabilityAlerts"`
 		PackageRules []struct {
 			MatchManagers      []string `json:"matchManagers"`
@@ -163,13 +165,18 @@ func TestSharedPreset(t *testing.T) {
 			AutomergeType      string   `json:"automergeType"`
 			Enabled            *bool    `json:"enabled"`
 			AddLabels          []string `json:"addLabels"`
+			PrConcurrentLimit  *int     `json:"prConcurrentLimit"`
+			PrHourlyLimit      *int     `json:"prHourlyLimit"`
 		} `json:"packageRules"`
 	}
 	if err := json.Unmarshal(data, &p); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(p.Schedule, []string{"* * 8,22 * *"}) {
-		t.Errorf("schedule = %v, want the 8th and 22nd", p.Schedule)
+	// Normal updates run every day: on the old 8th/22nd schedule a repo's ~5 visits a day opened
+	// about one PR each on two days a month, and majors piled up "Awaiting Schedule" (ui#354).
+	// minimumReleaseAge is what keeps a release off main for its first week now.
+	if !slices.Equal(p.Schedule, []string{"at any time"}) {
+		t.Errorf("schedule = %v, want at any time", p.Schedule)
 	}
 	if !slices.Equal(p.VulnerabilityAlerts.Schedule, []string{"at any time"}) || string(p.VulnerabilityAlerts.MinimumReleaseAge) != "null" {
 		t.Errorf("vulnerabilityAlerts = %+v, want any time and no minimum age", p.VulnerabilityAlerts)
@@ -193,8 +200,17 @@ func TestSharedPreset(t *testing.T) {
 	if p.MinimumReleaseAge != "7 days" || p.InternalChecksFilter != "strict" {
 		t.Errorf("minimumReleaseAge %q, internalChecksFilter %q", p.MinimumReleaseAge, p.InternalChecksFilter)
 	}
-	if !p.OSVVulnerabilityAlerts || p.PrHourlyLimit <= 0 || p.PrConcurrentLimit <= 0 {
-		t.Errorf("osv %v, prHourlyLimit %d, prConcurrentLimit %d", p.OSVVulnerabilityAlerts, p.PrHourlyLimit, p.PrConcurrentLimit)
+	// prHourlyLimit 4 leaves the non-major group room in a visit even when a major and security PRs
+	// were opened earlier in the same clock hour (Renovate counts every PR the repo opened this hour).
+	if !p.OSVVulnerabilityAlerts || p.PrHourlyLimit != 4 || p.PrConcurrentLimit != 8 {
+		t.Errorf("osv %v, prHourlyLimit %d, prConcurrentLimit %d: want true, 4 and 8", p.OSVVulnerabilityAlerts, p.PrHourlyLimit, p.PrConcurrentLimit)
+	}
+	// A security fix must always open. Renovate applies vulnerabilityAlerts over the package rules
+	// and calcLimit takes the lowest limit of a branch's upgrades, 0 meaning none, so without these
+	// a major security fix would take the majors rule's prConcurrentLimit 3 (and every fix the
+	// top-level 8, against the security PRs' own count).
+	if va := p.VulnerabilityAlerts; va.PrConcurrentLimit == nil || *va.PrConcurrentLimit != 0 || va.BranchConcurrentLimit == nil || *va.BranchConcurrentLimit != 0 {
+		t.Errorf("vulnerabilityAlerts prConcurrentLimit %v, branchConcurrentLimit %v: want both 0 (no limit)", va.PrConcurrentLimit, va.BranchConcurrentLimit)
 	}
 	// GitHub's native auto-merge never applies the ccf-review bypass, so Renovate merges the PRs
 	// itself, through the API as ccf-release-bot, with the repos' only merge method.
@@ -223,7 +239,7 @@ func TestSharedPreset(t *testing.T) {
 		t.Errorf("vulnerabilityAlerts labels %v, addLabels %v: want none", va.Labels, va.AddLabels)
 	}
 
-	var internalOff, grouped, opaOff, opaAPI, indirectFix bool
+	var internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped bool
 	var labelRules int
 	nonMajor := []string{"minor", "patch", "digest", "pin", "pinDigest"}
 	opaNames := []string{"github.com/open-policy-agent/opa", "open-policy-agent/opa", "openpolicyagent/opa"}
@@ -243,7 +259,19 @@ func TestSharedPreset(t *testing.T) {
 			}
 			continue
 		}
+		// Only the majors rule sets PR limits: a limit on another rule would cap the non-major group
+		// or a security fix through calcLimit's lowest-limit-wins.
+		if (r.PrConcurrentLimit != nil || r.PrHourlyLimit != nil) && !slices.Equal(r.MatchUpdateTypes, []string{"major"}) {
+			t.Errorf("a rule matching %v %v sets prConcurrentLimit %v, prHourlyLimit %v: want limits only on the majors rule", r.MatchUpdateTypes, r.MatchPackageNames, r.PrConcurrentLimit, r.PrHourlyLimit)
+		}
 		switch {
+		// Majors wait for a human, so they are capped: a new major opens only while the repo has
+		// fewer than 3 open non-vulnerability Renovate PRs (at most 2 majors next to the non-major
+		// group) and no Renovate PR yet this clock hour (at most one a visit). The rest wait under
+		// Rate-Limited in the Dependency Dashboard.
+		case slices.Equal(r.MatchUpdateTypes, []string{"major"}):
+			majorsCapped = r.Automerge != nil && !*r.Automerge && slices.Contains(r.AddLabels, "needs-human") &&
+				r.PrConcurrentLimit != nil && *r.PrConcurrentLimit == 3 && r.PrHourlyLimit != nil && *r.PrHourlyLimit == 1
 		// Indirect modules are linked into the binary: their updates must release (fix), not
 		// chore(deps), which :semanticPrefixFixDepsChoreOthers gives depType indirect.
 		case slices.Equal(r.MatchDepTypes, []string{"indirect"}):
@@ -264,9 +292,9 @@ func TestSharedPreset(t *testing.T) {
 	if labelRules != 1 {
 		t.Errorf("%d rules add %s, want 1", labelRules, AutomergeLabel)
 	}
-	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix {
-		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v",
-			internalOff, grouped, opaOff, opaAPI, indirectFix)
+	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped {
+		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v",
+			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped)
 	}
 }
 
@@ -329,8 +357,13 @@ func TestShard(t *testing.T) {
 	}
 }
 
-// TestThrottle: a live run takes at most MaxLiveRepos repos and each opens at most prHourlyLimit
-// non-vulnerability PRs, so one run opens at most the plan's ~15 across the org.
+// TestThrottle: a visit is one run on one repo, and Renovate counts a repo's PRs per clock hour, so
+// per repo per visit it opens at most prHourlyLimit non-vulnerability PRs, of which at most the
+// majors rule's prHourlyLimit are majors. A live run takes at most MaxLiveRepos repos, so it opens
+// at most MaxLiveRepos x prHourlyLimit across the org, 60 with today's values: a worst case that
+// needs every repo of the shard to have four non-vulnerability updates due at once (the majors'
+// own caps make it rarer; docs/renovate.md#the-org-wide-throttle). Vulnerability fixes come on top
+// and are deliberately not capped (TestSharedPreset).
 func TestThrottle(t *testing.T) {
 	data, err := os.ReadFile("../../renovate/default.json")
 	if err != nil {
@@ -338,11 +371,27 @@ func TestThrottle(t *testing.T) {
 	}
 	var p struct {
 		PrHourlyLimit int `json:"prHourlyLimit"`
+		PackageRules  []struct {
+			MatchUpdateTypes []string `json:"matchUpdateTypes"`
+			PrHourlyLimit    *int     `json:"prHourlyLimit"`
+		} `json:"packageRules"`
 	}
 	if err := json.Unmarshal(data, &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.PrHourlyLimit != 1 || MaxLiveRepos*p.PrHourlyLimit > 15 {
-		t.Errorf("prHourlyLimit %d x MaxLiveRepos %d: want prHourlyLimit 1 and at most 15 PRs a run", p.PrHourlyLimit, MaxLiveRepos)
+	if p.PrHourlyLimit != 4 {
+		t.Errorf("prHourlyLimit = %d, want 4 non-vulnerability PRs per repo per visit", p.PrHourlyLimit)
+	}
+	majorsPerVisit := -1
+	for _, r := range p.PackageRules {
+		if slices.Equal(r.MatchUpdateTypes, []string{"major"}) && r.PrHourlyLimit != nil {
+			majorsPerVisit = *r.PrHourlyLimit
+		}
+	}
+	if majorsPerVisit != 1 {
+		t.Errorf("the majors rule's prHourlyLimit = %d, want at most 1 major per repo per visit", majorsPerVisit)
+	}
+	if perRun := MaxLiveRepos * p.PrHourlyLimit; perRun > 60 {
+		t.Errorf("MaxLiveRepos %d x prHourlyLimit %d = %d non-vulnerability PRs a run, want at most 60", MaxLiveRepos, p.PrHourlyLimit, perRun)
 	}
 }

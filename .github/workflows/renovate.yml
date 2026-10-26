@@ -1,12 +1,13 @@
 name: renovate
 
 # Self-hosted Renovate for the manifest's repos, with the shared preset (renovate/default.json).
-# Runs hourly: the preset limits normal updates to the 8th and 22nd and lets vulnerability fixes
-# through any day. A live run works on one shard of at most 15 repos, picked by the run number, so
-# the shards take turns run by run: each repo is visited every n runs (n = shards). GitHub may delay
-# or drop scheduled runs, which slows the rotation but never skips a shard. The preset opens at most
-# one non-vulnerability PR per repo an hour, so one run opens at most about 15, and two runs close
-# together about 30 (docs/renovate.md#the-org-wide-throttle). A scheduled run uses the dispatch
+# Runs hourly: the preset lets normal updates through every day once a release is 7 days old, and
+# vulnerability fixes at once. A live run works on one shard of at most 15 repos, picked by the run
+# number, so the shards take turns run by run: each repo is visited every n runs (n = shards). GitHub
+# may delay or drop scheduled runs, which slows the rotation but never skips a shard. The preset opens
+# at most 4 non-vulnerability PRs per repo an hour, at most one of them a major, so one run opens at
+# most 60 across the org; vulnerability fixes are never capped
+# (docs/renovate.md#the-org-wide-throttle). A scheduled run uses the dispatch
 # defaults below, except that it runs live when the repo variable RENOVATE_LIVE is "true".
 # After a live run, a merge pass merges the shard's green renovate:automerge PRs as the bot: Renovate
 # itself merges at most one PR per repo per run (docs/renovate.md#the-merge-pass).
