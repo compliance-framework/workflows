@@ -145,8 +145,8 @@ func TestSharedPreset(t *testing.T) {
 		VulnerabilityAlerts    struct {
 			Schedule              []string        `json:"schedule"`
 			MinimumReleaseAge     json.RawMessage `json:"minimumReleaseAge"`
-			PrConcurrentLimit     *int            `json:"prConcurrentLimit"`
-			BranchConcurrentLimit *int            `json:"branchConcurrentLimit"`
+			PrConcurrentLimit     json.RawMessage `json:"prConcurrentLimit"`
+			BranchConcurrentLimit json.RawMessage `json:"branchConcurrentLimit"`
 			SemanticCommitType    string          `json:"semanticCommitType"`
 			GroupName             string          `json:"groupName"`
 			GroupSlug             string          `json:"groupSlug"`
@@ -154,19 +154,20 @@ func TestSharedPreset(t *testing.T) {
 			AddLabels             []string        `json:"addLabels"`
 		} `json:"vulnerabilityAlerts"`
 		PackageRules []struct {
-			MatchManagers      []string `json:"matchManagers"`
-			MatchDepTypes      []string `json:"matchDepTypes"`
-			SemanticCommitType string   `json:"semanticCommitType"`
-			MatchPackageNames  []string `json:"matchPackageNames"`
-			MatchRepositories  []string `json:"matchRepositories"`
-			MatchUpdateTypes   []string `json:"matchUpdateTypes"`
-			GroupName          string   `json:"groupName"`
-			Automerge          *bool    `json:"automerge"`
-			AutomergeType      string   `json:"automergeType"`
-			Enabled            *bool    `json:"enabled"`
-			AddLabels          []string `json:"addLabels"`
-			PrConcurrentLimit  *int     `json:"prConcurrentLimit"`
-			PrHourlyLimit      *int     `json:"prHourlyLimit"`
+			MatchManagers         []string `json:"matchManagers"`
+			MatchDepTypes         []string `json:"matchDepTypes"`
+			SemanticCommitType    string   `json:"semanticCommitType"`
+			MatchPackageNames     []string `json:"matchPackageNames"`
+			MatchRepositories     []string `json:"matchRepositories"`
+			MatchUpdateTypes      []string `json:"matchUpdateTypes"`
+			GroupName             string   `json:"groupName"`
+			Automerge             *bool    `json:"automerge"`
+			AutomergeType         string   `json:"automergeType"`
+			Enabled               *bool    `json:"enabled"`
+			AddLabels             []string `json:"addLabels"`
+			PrConcurrentLimit     *int     `json:"prConcurrentLimit"`
+			PrHourlyLimit         *int     `json:"prHourlyLimit"`
+			BranchConcurrentLimit *int     `json:"branchConcurrentLimit"`
 		} `json:"packageRules"`
 	}
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -209,8 +210,8 @@ func TestSharedPreset(t *testing.T) {
 	// and calcLimit takes the lowest limit of a branch's upgrades, 0 meaning none, so without these
 	// a major security fix would take the majors rule's prConcurrentLimit 3 (and every fix the
 	// top-level 8, against the security PRs' own count).
-	if va := p.VulnerabilityAlerts; va.PrConcurrentLimit == nil || *va.PrConcurrentLimit != 0 || va.BranchConcurrentLimit == nil || *va.BranchConcurrentLimit != 0 {
-		t.Errorf("vulnerabilityAlerts prConcurrentLimit %v, branchConcurrentLimit %v: want both 0 (no limit)", va.PrConcurrentLimit, va.BranchConcurrentLimit)
+	if va := p.VulnerabilityAlerts; string(va.PrConcurrentLimit) != "0" || string(va.BranchConcurrentLimit) != "0" {
+		t.Errorf("vulnerabilityAlerts prConcurrentLimit %s, branchConcurrentLimit %s: want both 0 (no limit)", va.PrConcurrentLimit, va.BranchConcurrentLimit)
 	}
 	// GitHub's native auto-merge never applies the ccf-review bypass, so Renovate merges the PRs
 	// itself, through the API as ccf-release-bot, with the repos' only merge method.
@@ -245,6 +246,12 @@ func TestSharedPreset(t *testing.T) {
 	opaNames := []string{"github.com/open-policy-agent/opa", "open-policy-agent/opa", "openpolicyagent/opa"}
 	for _, r := range p.PackageRules {
 		off := r.Enabled != nil && !*r.Enabled
+		// Only the majors rule sets PR limits: through calcLimit's lowest-limit-wins, a limit on
+		// another rule would cap the non-major group (the renovate:automerge rule matches every
+		// non-major update) or a security fix.
+		if (r.PrConcurrentLimit != nil || r.PrHourlyLimit != nil || r.BranchConcurrentLimit != nil) && !slices.Equal(r.MatchUpdateTypes, []string{"major"}) {
+			t.Errorf("a rule matching %v of %v sets a PR or branch limit: want limits only on the majors rule", r.MatchUpdateTypes, r.MatchPackageNames)
+		}
 		// renovate:automerge marks what the merge pass merges: exactly the auto-merged non-major
 		// updates (the group, and non-major security fixes through it), never a major or OPA (in the
 		// api its own needs-human PR). Renovate unions a group's labels, so one rule carries it.
@@ -258,11 +265,6 @@ func TestSharedPreset(t *testing.T) {
 				t.Errorf("the %s rule matches %v of %v: want only the non-major updates, OPA excluded, and nothing else set", AutomergeLabel, r.MatchUpdateTypes, r.MatchPackageNames)
 			}
 			continue
-		}
-		// Only the majors rule sets PR limits: a limit on another rule would cap the non-major group
-		// or a security fix through calcLimit's lowest-limit-wins.
-		if (r.PrConcurrentLimit != nil || r.PrHourlyLimit != nil) && !slices.Equal(r.MatchUpdateTypes, []string{"major"}) {
-			t.Errorf("a rule matching %v %v sets prConcurrentLimit %v, prHourlyLimit %v: want limits only on the majors rule", r.MatchUpdateTypes, r.MatchPackageNames, r.PrConcurrentLimit, r.PrHourlyLimit)
 		}
 		switch {
 		// Majors wait for a human, so they are capped: a new major opens only while the repo has
