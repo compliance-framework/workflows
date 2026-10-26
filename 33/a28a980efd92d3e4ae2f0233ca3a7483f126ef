@@ -1,0 +1,4 @@
+lisa-addressed:
+self-review pass 1 (33a28a9):
+- CORE-TEST-002 badDQEscapes now decodes every YAML document (yaml.NewDecoder until io.EOF), with a test case for a later document.
+- GO-NIL-001 TestSchemaURLRenovate fails with a message when a matchStrings regex has no currentValue group, instead of indexing with -1.
