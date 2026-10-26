@@ -2,3 +2,7 @@ lisa-addressed:
 self-review pass 1 (33a28a9):
 - CORE-TEST-002 badDQEscapes now decodes every YAML document (yaml.NewDecoder until io.EOF), with a test case for a later document.
 - GO-NIL-001 TestSchemaURLRenovate fails with a message when a matchStrings regex has no currentValue group, instead of indexing with -1.
+
+lisa-selfreview:
+pass 2 (strict): approve, no findings. Full gate green: gofmt, go vet, go test ./..., actionlint v1.7.12, manifest; renovate-config-validator 44.145.1 (strict, both modes) on renovate.json and renovate/default.json.
+Note: TestProbeOCIPlugin (internal/pluginprobe, untouched) timed out once under `go test -race ./...` load locally ("timeout while waiting for plugin to start"); it passes alone with and without -race and on origin/main. Environment flake, not this change.
