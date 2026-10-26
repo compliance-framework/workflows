@@ -1,8 +1,11 @@
 package ciworkflows_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,9 +21,17 @@ import (
 // and it is the only one: Go's yaml rejects every other escape YAML 1.2 doesn't have, so src
 // failing to parse is an error too.
 func badDQEscapes(src []byte) ([]string, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(src, &doc); err != nil {
-		return nil, err
+	// Every document, as Renovate parses them all.
+	var docs []*yaml.Node
+	dec := yaml.NewDecoder(bytes.NewReader(src))
+	for {
+		var doc yaml.Node
+		if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, err
+		}
+		docs = append(docs, &doc)
 	}
 	lines := strings.SplitAfter(string(src), "\n")
 	var bad []string
@@ -53,7 +64,12 @@ func badDQEscapes(src []byte) ([]string, error) {
 		}
 		return nil
 	}
-	return bad, walk(&doc)
+	for _, doc := range docs {
+		if err := walk(doc); err != nil {
+			return nil, err
+		}
+	}
+	return bad, nil
 }
 
 func TestBadDQEscapes(t *testing.T) {
@@ -65,6 +81,7 @@ func TestBadDQEscapes(t *testing.T) {
 		{"\"k\\'\": \"\\\"\\\\'\"\n", []string{"1:3"}}, // a key; \\ then a plain '
 		{"a: \"tab\\t \\\" \\\\ \\x41 \\u00e9 \\\n  more\"\n", nil},
 		{"a:\n  - b: \"one \\\n    two \\'\"\n  - é: \"\\'\"\n", []string{"3:9", "4:9"}},
+		{"a: 1\n---\nb: \"\\'\"\n", []string{"3:5"}}, // a later document
 		// Not double-quoted: a shell script's \' is the script's, not YAML's.
 		{"run: |\n  echo it\\'s \"x\\'\"\nb: 'it''s'\nc: it\\'s\n", nil},
 	} {
@@ -155,7 +172,11 @@ func TestSchemaURLRenovate(t *testing.T) {
 			files = append(files, regexp.MustCompile(re))
 		}
 		for _, s := range m.MatchStrings {
-			match = append(match, regexp.MustCompile(s))
+			re := regexp.MustCompile(s)
+			if re.SubexpIndex("currentValue") < 0 {
+				t.Fatalf("matchStrings %q: no currentValue group", s)
+			}
+			match = append(match, re)
 		}
 	}
 	if len(files) == 0 || len(match) == 0 {
