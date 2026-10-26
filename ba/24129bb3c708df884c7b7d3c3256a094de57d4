@@ -1,3 +1,7 @@
 lisa-addressed:
 self-review pass 1, fixed in ba24129:
 - [should-fix] c02d46436969 internal/renovate/config_test.go TestSharedPreset: the limits guard now runs before the renovate:automerge block's continue and also covers branchConcurrentLimit; vulnerabilityAlerts limits read as json.RawMessage so failures print values. Mutation-checked: a limit on the automerge-label rule, a missing/non-zero vulnerabilityAlerts limit, majors prHourlyLimit 2, top-level prHourlyLimit 1 and the old schedule each fail the tests.
+
+lisa-selfreview:
+pass 2 (strict): approve, no findings. Re-ran gofmt, go vet, go test ./..., actionlint v1.7.12, both renovate-config-validator 44.145.1 --strict modes, manifest check and renovate-config config --dry-run full (schedule at any time, prHourlyLimit 4, majors 3/1, vulnerabilityAlerts limits 0 in the built config).
+Not changed (out of scope): docs/renovate.md's validator commands use unpinned `renovate`, not renovate@44.145.1.
