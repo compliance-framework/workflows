@@ -1,0 +1,3 @@
+lisa-addressed:
+self-review pass 1, fixed in ba24129:
+- [should-fix] c02d46436969 internal/renovate/config_test.go TestSharedPreset: the limits guard now runs before the renovate:automerge block's continue and also covers branchConcurrentLimit; vulnerabilityAlerts limits read as json.RawMessage so failures print values. Mutation-checked: a limit on the automerge-label rule, a missing/non-zero vulnerabilityAlerts limit, majors prHourlyLimit 2, top-level prHourlyLimit 1 and the old schedule each fail the tests.
