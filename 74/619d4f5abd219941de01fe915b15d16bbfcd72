@@ -4,3 +4,8 @@ lisa-design:
 - managerFilePatterns (not the removed fileMatch, absent from the 44.145.1 schema) is a /regex/ on .github/workflows/ci-go-*.y?(a)ml. TestSchemaURLRenovate requires every workflow with a golangci-lint raw schema URL to be matched, so a new file can't silently escape it.
 - The YAML check is Go-side: yaml.v3 rejects every non-YAML-1.2 escape except \' (scannerc.go accepts it as an extension), so the test parses with yaml.v3 and scans only double-quoted scalars' source for \'. Block scalars (run: scripts) are not checked: a shell \' there is the script's. Positions match yaml@2's BAD_DQ_ESCAPE positions (checked on origin/main: cut-prerelease.yml:20:57 etc.).
 - No node tooling added to the repo; the yaml@2 strict parse and Renovate runs were done from a scratch dir / the renovate 44.145.1 container.
+
+lisa-selfreview:
+pass 1 (strict): request_changes
+- [must-fix] CORE-TEST-002 internal/ciworkflows/renovate_test.go badDQEscapes: yaml.Unmarshal checks only the first document of a multi-document file. Fix: decode every document.
+- [must-fix] GO-NIL-001 internal/ciworkflows/renovate_test.go TestSchemaURLRenovate: m[re.SubexpIndex("currentValue")] panics if the regex loses its currentValue group. Fix: t.Fatalf on -1.
