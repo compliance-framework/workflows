@@ -4,3 +4,7 @@ lisa-design:
 - vulnerabilityAlerts prConcurrentLimit/branchConcurrentLimit 0 rather than a large number: 0 short-circuits calcLimit to unlimited, and vulnerabilityAlerts is applied over packageRules, so a major security fix does not inherit the majors rule's 3. renovate-config-validator 44.145.1 --strict accepts both keys there (and rejects a misspelt key there, so the keys are really validated).
 - TestSharedPreset also fails if any rule other than the majors rule sets prConcurrentLimit/prHourlyLimit: through lowest-limit-wins such a limit would cap the non-major group or a security fix.
 - TestThrottle bound is MaxLiveRepos x prHourlyLimit (60), a worst case; MaxLiveRepos stays 15 (also keeps a live run within the app token's hour). ccf-bump-sync.yml and its 8th/22nd schedule are untouched.
+
+lisa-selfreview:
+pass 1 (strict): 1 finding
+- [should-fix] c02d46436969 internal/renovate/config_test.go TestSharedPreset: the only-majors-set-limits guard runs after the renovate:automerge rule's continue (so a limit on that rule, which matches every non-major update, would go unnoticed) and ignores branchConcurrentLimit. Fix: move it above the label block, include branchConcurrentLimit.
