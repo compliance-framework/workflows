@@ -95,6 +95,35 @@ npx --yes --package renovate -- renovate-config-validator --strict --no-global r
 npx --yes --package renovate -- renovate-config-validator --strict renovate/default.json
 ```
 
+### This repo's `renovate.json`
+
+This repo has one, for a version only its own workflows hold. The Go kind workflows (`ci-go-lib`,
+`ci-go-plugin`, `ci-go-service`) verify the golangci-lint config against the JSON schema of the
+golangci-lint version their `golangci/golangci-lint-action` step installs, downloaded from that
+version's tag (`SCHEMA_URL: https://raw.githubusercontent.com/golangci/golangci-lint/<version>/jsonschema/...`),
+and `TestGolangciVerifySetup` fails when the two versions differ. Renovate's github-actions manager
+bumps the action's `with.version`, but a URL in an `env:` value is just a string to it, so every
+golangci-lint bump used to break CI. A regex custom manager (`customManagers`, `managerFilePatterns`
+`.github/workflows/ci-go-*.yml`) reads the URL's version as the same dependency as the action's
+(`depName` and `packageName` `golangci/golangci-lint`, `github-releases`), so both move in the same
+`renovate/all-non-major` PR to the same version. `TestSchemaURLRenovate` checks the manager finds
+each file's URL with the action's version. The file is merged on top of the preset as any repo's
+would be (`requireConfig: "optional"`) and sets nothing else. Validate it like the preset:
+`renovate-config-validator --strict --no-global renovate.json`.
+
+### Workflow YAML must be valid YAML 1.2
+
+Renovate's github-actions manager finds `uses:` lines with a regex, but everything else it reads
+from the parsed workflow: the versions in `with:` (`goreleaser-action`'s `version`,
+`golangci-lint-action`'s `version`, `setup-node`'s `node-version`, `chart-testing`), job containers,
+services and runners. Its YAML parser is strict YAML 1.2, and when a file doesn't parse, Renovate
+drops all of those for the file without a warning, while still updating its actions. GitHub and Go's
+yaml are laxer: until October 2026, ten release workflows had `"the caller\'s ..."` in an input
+description, which GitHub accepts but YAML 1.2 doesn't (`\'` is no escape in double quotes; write
+`'`), so Renovate bumped goreleaser in the CI workflows but not in `release-go-lib.yml` and
+`release-go-plugin.yml`, and `TestGoreleaserPins` failed on its PR (#146). `TestGitHubYAMLEscapes`
+keeps `\'` out of every YAML file under `.github`.
+
 ## The org-wide throttle
 
 `prHourlyLimit` is per repo in Renovate (each repo counts the PRs it opened since the top of the

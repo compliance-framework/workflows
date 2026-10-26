@@ -113,8 +113,8 @@ jobs:
         if: ${{ !cancelled() && steps.golangci-lint.outcome != 'skipped' }}
         env:
           CONFIG: ${{ steps.args.outputs.config }}
-          # The JSON schema of the golangci-lint version above, from its tag (the same file
-          # golangci-lint.run serves for v2.11), so golangci-lint.run isn't needed.
+          # The JSON schema of the golangci-lint version above, from its tag, so golangci-lint.run
+          # isn't needed. Renovate bumps it with the version (renovate.json, docs/renovate.md).
           SCHEMA_URL: https://raw.githubusercontent.com/golangci/golangci-lint/v2.11.4/jsonschema/golangci.next.jsonschema.json
         run: |
           args=()
