@@ -20,6 +20,11 @@ type fakeGH struct {
 	finals   map[string]string
 	files    map[string]string // "repo@ref:path" -> content
 	commits  map[string]string // "repo@tag" -> commit SHA
+	tagReads []string          // TagCommit's "repo@tag", in order
+	// authors: "repo@tag" -> who published the release (default ccf-release-bot[bot]); offMain:
+	// commits that are not on the default branch.
+	authors  map[string]string
+	offMain  map[string]bool
 	open     map[string]*bump.PR
 	calls    []string
 	nextPR   int
@@ -47,11 +52,21 @@ func (f *fakeGH) TagTime(context.Context, string, string) (time.Time, error) {
 	return time.Time{}, nil
 }
 func (f *fakeGH) TagCommit(_ context.Context, repo, tag string) (string, error) {
+	f.tagReads = append(f.tagReads, repo+"@"+tag)
 	c, ok := f.commits[repo+"@"+tag]
 	if !ok {
 		return "", fmt.Errorf("no tag %s %s", repo, tag)
 	}
 	return c, nil
+}
+func (f *fakeGH) ReleaseAuthor(_ context.Context, repo, tag string) (string, error) {
+	if a, ok := f.authors[repo+"@"+tag]; ok {
+		return a, nil
+	}
+	return "ccf-release-bot[bot]", nil
+}
+func (f *fakeGH) OnBranch(_ context.Context, _, sha, branch string) (bool, error) {
+	return branch == "main" && !f.offMain[sha], nil
 }
 func (f *fakeGH) File(_ context.Context, repo, ref, path string) ([]byte, error) {
 	c, ok := f.files[repo+"@"+ref+":"+path]
@@ -209,7 +224,7 @@ func setup(t *testing.T) (root string, e env, gh *fakeGH, out *bytes.Buffer) {
 	}
 	root = t.TempDir()
 	fixtures := map[string]string{"mock-api": "", "mock-agent": "", "mock-ui": "ui", "mock-agent-action": "action",
-		"mock-plugin-1": "plugin", "mock-plugin-policies-1": "policies"}
+		"mock-plugin-1": "plugin", "mock-plugin-policies-1": "policies", "mock-helm-charts": "helm"}
 	for repo, fx := range fixtures {
 		dir := filepath.Join(root, "clones", repo)
 		if fx != "" {
@@ -247,13 +262,15 @@ func TestSyncAllPR(t *testing.T) {
 	root, e, gh, out := setup(t)
 	var slept []time.Duration
 	e.sleep = func(d time.Duration) { slept = append(slept, d) }
+	output := filepath.Join(root, "github-output")
+	e.getenv = func(k string) string { return map[string]string{"GITHUB_OUTPUT": output}[k] }
 	args := []string{"sync", "--all", "--manifest", filepath.Join(root, "repos.yaml"), "--pr", "--batch", "2"}
 	if err := run(context.Background(), args, e); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	want := []string{
 		`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
-		"label mock-ui#1 ccf-bump:automerge",
+		"label mock-ui#1 needs-human", // the ui sync script records no version: a human checks it
 		`create mock-agent-action main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-agent to v0.2.0"`,
 		"label mock-agent-action#2 needs-human",
 		`create mock-plugin-1 main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-gooci to v0.3.0"`,
@@ -267,9 +284,13 @@ func TestSyncAllPR(t *testing.T) {
 	if len(slept) != 1 || slept[0] != time.Hour {
 		t.Errorf("slept %v, want one hour after the first batch of 2", slept)
 	}
+	// ccf-bump-sync.yml pauses before the next chunk only when this chunk pushed PRs.
+	if got, err := os.ReadFile(output); err != nil || string(got) != "prs=4\n" {
+		t.Errorf("GITHUB_OUTPUT = %q, %v; want prs=4", got, err)
+	}
 	for repo, line := range map[string]string{
 		"mock-agent-action:Dockerfile":                         "FROM ghcr.io/compliance-framework/mock-agent:0.2.0 AS source",
-		"mock-ui:src/api-version.json":                         `"mockApi": "v0.1.0"`,
+		"mock-ui:" + conformanceFixture:                        `"api": "v0.1.0"`,
 		"mock-plugin-1:.github/workflows/release.yml":          "mock-gooci/cmd/mock-gooci@v0.3.0",
 		"mock-plugin-policies-1:.github/workflows/release.yml": `opa-version: "1.15.0"`,
 		"mock-plugin-policies-1:.github/workflows/preview.yml": "opa-version: ${{ vars.OPA_VERSION }}",
@@ -291,8 +312,11 @@ func TestSyncAllPR(t *testing.T) {
 	if err := run(context.Background(), []string{"sync", "--repos", "mock-ui", "--manifest", filepath.Join(root, "repos.yaml"), "--pr"}, e); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{`update mock-ui#1 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#1 ccf-bump:automerge"}; !slices.Equal(gh.calls, want) {
+	if want := []string{`update mock-ui#1 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#1 needs-human"}; !slices.Equal(gh.calls, want) {
 		t.Errorf("rerun calls %q, want %q", gh.calls, want)
+	}
+	if got, err := os.ReadFile(output); err != nil || string(got) != "prs=4\nprs=1\n" {
+		t.Errorf("GITHUB_OUTPUT = %q, %v; want prs=1 appended", got, err)
 	}
 }
 
@@ -355,6 +379,37 @@ func TestWorkflowsPins(t *testing.T) {
 		t.Errorf("train --set workflows=1.1.0: %v\n%s", err, out)
 	}
 
+	// A release someone published by hand, or cut from a commit that isn't on main, doesn't move
+	// the pins: sync warns and leaves them, a given release fails.
+	for _, untrusted := range []struct {
+		name string
+		set  func()
+		why  string
+	}{
+		{"published by hand", func() { gh.authors = map[string]string{"workflows@v1.1.0": "mallory"} },
+			"release v1.1.0 of workflows was published by mallory, not ccf-release-bot[bot]"},
+		{"off main", func() { gh.authors, gh.offMain = nil, map[string]bool{sha: true} },
+			"release v1.1.0 of workflows is at " + sha + ", which is not on main"},
+	} {
+		untrusted.set()
+		out.Reset()
+		gh.finals["workflows"] = "v1.1.0"
+		args := []string{"sync", "--repos", "mock-plugin-1", "--manifest", m, "--clones", filepath.Join(root, "clones")}
+		if err := run(context.Background(), args, e); err != nil {
+			t.Fatalf("%s: sync: %v\n%s", untrusted.name, err, out)
+		}
+		if !strings.Contains(out.String(), "::warning::ccf-bump: workflows pins left as they are: "+untrusted.why) ||
+			!strings.Contains(out.String(), "no target workflows    3 pin(s) left as they are") {
+			t.Errorf("%s: sync output:\n%s", untrusted.name, out)
+		}
+		out.Reset()
+		args = []string{"--repo", "mock-plugin-1", "--mode", "train", "--set", "workflows=v1.1.0", "--manifest", m, "--clones", filepath.Join(root, "clones")}
+		if err := run(context.Background(), args, e); err == nil || !strings.Contains(err.Error(), untrusted.why) {
+			t.Errorf("%s: train --set workflows=v1.1.0: %v\n%s", untrusted.name, err, out)
+		}
+	}
+	gh.authors, gh.offMain = nil, nil
+
 	// Train mode moves the pins only when asked; sync mode without a workflows release leaves them.
 	for _, args := range [][]string{
 		{"--repo", "mock-plugin-1", "--mode", "train", "--set", "mock-gooci=0.3.0"},
@@ -380,6 +435,20 @@ func TestListAndErrors(t *testing.T) {
 	if got := out.String(); got != "mock-api,mock-agent,mock-ui,mock-agent-action,mock-plugin-1,mock-plugin-policies-1\n" {
 		t.Errorf("list = %q", got)
 	}
+	// One ccf-bump-sync.yml job per chunk, in stage order.
+	for size, want := range map[string]string{
+		"4":  `[{"index":1,"of":2,"repos":"mock-api,mock-agent,mock-ui,mock-agent-action"},{"index":2,"of":2,"repos":"mock-plugin-1,mock-plugin-policies-1"}]`,
+		"6":  `[{"index":1,"of":1,"repos":"mock-api,mock-agent,mock-ui,mock-agent-action,mock-plugin-1,mock-plugin-policies-1"}]`,
+		"10": `[{"index":1,"of":1,"repos":"mock-api,mock-agent,mock-ui,mock-agent-action,mock-plugin-1,mock-plugin-policies-1"}]`,
+	} {
+		out.Reset()
+		if err := run(context.Background(), []string{"list", "--manifest", m, "--chunk", size}, e); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSpace(out.String()); got != want {
+			t.Errorf("list --chunk %s = %s, want %s", size, got, want)
+		}
+	}
 	for args, want := range map[string]string{
 		"sync":                               "one of --all or --repos",
 		"sync --all --repos mock-ui":         "one of --all or --repos",
@@ -390,6 +459,8 @@ func TestListAndErrors(t *testing.T) {
 		"--set mock-api=main --repo mock-ui": "want a version",
 		"--batch 5 --repo mock-ui":           "go with sync",
 		"sync --all --mode train":            "sync runs in sync mode",
+		"sync --all --chunk 2":               "goes with list",
+		"list --chunk -1":                    "goes with list",
 	} {
 		err := run(context.Background(), append(strings.Fields(args), "--manifest", m), e)
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -430,7 +501,7 @@ func TestLabelFailureWarns(t *testing.T) {
 	if n := strings.Count(strings.Join(gh.calls, "\n"), "create "); n != 4 {
 		t.Errorf("created %d PRs, want 4: %q", n, gh.calls)
 	}
-	want := "mock-ui#1: label ccf-bump:automerge: 403 Forbidden"
+	want := "mock-plugin-1#3: label ccf-bump:automerge: 403 Forbidden"
 	if !strings.Contains(out.String(), "::warning::ccf-bump: "+want) {
 		t.Errorf("no ::warning:: line:\n%s", out)
 	}
@@ -465,7 +536,7 @@ func TestSupersededPRsClosed(t *testing.T) {
 		`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
 		`close mock-ui#50 "Superseded by #100."`,
 		"delete mock-ui ccf-bump/sync-2026-09-22",
-		"label mock-ui#100 ccf-bump:automerge",
+		"label mock-ui#100 needs-human",
 	}
 	if !slices.Equal(gh.calls, want) {
 		t.Errorf("calls:\n%s\nwant:\n%s\noutput:\n%s", strings.Join(gh.calls, "\n"), strings.Join(want, "\n"), out)
@@ -485,12 +556,12 @@ func TestSupersededPRsWarnings(t *testing.T) {
 			fake: func(f *fakeGH) { f.closeErr = fmt.Errorf("403 Forbidden") },
 			warn: "mock-ui#50: close superseded PR: 403 Forbidden",
 			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`,
-				`close mock-ui#50 "Superseded by #100."`, "label mock-ui#100 ccf-bump:automerge"},
+				`close mock-ui#50 "Superseded by #100."`, "label mock-ui#100 needs-human"},
 		},
 		"author unknown": {
 			fake:  func(f *fakeGH) { f.anon = true },
 			warn:  "mock-ui#100: author unknown; earlier ccf-bump PRs left open",
-			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#100 ccf-bump:automerge"},
+			calls: []string{`create mock-ui main<-ccf-bump/sync-2026-10-08 "fix(deps): bump mock-api to v0.1.0"`, "label mock-ui#100 needs-human"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -534,6 +605,129 @@ func TestWithoutTokens(t *testing.T) {
 	}
 }
 
+func TestCommandEnv(t *testing.T) {
+	const org = "github.com/compliance-framework/*"
+	for name, tc := range map[string]struct{ env, want []string }{
+		"unset": {
+			env:  []string{"PATH=/bin", "GH_TOKEN=x", "GITHUB_TOKEN=y"},
+			want: []string{"PATH=/bin", "GOPRIVATE=" + org},
+		},
+		"empty": {env: []string{"GOPRIVATE="}, want: []string{"GOPRIVATE=" + org}},
+		"appended": {
+			env:  []string{"GOPRIVATE=example.com/*", "PATH=/bin"},
+			want: []string{"PATH=/bin", "GOPRIVATE=example.com/*," + org},
+		},
+		"already there": {
+			env:  []string{"GOPRIVATE=example.com/*," + org},
+			want: []string{"GOPRIVATE=example.com/*," + org},
+		},
+		"last value wins": {
+			env:  []string{"GOPRIVATE=a.com/*", "GOPRIVATE=b.com/*"},
+			want: []string{"GOPRIVATE=b.com/*," + org},
+		},
+		// Set explicitly, they override GOPRIVATE, so they get the pattern too; unset, they follow it.
+		"GONOPROXY and GONOSUMDB": {
+			env:  []string{"GONOPROXY=example.com/*", "GONOSUMDB=other.com/*", "GOFLAGS=-mod=mod"},
+			want: []string{"GOFLAGS=-mod=mod", "GOPRIVATE=" + org, "GONOPROXY=example.com/*," + org, "GONOSUMDB=other.com/*," + org},
+		},
+	} {
+		if got := commandEnv(tc.env, "compliance-framework"); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: commandEnv = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// fakeGo puts a go on PATH that logs its arguments and the environment it got to the returned
+// file, and changes nothing.
+func fakeGo(t *testing.T) (log string) {
+	bin := t.TempDir()
+	log = filepath.Join(t.TempDir(), "go.log")
+	script := "#!/bin/sh\nprintf '%s|GOPRIVATE=%s|GONOSUMDB=%s|GH_TOKEN=%s\\n' \"$*\" \"$GOPRIVATE\" \"$GONOSUMDB\" \"$GH_TOKEN\" >> " + log + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+// goModRepo commits a go.mod requiring the org module mock-api to mock-agent's clone and returns
+// the args of a train dry run of mock-agent with mock-api v0.1.0.
+func goModRepo(t *testing.T, root string) []string {
+	addGoMod(t, root, "mock-agent")
+	return []string{"--repo", "mock-agent", "--manifest", filepath.Join(root, "repos.yaml"), "--mode", "train",
+		"--set", "mock-api=0.1.0", "--pr", "--dry-run", "--clones", filepath.Join(root, "clones")}
+}
+
+// addGoMod commits a go.mod requiring mock-api v0.0.9 to repo's clone.
+func addGoMod(t *testing.T, root, repo string) {
+	dir := filepath.Join(root, "clones", repo)
+	mod := "module github.com/compliance-framework/mock-agent\n\ngo 1.26.1\n\nrequire github.com/compliance-framework/mock-api v0.0.9\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "--quiet", "-m", "go.mod")
+}
+
+// TestGoFetchesOrgModulesDirectly: go runs with the org's modules in GOPRIVATE (kept: one already
+// set) and without the token.
+func TestGoFetchesOrgModulesDirectly(t *testing.T) {
+	root, e, gh, out := setup(t)
+	log := fakeGo(t)
+	t.Setenv("GOPRIVATE", "example.com/*")
+	t.Setenv("GONOSUMDB", "")
+	t.Setenv("GH_TOKEN", "secret")
+	gh.commits = map[string]string{"mock-api@v0.1.0": "0123456789abcdef0123456789abcdef01234567"}
+	if err := run(context.Background(), goModRepo(t, root), e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	got, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const env = "|GOPRIVATE=example.com/*,github.com/compliance-framework/*|GONOSUMDB=|GH_TOKEN=\n"
+	if want := "get github.com/compliance-framework/mock-api@v0.1.0" + env + "mod tidy" + env; string(got) != want {
+		t.Errorf("go ran:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestDryRunUntaggedVersion: a dry run doesn't run go get for a version that isn't tagged yet (the
+// train plans versions before they are released); it prints the plan and fails the repo.
+func TestDryRunUntaggedVersion(t *testing.T) {
+	root, e, _, out := setup(t)
+	log := fakeGo(t)
+	err := run(context.Background(), goModRepo(t, root), e)
+	if err == nil || !strings.Contains(err.Error(), "dry run: tag v0.1.0 of mock-api not found (not tagged yet?), so go get was not run") {
+		t.Errorf("err = %v", err)
+	}
+	if !strings.Contains(out.String(), "bump      mock-api     v0.0.9 -> v0.1.0") {
+		t.Errorf("output lacks the plan:\n%s", out)
+	}
+	if got, err := os.ReadFile(log); err == nil {
+		t.Errorf("go ran:\n%s", got)
+	}
+}
+
+// TestDryRunTagReadOnce: a dry run over several repos reads each Go module target's tag once.
+func TestDryRunTagReadOnce(t *testing.T) {
+	root, e, gh, out := setup(t)
+	log := fakeGo(t)
+	addGoMod(t, root, "mock-agent")
+	addGoMod(t, root, "mock-plugin-1")
+	gh.commits = map[string]string{"mock-api@v0.1.0": "0123456789abcdef0123456789abcdef01234567"}
+	args := []string{"sync", "--repos", "mock-agent,mock-plugin-1", "--manifest", filepath.Join(root, "repos.yaml"),
+		"--dry-run", "--clones", filepath.Join(root, "clones")}
+	if err := run(context.Background(), args, e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !slices.Equal(gh.tagReads, []string{"mock-api@v0.1.0"}) {
+		t.Errorf("tags read: %q, want mock-api@v0.1.0 once", gh.tagReads)
+	}
+	if got, err := os.ReadFile(log); err != nil || strings.Count(string(got), "get github.com/compliance-framework/mock-api@v0.1.0") != 2 {
+		t.Errorf("go get should run once per repo; go ran (%v):\n%s", err, got)
+	}
+}
+
 func TestLabels(t *testing.T) {
 	automerge := []bump.PRLabel{{Name: bump.AutomergeLabel}}
 	for name, tc := range map[string]struct {
@@ -544,12 +738,12 @@ func TestLabels(t *testing.T) {
 		out   string
 	}{
 		"eligible": {
-			repo: "mock-ui", calls: []string{"label mock-ui#1 ccf-bump:automerge"}, out: "  label: ccf-bump:automerge\n",
+			repo: "mock-plugin-1", calls: []string{"label mock-plugin-1#1 ccf-bump:automerge"}, out: "  label: ccf-bump:automerge\n",
 		},
 		"label fails": {
-			repo: "mock-ui", fake: func(f *fakeGH) { f.labelErr = fmt.Errorf("403 Forbidden") },
-			calls: []string{"label mock-ui#1 ccf-bump:automerge", "label mock-ui#1 needs-human"},
-			out:   "::warning::ccf-bump: mock-ui#1: label needs-human: 403 Forbidden",
+			repo: "mock-plugin-1", fake: func(f *fakeGH) { f.labelErr = fmt.Errorf("403 Forbidden") },
+			calls: []string{"label mock-plugin-1#1 ccf-bump:automerge", "label mock-plugin-1#1 needs-human"},
+			out:   "::warning::ccf-bump: mock-plugin-1#1: label needs-human: 403 Forbidden",
 		},
 		"major": {
 			repo: "mock-agent-action", calls: []string{"label mock-agent-action#1 needs-human"}, out: "auto-merge: off",
@@ -559,14 +753,14 @@ func TestLabels(t *testing.T) {
 			calls: []string{"unlabel mock-agent-action#7 ccf-bump:automerge", "label mock-agent-action#7 needs-human"},
 		},
 		"GitHub auto-merge from an older run": {
-			repo: "mock-ui", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
-			calls: []string{"disable-automerge PR_7", "label mock-ui#7 ccf-bump:automerge"}, out: "GitHub auto-merge: disabled",
+			repo: "mock-plugin-1", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
+			calls: []string{"disable-automerge PR_7", "label mock-plugin-1#7 ccf-bump:automerge"}, out: "GitHub auto-merge: disabled",
 		},
 		"disabling GitHub auto-merge fails": {
-			repo: "mock-ui", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
+			repo: "mock-plugin-1", open: &bump.PR{Number: 7, NodeID: "PR_7", AutoMerge: map[string]any{}},
 			fake:  func(f *fakeGH) { f.autoErr = fmt.Errorf("disable auto-merge: nope") },
-			calls: []string{"disable-automerge PR_7", "label mock-ui#7 ccf-bump:automerge"},
-			out:   "::warning::ccf-bump: mock-ui#7: disable auto-merge: nope",
+			calls: []string{"disable-automerge PR_7", "label mock-plugin-1#7 ccf-bump:automerge"},
+			out:   "::warning::ccf-bump: mock-plugin-1#7: disable auto-merge: nope",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -586,6 +780,65 @@ func TestLabels(t *testing.T) {
 			}
 			if !strings.Contains(out.String(), tc.out) {
 				t.Errorf("output lacks %q:\n%s", tc.out, out)
+			}
+		})
+	}
+}
+
+// TestHelmAppMinor: in a helm repo an app version moved by a minor or more needs a human; a patch
+// is auto-merged. The helm fixture pins api 0.17.1 (image tag and appVersion) and ui 2.10.1.
+func TestHelmAppMinor(t *testing.T) {
+	const manifest = testManifest + "  - {name: mock-helm-charts, kind: helm, release: true}\n"
+	automerge := []bump.PRLabel{{Name: bump.AutomergeLabel}}
+	held := "auto-merge: off (" + bump.HelmAppReason + ")"
+	for name, tc := range map[string]struct {
+		set   string
+		open  *bump.PR // the PR an earlier run opened on today's branch
+		calls []string
+		out   string
+	}{
+		"0.x minor":  {set: "api=0.18.0", calls: []string{"label mock-helm-charts#1 needs-human"}, out: held},
+		"0.x patch":  {set: "api=0.17.2", calls: []string{"label mock-helm-charts#1 ccf-bump:automerge"}, out: "label: ccf-bump:automerge"},
+		"1.x+ minor": {set: "ui=2.11.0", calls: []string{"label mock-helm-charts#1 needs-human"}, out: held},
+		"1.x+ patch": {set: "ui=2.10.2", calls: []string{"label mock-helm-charts#1 ccf-bump:automerge"}, out: "label: ccf-bump:automerge"},
+		"major":      {set: "ui=3.0.0", calls: []string{"label mock-helm-charts#1 needs-human"}, out: held},
+		"minor, earlier run patch": {set: "api=0.18.0", open: &bump.PR{Number: 7, Labels: automerge},
+			calls: []string{"unlabel mock-helm-charts#7 ccf-bump:automerge", "label mock-helm-charts#7 needs-human"}, out: held},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, e, gh, out := setup(t)
+			m := filepath.Join(root, "helm.yaml")
+			if err := os.WriteFile(m, []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tc.open != nil {
+				gh.open["mock-helm-charts ccf-bump/train-2026-10-08"] = tc.open
+			}
+			args := []string{"--repo", "mock-helm-charts", "--mode", "train", "--set", tc.set, "--manifest", m, "--pr"}
+			if err := run(context.Background(), args, e); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if got := gh.calls[1:]; !slices.Equal(got, tc.calls) { // [0] is the create or update
+				t.Errorf("calls %q, want %q\n%s", got, tc.calls, out)
+			}
+			if !strings.Contains(out.String(), tc.out) {
+				t.Errorf("output lacks %q:\n%s", tc.out, out)
+			}
+			if strings.Contains(tc.calls[len(tc.calls)-1], "needs-human") == strings.Contains(out.String(), "label: ccf-bump:automerge") {
+				t.Errorf("held PR labelled ccf-bump:automerge, or an eligible one not:\n%s", out)
+			}
+
+			// The PR body says why too.
+			out.Reset()
+			if err := run(context.Background(), append(args, "--dry-run"), e); err != nil {
+				t.Fatalf("dry run: %v\n%s", err, out)
+			}
+			body := "Not auto-merged, a human merges this PR:\n    \n    - " + bump.HelmAppReason + ".\n"
+			if got := strings.Contains(out.String(), body); got != (tc.out == held) {
+				t.Errorf("dry run body has the reason: %v, want %v:\n%s", got, tc.out == held, out)
+			}
+			if got := strings.Contains(out.String(), "dry run: "+held); got != (tc.out == held) {
+				t.Errorf("dry run says auto-merge is off: %v, want %v:\n%s", got, tc.out == held, out)
 			}
 		})
 	}
@@ -620,7 +873,7 @@ func TestPRTitleType(t *testing.T) {
 		"only a runtime dep":    {[]bump.Change{gomod}, "fix(deps): bump mock-api to v0.2.0"},
 		"OPA counts as runtime": {[]bump.Change{{Ref: bump.Ref{Dep: bump.DepOPA, File: ".github/workflows/release.yml"}, To: "v1.15.0"}, wf("x")}, "fix(deps): bump opa to v1.15.0, workflows to v1.1.0"},
 	} {
-		if title, _ := prText(options{owner: "compliance-framework", mode: "sync"}, bump.Plan{Changes: tc.changes}); title != tc.want {
+		if title, _ := prText(options{owner: "compliance-framework", mode: "sync"}, bump.Plan{Changes: tc.changes}, nil); title != tc.want {
 			t.Errorf("%s: title %q, want %q", name, title, tc.want)
 		}
 	}

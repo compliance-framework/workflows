@@ -10,11 +10,6 @@ on:
     - cron: "30 8 * * 1" # Mondays 08:30 UTC
   workflow_dispatch:
     inputs:
-      manifest:
-        description: Manifest to read the repos from
-        type: choice
-        options: [repos.mock.yaml, repos.yaml]
-        default: repos.mock.yaml
       dry_run:
         description: Print the digest instead of posting it
         type: boolean
@@ -31,10 +26,13 @@ jobs:
   digest:
     name: digest
     runs-on: ubuntu-latest
+    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
+    # (repo-settings), so a workflow on another branch can't read them.
+    environment: release
     timeout-minutes: 15
     env:
       # A scheduled run has no inputs: keep this fallback equal to the input's default.
-      MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+      MANIFEST: repos.yaml
       # Scheduled runs are dry runs until ATTENTION_DIGEST_LIVE is "true"; manual ones follow the input.
       DRY_RUN: ${{ github.event_name == 'schedule' && vars.ATTENTION_DIGEST_LIVE != 'true' || github.event_name != 'schedule' && inputs.dry_run }}
     steps:
@@ -57,7 +55,7 @@ jobs:
             echo "repos=$repos"
             echo "dry_run=$([ "$DRY_RUN" = true ] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: token
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}

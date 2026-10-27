@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "CCF shared Renovate preset: third-party dependencies only (ccf-bump owns compliance-framework ones). Branches are rebased only on conflicts (rebaseWhen), so one run merges every green PR. See docs/renovate.md.",
+  "description": "CCF shared Renovate preset: third-party dependencies only (ccf-bump owns compliance-framework ones). Normal updates run every day once a release is 7 days old (minimumReleaseAge), at most 4 new PRs per repo an hour (prHourlyLimit), with majors capped by their package rule (one per visit, about 2 open); vulnerability fixes are never held by a PR limit (vulnerabilityAlerts prConcurrentLimit and branchConcurrentLimit 0). Renovate merges at most one PR per repo per run (two with its restart), so vulnerability fixes are grouped into one PR per package manager (vulnerabilityAlerts groupName/groupSlug), and branches are rebased only on conflicts (rebaseWhen). See docs/renovate.md.",
   "extends": [
     "config:recommended",
     ":semanticCommits",
@@ -8,13 +8,18 @@
     "helpers:pinGitHubActionDigests"
   ],
   "timezone": "UTC",
-  "schedule": ["* * 8,22 * *"],
+  "schedule": ["at any time"],
   "minimumReleaseAge": "7 days",
   "internalChecksFilter": "strict",
   "vulnerabilityAlerts": {
     "enabled": true,
     "schedule": ["at any time"],
-    "minimumReleaseAge": null
+    "minimumReleaseAge": null,
+    "prConcurrentLimit": 0,
+    "branchConcurrentLimit": 0,
+    "semanticCommitType": "fix",
+    "groupName": "security fixes ({{{manager}}}{{#if (containsString packageName 'open-policy-agent/opa')}}, opa{{/if}})",
+    "groupSlug": "security-{{{manager}}}{{#if (containsString packageName 'open-policy-agent/opa')}}-opa{{/if}}"
   },
   "osvVulnerabilityAlerts": true,
   "platformAutomerge": false,
@@ -30,7 +35,7 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "Indirect Go modules (depType indirect, chore(deps) by default) are linked into the binary too, so their updates (security fixes included) are fix(deps) and release.",
+      "description": "Indirect Go modules (depType indirect, chore(deps) by default) are linked into the binary too, so their updates are fix(deps) and release (security fixes are fix(deps) through vulnerabilityAlerts whatever their depType).",
       "matchManagers": ["gomod"],
       "matchDepTypes": ["indirect"],
       "semanticCommitType": "fix"
@@ -45,10 +50,22 @@
       "automergeType": "pr"
     },
     {
-      "description": "Majors open a PR for a human, labelled needs-human (docs/attention.md).",
+      "description": "What the preset auto-merges (the non-major group and non-major security fixes) is labelled renovate:automerge, so renovate.yml's merge pass merges it right after the run: Renovate merges at most one PR per repo per run. Not majors or OPA, which wait for a human (docs/renovate.md#the-merge-pass).",
+      "matchPackageNames": [
+        "!github.com/open-policy-agent/opa",
+        "!open-policy-agent/opa",
+        "!openpolicyagent/opa"
+      ],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "addLabels": ["renovate:automerge"]
+    },
+    {
+      "description": "Majors open a PR for a human, labelled needs-human (docs/attention.md), and are capped so a backlog of them can't bury a repo. Renovate compares a rule's limits with repo-wide counts: prConcurrentLimit 3 lets a major open only while the repo has fewer than 3 open non-vulnerability Renovate PRs (so at most 2 majors while the non-major group is open), and prHourlyLimit 1 only while the repo has had no Renovate PR yet this clock hour (security PRs included), so at most one major per visit, and none in a visit that opens the group. The rest wait under Rate-Limited in the Dependency Dashboard (docs/renovate.md#the-org-wide-throttle).",
       "matchUpdateTypes": ["major"],
       "automerge": false,
-      "addLabels": ["needs-human"]
+      "addLabels": ["needs-human"],
+      "prConcurrentLimit": 3,
+      "prHourlyLimit": 1
     },
     {
       "description": "OPA follows the api via ccf-bump everywhere else (agent, policy and plugin repos), so Renovate leaves it alone there.",
@@ -57,10 +74,7 @@
         "open-policy-agent/opa",
         "openpolicyagent/opa"
       ],
-      "matchRepositories": [
-        "!compliance-framework/api",
-        "!compliance-framework/mock-api"
-      ],
+      "matchRepositories": ["!compliance-framework/api"],
       "enabled": false
     },
     {
@@ -70,10 +84,7 @@
         "open-policy-agent/opa",
         "openpolicyagent/opa"
       ],
-      "matchRepositories": [
-        "compliance-framework/api",
-        "compliance-framework/mock-api"
-      ],
+      "matchRepositories": ["compliance-framework/api"],
       "groupName": "opa",
       "groupSlug": "opa",
       "automerge": false,

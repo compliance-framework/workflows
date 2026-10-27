@@ -30,6 +30,7 @@ type Engine struct {
 	Members Members      // nil: commands are refused, since no one's role can be checked
 	Slack   slackkit.API // nil: messages are only logged
 	Bumper  Bumper
+	Gate    Gate // runs the gate's workflows (gate.go); nil: no gate
 	// Load reads a manifest; the train's own path is in its state.
 	Load func(path string) (*manifest.Manifest, error)
 
@@ -39,8 +40,11 @@ type Engine struct {
 	RequiredCheck         string // a check every merged PR must pass, e.g. "ci / required"
 	ReleasePleaseWorkflow string // file name of the repos' release-please workflow
 	RunURL                string // this workflow run, linked from failure messages
+	Registry              string // where the repos' OCI artifacts are, e.g. ghcr.io/compliance-framework
 	Now                   func() time.Time
 	Log                   io.Writer
+
+	finals map[string]string // repo -> latest final release (LatestFinal), read once per run
 }
 
 func (e *Engine) logf(format string, args ...any) {
@@ -52,7 +56,7 @@ func (e *Engine) logf(format string, args ...any) {
 // StartOptions selects the repos of a new train.
 type StartOptions struct {
 	Manifest  string
-	Repos     []string // default: every repo with release: true
+	Repos     []string // default: every active repo with release: true (manifest.Stages)
 	DryRun    bool
 	Scheduled bool // only start on the month's first working weekday, once
 }
@@ -64,8 +68,12 @@ func (e *Engine) newState(ctx context.Context, m *manifest.Manifest, month strin
 		return nil, err
 	}
 	for _, name := range o.Repos {
-		if i := slices.IndexFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == name }); i < 0 || !m.Repos[i].Release {
+		r := m.Repo(name)
+		if r == nil || !r.Release {
 			return nil, fmt.Errorf("repo %q is not in %s with release: true", name, o.Manifest)
+		}
+		if !m.Active(*r) {
+			return nil, fmt.Errorf("repo %q is in batch %d, which is not active in %s", name, r.Batch, o.Manifest)
 		}
 	}
 	st := &State{Month: month, Manifest: o.Manifest, DryRun: o.DryRun, Status: StatusOpen, Channel: e.Channel}
@@ -90,6 +98,7 @@ func (e *Engine) newState(ctx context.Context, m *manifest.Manifest, month strin
 	if len(st.Repos) == 0 {
 		return nil, errors.New("no repos selected")
 	}
+	st.GateStage = gateStage(m, st)
 	return st, nil
 }
 
@@ -132,8 +141,29 @@ func (e *Engine) run(ctx context.Context, is Issue) error {
 // step advances the open stages, finishes the train when every repo is done, posts the new
 // holds and saves the state.
 func (e *Engine) step(ctx context.Context, is Issue, st *State) error {
+	// The gate runs once every stage before GateStage is done, and holds that stage (helm) or the
+	// finish. A train started before the gate existed has none.
+	gs := st.GateStage
 	var errs []error
+	gated := func() bool {
+		m, err := e.Load(st.Manifest)
+		if err != nil {
+			errs = append(errs, err)
+			return false
+		}
+		passed, err := e.gate(ctx, st, m, gs)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		return passed
+	}
+	passed := gs == 0
 	for stage := 1; stage <= st.Stages() && st.StageOpen(stage); stage++ {
+		if stage == gs {
+			if passed = gated(); !passed {
+				break
+			}
+		}
 		for _, r := range st.Repos {
 			if r.Stage == stage {
 				if err := e.advance(ctx, st, r); err != nil {
@@ -142,11 +172,14 @@ func (e *Engine) step(ctx context.Context, is Issue, st *State) error {
 			}
 		}
 	}
-	if len(errs) == 0 && st.AllDone() {
+	if gs > st.Stages() && st.AllDone() {
+		passed = gated()
+	}
+	if len(errs) == 0 && st.AllDone() && passed {
 		errs = append(errs, e.finish(ctx, is, st))
 	}
 	for _, r := range st.Repos {
-		if r.Hold != NoHold {
+		if r.Hold != NoHold && !r.Phase.Done() { // the gate posts its own holds, with the output
 			e.notify(ctx, st, r.Name+"|"+string(r.Phase)+"|"+string(r.Hold)+"|"+r.Detail,
 				fmt.Sprintf(":warning: *%s* is %s (%s): %s <%s|tracking issue>", r.Name, r.Hold, r.Phase, SlackText(r.Detail), is.URL))
 		}
@@ -201,6 +234,42 @@ func (s *State) released(stage int) map[string]string {
 		}
 	}
 	return sets
+}
+
+// bumpSets returns the --set versions for r's bump: what the earlier stages released (released),
+// and for each dependency of r (depends_on) in this train that released nothing in it, or was
+// skipped, its latest final release, the version ccf-bump sync would move it to. A dependency
+// outside the train is left out: the train's token only reaches its own repos. ccf-bump never
+// downgrades, so a pin newer than the latest final release stays as it is.
+func (e *Engine) bumpSets(ctx context.Context, st *State, r *RepoState) (map[string]string, error) {
+	sets := st.released(r.Stage)
+	m, err := e.Load(st.Manifest)
+	if err != nil {
+		return nil, err
+	}
+	repo := m.Repo(r.Name)
+	if repo == nil {
+		return sets, nil
+	}
+	for _, dep := range repo.DependsOn {
+		if _, ok := sets[dep]; ok || st.Repo(dep) == nil {
+			continue
+		}
+		v, ok := e.finals[dep]
+		if !ok {
+			if v, err = e.Repos.LatestFinal(ctx, dep); err != nil {
+				return nil, fmt.Errorf("latest release of %s: %w", dep, err)
+			}
+			if e.finals == nil {
+				e.finals = map[string]string{}
+			}
+			e.finals[dep] = v
+		}
+		if v != "" {
+			sets[dep] = v
+		}
+	}
+	return sets, nil
 }
 
 // post posts m to the train's thread (or as a new message when threadTS is ""), and logs it.

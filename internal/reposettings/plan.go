@@ -1,6 +1,7 @@
 package reposettings
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,44 @@ type Reader interface {
 	// Rulesets returns the repo's own rulesets (not inherited ones) by ID; nil bypass actors are
 	// ones the token can't read.
 	Rulesets(ctx context.Context, repo string) (map[int64]CurrentRuleset, error)
+	WorkflowPermissions(ctx context.Context, repo string) (WorkflowPermissions, error)
+	// ForkPRApproval returns the fork PR contributor approval policy, or "" if the repo has none
+	// (a private repo).
+	ForkPRApproval(ctx context.Context, repo string) (string, error)
+	DefaultBranch(ctx context.Context, repo string) (string, error)
+	// Environment returns the named environment, or nil if the repo has none by that name.
+	Environment(ctx context.Context, repo, name string) (*CurrentEnvironment, error)
+	// DeploymentPolicies lists an environment's branch and tag policies; it has some only with
+	// custom policies (CurrentEnvironment.Custom).
+	DeploymentPolicies(ctx context.Context, repo, env string) ([]DeploymentPolicy, error)
+	// EnvironmentSecrets lists the names of an environment's secrets (never their values).
+	EnvironmentSecrets(ctx context.Context, repo, env string) ([]string, error)
+}
+
+// CurrentEnvironment is an environment as GET /repos/{owner}/{repo}/environments/{name} returns
+// it. A nil DeploymentBranchPolicy lets every branch use it.
+type CurrentEnvironment struct {
+	DeploymentBranchPolicy *struct {
+		ProtectedBranches    bool `json:"protected_branches"`
+		CustomBranchPolicies bool `json:"custom_branch_policies"`
+	} `json:"deployment_branch_policy"`
+}
+
+// Custom reports whether only the environment's branch and tag policies may use it.
+func (e *CurrentEnvironment) Custom() bool {
+	return e.DeploymentBranchPolicy != nil && e.DeploymentBranchPolicy.CustomBranchPolicies
+}
+
+// policyMode describes the environment's deployment branch policy.
+func (e *CurrentEnvironment) policyMode() string {
+	switch {
+	case e.DeploymentBranchPolicy == nil:
+		return "all branches"
+	case e.DeploymentBranchPolicy.ProtectedBranches:
+		return "protected branches"
+	default:
+		return "custom"
+	}
 }
 
 // SecurityConfiguration is the part of an org code security configuration this tool checks. Each
@@ -45,6 +84,14 @@ type Writer interface {
 	SetSecurityUpdates(ctx context.Context, repo string, enabled bool) error
 	CreateRuleset(ctx context.Context, repo string, r Ruleset) error
 	UpdateRuleset(ctx context.Context, repo string, id int64, r Ruleset) error
+	SetWorkflowPermissions(ctx context.Context, repo string, p WorkflowPermissions) error
+	SetForkPRApproval(ctx context.Context, repo, policy string) error
+	// PutEnvironment creates the environment, or switches it, to custom branch and tag policies
+	// (none yet: no ref may use it until AddDeploymentPolicy).
+	PutEnvironment(ctx context.Context, repo, name string) error
+	AddDeploymentPolicy(ctx context.Context, repo, env string, p DeploymentPolicy) error
+	DeleteDeploymentPolicy(ctx context.Context, repo, env string, id int64) error
+	SetEnvironmentSecret(ctx context.Context, repo, env, name, value string) error
 }
 
 // Client reads and writes repo settings.
@@ -82,8 +129,8 @@ type Plan struct {
 	// Unknown are settings the token can't read (merge settings, ruleset bypass actors, Dependabot
 	// security updates), so whether they differ isn't known. They are not counted as changes, but Apply writes them.
 	Unknown []Change
-	// Managed are security settings an enforced org code security configuration already sets to
-	// the desired value. They are skipped.
+	// Managed are settings left alone: security settings an enforced org code security
+	// configuration already sets to the desired value, and settings the repo doesn't have.
 	Managed []string
 	// Warnings are security settings an enforced org code security configuration sets to another
 	// value. They are skipped, not failed: only the org configuration can change them.
@@ -92,7 +139,20 @@ type Plan struct {
 	merge               *MergeSettings
 	vulnerabilityAlerts *bool
 	securityUpdates     *bool
+	workflowPermissions *WorkflowPermissions
+	forkPRApproval      *string
 	rulesets            []rulesetWrite
+	environments        []environmentWrite
+}
+
+// environmentWrite is what Apply does to one environment, in this order: put it (create, or
+// switch to custom policies), delete and add policies, then write the secrets, so a secret never
+// lands in an environment that more refs may use than the desired ones.
+type environmentWrite struct {
+	name        string
+	put         bool
+	delete, add []DeploymentPolicy
+	secrets     []string
 }
 
 type rulesetWrite struct {
@@ -152,6 +212,13 @@ func PlanRepo(ctx context.Context, r Reader, repo string, d Desired) (*Plan, err
 		p.securityUpdates = p.compareSecurity("security.dependabot_security_updates", updates, d.SecurityUpdates)
 	}
 
+	if err := p.planActions(ctx, r, d.Actions); err != nil {
+		return nil, err
+	}
+	if err := p.planEnvironments(ctx, r, d.Environments); err != nil {
+		return nil, err
+	}
+
 	current, err := r.Rulesets(ctx, repo)
 	if err != nil {
 		return nil, err
@@ -188,6 +255,115 @@ func PlanRepo(ctx context.Context, r Reader, repo string, d Desired) (*Plan, err
 		}
 	}
 	return p, nil
+}
+
+// planActions compares the Actions settings with want.
+func (p *Plan) planActions(ctx context.Context, r Reader, want ActionsSettings) error {
+	perms, err := r.WorkflowPermissions(ctx, p.Repo)
+	if err != nil {
+		return err
+	}
+	if perms.CanApprovePullRequestReviews != want.CanApprovePullRequestReviews {
+		p.Changes = append(p.Changes, Change{Key: "actions.can_approve_pull_request_reviews",
+			Current: fmt.Sprint(perms.CanApprovePullRequestReviews), Desired: fmt.Sprint(want.CanApprovePullRequestReviews)})
+		perms.CanApprovePullRequestReviews = want.CanApprovePullRequestReviews
+		p.workflowPermissions = &perms // keeps the default permissions as they are
+	}
+	if want.ForkPRApproval == "" {
+		return nil
+	}
+	policy, err := r.ForkPRApproval(ctx, p.Repo)
+	switch {
+	case err != nil:
+		return err
+	case policy == "":
+		p.Managed = append(p.Managed, "actions.fork_pr_approval: the repo has no such setting (private); skipped")
+	case policy != want.ForkPRApproval:
+		p.Changes = append(p.Changes, Change{Key: "actions.fork_pr_approval", Current: policy, Desired: want.ForkPRApproval})
+		p.forkPRApproval = &want.ForkPRApproval
+	}
+	return nil
+}
+
+// planEnvironments compares the environments with want.
+func (p *Plan) planEnvironments(ctx context.Context, r Reader, want []Environment) error {
+	if len(want) == 0 {
+		return nil
+	}
+	branch, err := r.DefaultBranch(ctx, p.Repo)
+	if err != nil {
+		return err
+	}
+	for _, e := range want {
+		prefix := "environment[" + e.Name + "]"
+		w := environmentWrite{name: e.Name}
+		var policies []DeploymentPolicy
+		for _, b := range e.Branches {
+			if b == DefaultBranchPattern {
+				b = branch
+			}
+			policies = append(policies, DeploymentPolicy{Name: b, Type: "branch"})
+		}
+		for _, t := range e.Tags {
+			policies = append(policies, DeploymentPolicy{Name: t, Type: "tag"})
+		}
+
+		cur, err := r.Environment(ctx, p.Repo, e.Name)
+		if err != nil {
+			return err
+		}
+		var current []DeploymentPolicy
+		var secrets []string
+		switch {
+		case cur == nil:
+			p.Changes = append(p.Changes, Change{Key: prefix, Current: "missing", Desired: "create"})
+			w.put = true
+		case !cur.Custom():
+			p.Changes = append(p.Changes, Change{Key: prefix + ".deployment_branch_policy", Current: cur.policyMode(), Desired: "custom"})
+			w.put = true
+			fallthrough
+		default:
+			if cur.Custom() {
+				if current, err = r.DeploymentPolicies(ctx, p.Repo, e.Name); err != nil {
+					return err
+				}
+			}
+			if secrets, err = r.EnvironmentSecrets(ctx, p.Repo, e.Name); err != nil {
+				return err
+			}
+		}
+
+		for _, c := range current {
+			if c.Type == "" {
+				c.Type = "branch" // policies made before tag policies existed have no type
+			}
+			if !slices.ContainsFunc(policies, func(d DeploymentPolicy) bool { return d.Name == c.Name && d.Type == c.Type }) {
+				p.Changes = append(p.Changes, Change{Key: prefix + ".policy[" + c.String() + "]", Current: "present", Desired: "delete"})
+				w.delete = append(w.delete, c)
+			}
+		}
+		for _, d := range policies {
+			if !slices.ContainsFunc(current, func(c DeploymentPolicy) bool { return c.Name == d.Name && cmp.Or(c.Type, "branch") == d.Type }) {
+				p.Changes = append(p.Changes, Change{Key: prefix + ".policy[" + d.String() + "]", Current: unset, Desired: "add"})
+				w.add = append(w.add, d)
+			}
+		}
+		for _, s := range e.Secrets {
+			switch {
+			case !slices.Contains(secrets, s):
+				p.Changes = append(p.Changes, Change{Key: prefix + ".secret." + s, Current: "missing", Desired: "set"})
+			case e.RotateSecrets:
+				p.Changes = append(p.Changes, Change{Key: prefix + ".secret." + s, Current: "present", Desired: "rotate"})
+			default:
+				continue
+			}
+			w.secrets = append(w.secrets, s)
+		}
+		if w.put || len(w.delete) > 0 || len(w.add) > 0 || len(w.secrets) > 0 {
+			p.environments = append(p.environments, w)
+		}
+	}
+	return nil
 }
 
 // stateName names a bool security setting as GitHub does.
@@ -242,10 +418,12 @@ type StepResult struct {
 	Err  error
 }
 
-// Apply writes the changes in p, one step per setting: the merge settings, each ruleset, then the
-// security settings, which an org configuration can refuse. Steps are independent: a failed step
-// doesn't stop the others. Apply returns every step's result, in order.
-func Apply(ctx context.Context, w Writer, p *Plan) []StepResult {
+// Apply writes the changes in p, one step per setting: the merge settings, each ruleset, the
+// Actions settings, each environment, then the security settings, which an org configuration can
+// refuse. Steps are independent: a failed step doesn't stop the others, except that an
+// environment's secrets are skipped if its policies failed. secrets holds the secrets' values;
+// they are never printed. Apply returns every step's result, in order.
+func Apply(ctx context.Context, w Writer, p *Plan, secrets map[string]string) []StepResult {
 	var results []StepResult
 	step := func(name string, err error) { results = append(results, StepResult{Step: name, Err: err}) }
 	if p.merge != nil {
@@ -257,6 +435,40 @@ func Apply(ctx context.Context, w Writer, p *Plan) []StepResult {
 			step(name, w.CreateRuleset(ctx, p.Repo, rw.ruleset))
 		} else {
 			step(name, w.UpdateRuleset(ctx, p.Repo, rw.id, rw.ruleset))
+		}
+	}
+	if p.workflowPermissions != nil {
+		step("actions.workflow_permissions", w.SetWorkflowPermissions(ctx, p.Repo, *p.workflowPermissions))
+	}
+	if p.forkPRApproval != nil {
+		step("actions.fork_pr_approval", w.SetForkPRApproval(ctx, p.Repo, *p.forkPRApproval))
+	}
+	for _, e := range p.environments {
+		prefix := "environment[" + e.name + "]"
+		ok := true
+		policyStep := func(name string, err error) {
+			step(name, err)
+			ok = ok && err == nil
+		}
+		if e.put {
+			policyStep(prefix, w.PutEnvironment(ctx, p.Repo, e.name))
+		}
+		for _, d := range e.delete {
+			policyStep(prefix+".policy["+d.String()+"] delete", w.DeleteDeploymentPolicy(ctx, p.Repo, e.name, d.ID))
+		}
+		for _, d := range e.add {
+			policyStep(prefix+".policy["+d.String()+"]", w.AddDeploymentPolicy(ctx, p.Repo, e.name, d))
+		}
+		for _, s := range e.secrets {
+			name := prefix + ".secret." + s
+			switch v := secrets[s]; {
+			case !ok:
+				step(name, errors.New("skipped: the environment's deployment policies are not in place"))
+			case v == "":
+				step(name, fmt.Errorf("no value for %s: set it in the job's environment (README: Repo settings)", s))
+			default:
+				step(name, w.SetEnvironmentSecret(ctx, p.Repo, e.name, s, v))
+			}
 		}
 	}
 	if p.vulnerabilityAlerts != nil {
@@ -278,6 +490,9 @@ type Options struct {
 	Apply bool
 	// CheckTokenScope fails before reading any repo if the token reaches a repo outside Repos.
 	CheckTokenScope bool
+	// Secrets are the environment secrets' values, by name; Apply writes the missing ones (all of
+	// them with Environment.RotateSecrets). A dry run needs none.
+	Secrets map[string]string
 }
 
 // Run prints each repo's diff to out and, with o.Apply, writes the changes. A failure on one repo,
@@ -337,7 +552,7 @@ func Run(ctx context.Context, gh Client, o Options, out io.Writer) error {
 			continue
 		}
 		var failed []error
-		results := Apply(ctx, gh, p)
+		results := Apply(ctx, gh, p, o.Secrets)
 		for _, r := range results {
 			if r.Err != nil {
 				fmt.Fprintf(out, "%s: %s failed: %v\n", repo, r.Step, r.Err)

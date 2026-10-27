@@ -1,19 +1,17 @@
 name: repo-settings
 
-# Brings the manifest repos' merge settings, security settings and rulesets to the desired state
-# (internal/reposettings). Prints a per-repo diff; writes only with apply: true, which a human runs
-# after granting ccf-repo-admin Administration write (README: "Repo settings").
+# Brings the manifest repos' merge settings, security settings, Actions settings, rulesets and
+# release environments (with the ccf-release-bot secrets) to the desired state
+# (internal/reposettings). Prints a per-repo diff; writes only with apply: true, from main. The
+# job runs in this repo's repo-admin environment: its secrets (ccf-repo-admin's key and the
+# ccf-release-bot secrets it copies) are released only to a run on main a reviewer approves
+# (README: "Repo settings").
 
 on:
   workflow_dispatch:
     inputs:
-      manifest:
-        description: Manifest to read the repos from
-        type: choice
-        options: [repos.yaml, repos.mock.yaml]
-        default: repos.yaml
       repos:
-        description: Comma-separated subset of repos (default every repo with release true; name a release false repo to include it)
+        description: Comma-separated subset of repos (default every active repo in the manifest; may name inactive batches)
         type: string
         default: ""
       apply:
@@ -28,6 +26,10 @@ on:
         description: Status check context the ccf-required ruleset requires
         type: string
         default: ci / required
+      rotate-secrets:
+        description: Rewrite every release environment secret, not only missing ones (after a key rotation)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,6 +42,10 @@ jobs:
   sync:
     name: sync
     runs-on: ubuntu-latest
+    # Holds REPO_ADMIN_APP_ID/REPO_ADMIN_PRIVATE_KEY and the RELEASE_BOT_APP_ID/RELEASE_BOT_PRIVATE_KEY
+    # values copied into each repo's release environment. Main only, with required reviewers:
+    # ccf-repo-admin keeps Administration write, so its key must not reach any other run.
+    environment: repo-admin
     timeout-minutes: 15
     steps:
       - name: Only apply from main
@@ -56,7 +62,7 @@ jobs:
       - name: Select repos
         id: select
         env:
-          MANIFEST: ${{ inputs.manifest }}
+          MANIFEST: repos.yaml
           REPOS: ${{ inputs.repos }}
         run: |
           repos="$(go run ./cmd/repo-settings list --manifest "$MANIFEST" --repos "$REPOS")"
@@ -66,7 +72,7 @@ jobs:
             exit 1
           fi
           echo "repos=$repos" >> "$GITHUB_OUTPUT"
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: token
         with:
           app-id: ${{ secrets.REPO_ADMIN_APP_ID }}
@@ -74,14 +80,20 @@ jobs:
           owner: compliance-framework
           repositories: ${{ steps.select.outputs.repos }}
           permission-administration: ${{ inputs.apply && 'write' || 'read' }}
+          permission-actions: read # environments and their deployment policies
+          permission-environments: ${{ inputs.apply && 'write' || 'read' }} # environment secrets
       - name: Sync repo settings
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          MANIFEST: ${{ inputs.manifest }}
+          MANIFEST: repos.yaml
           REPOS: ${{ steps.select.outputs.repos }}
           APPLY: ${{ inputs.apply }}
           BYPASS_APP_ID: ${{ inputs.release-bot-app-id || vars.RELEASE_BOT_APP_ID }}
           REQUIRED_CHECK: ${{ inputs.required-check }}
+          ROTATE_SECRETS: ${{ inputs.rotate-secrets }}
+          # The values written to the release environments; a dry run doesn't get them.
+          RELEASE_BOT_APP_ID: ${{ inputs.apply && secrets.RELEASE_BOT_APP_ID || '' }}
+          RELEASE_BOT_PRIVATE_KEY: ${{ inputs.apply && secrets.RELEASE_BOT_PRIVATE_KEY || '' }}
         run: |
           go run ./cmd/repo-settings sync --manifest "$MANIFEST" --repos "$REPOS" --apply="$APPLY" \
-            --bypass-app-id "$BYPASS_APP_ID" --required-check "$REQUIRED_CHECK"
+            --bypass-app-id "$BYPASS_APP_ID" --required-check "$REQUIRED_CHECK" --rotate-secrets="$ROTATE_SECRETS"

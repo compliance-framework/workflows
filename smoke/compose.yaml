@@ -1,7 +1,8 @@
-# Stack smoke test: postgres, the API, the UI and one agent, from the published images
-# (docs/stack-smoke.md). Run it through smoke/run.sh, which generates the JWT secret, registers
-# the agent and passes its key in; `docker compose up` on this file alone starts an anonymous
-# agent that the checks would reject.
+# Stack smoke test: postgres, the API, the UI and one agent running plugin-file-attestation,
+# from the published images (docs/stack-smoke.md). Run it through smoke/run.sh, which generates
+# the JWT secret, registers the agent, passes its key in and renders the agent's config with the
+# plugin and policy tags; `docker compose up` on this file alone has no agent config and starts
+# an anonymous agent that the checks would reject.
 #
 # Nothing here is a real credential: the postgres password is a throwaway default for a
 # database that lives only as long as the run, and is not published on the host.
@@ -51,7 +52,10 @@ services:
       - api
     command: ["/app/concom", "agent", "-c", "/etc/ccf-agent/config.yml"]
     volumes:
-      - ./agent-config.yml:/etc/ccf-agent/config.yml:ro
+      # smoke/agent-config.yml with the plugin and policy tags filled in by smoke/run.sh.
+      - ${SMOKE_AGENT_CONFIG:?set SMOKE_AGENT_CONFIG (or use smoke/run.sh)}:/etc/ccf-agent/config.yml:ro
+      # The file the plugin checks (plugins.file_attestation.config.file_path).
+      - ./fixtures:/etc/ccf-agent/fixtures:ro
     environment:
       # A key smoke/run.sh creates in the API for this run (empty: the agent is anonymous).
       CCF_API_AUTH_CLIENT_ID: ${SMOKE_AGENT_CLIENT_ID:-}

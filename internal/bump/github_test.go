@@ -28,6 +28,15 @@ func TestGitHub(t *testing.T) {
 			fmt.Fprint(w, `[]`)
 		case "/repos/o/workflows/commits/v1.1.0": // GitHub peels an annotated tag to its commit
 			fmt.Fprint(w, `{"sha":"89abcdef0123456789abcdef0123456789abcdef"}`)
+		case "/repos/o/workflows/releases/tags/v1.1.0":
+			fmt.Fprint(w, `{"tag_name":"v1.1.0","author":{"login":"ccf-release-bot[bot]"}}`)
+		case "/repos/o/workflows/compare/89abcdef0123456789abcdef0123456789abcdef...main":
+			if r.URL.Query().Get("per_page") != "1" {
+				t.Errorf("compare per_page = %q", r.URL.Query().Get("per_page"))
+			}
+			fmt.Fprint(w, `{"status":"ahead"}`)
+		case "/repos/o/workflows/compare/0123456789abcdef0123456789abcdef01234567...main":
+			fmt.Fprint(w, `{"status":"diverged"}`)
 		case "/repos/o/none/releases":
 			fmt.Fprint(w, `[]`)
 		case "/repos/o/agent/contents/go.mod":
@@ -57,6 +66,18 @@ func TestGitHub(t *testing.T) {
 	}
 	if _, err := g.TagCommit(ctx, "workflows", "v9.9.9"); err == nil {
 		t.Error("TagCommit(missing tag): no error")
+	}
+	if a, err := g.ReleaseAuthor(ctx, "workflows", "v1.1.0"); err != nil || a != "ccf-release-bot[bot]" {
+		t.Errorf("ReleaseAuthor = %q, %v", a, err)
+	}
+	if _, err := g.ReleaseAuthor(ctx, "workflows", "v9.9.9"); err == nil {
+		t.Error("ReleaseAuthor(missing release): no error")
+	}
+	if on, err := g.OnBranch(ctx, "workflows", "89abcdef0123456789abcdef0123456789abcdef", "main"); err != nil || !on {
+		t.Errorf("OnBranch(ahead) = %v, %v", on, err)
+	}
+	if on, err := g.OnBranch(ctx, "workflows", "0123456789abcdef0123456789abcdef01234567", "main"); err != nil || on {
+		t.Errorf("OnBranch(diverged) = %v, %v", on, err)
 	}
 	if b, err := g.File(ctx, "agent", "v0.10.1", "go.mod"); err != nil || string(b) != "require go 1.26\n" {
 		t.Errorf("File = %q, %v", b, err)
@@ -261,19 +282,64 @@ func TestRequiredCheck(t *testing.T) {
 
 func TestExpectsCheck(t *testing.T) {
 	expected := []byte(`{"message":"Required status check \"ci / required\" is expected."}`)
+	// refused is GitHub's 405 for a ruleset violation, as on mock-plugin-2#30 (run 37915939413).
+	refused := func(violation string) error {
+		return &StatusError{Code: http.StatusMethodNotAllowed, Body: []byte(`{"message":"Repository rule violations found\n\n` + violation + `\n\n"}`)}
+	}
 	for name, tc := range map[string]struct {
 		err  error
 		want bool
 	}{
-		"405 check expected": {&StatusError{Code: http.StatusMethodNotAllowed, Body: expected}, true},
-		"wrapped":            {fmt.Errorf("merge: %w", &StatusError{Code: http.StatusMethodNotAllowed, Body: expected}), true},
-		"405 other":          {&StatusError{Code: http.StatusMethodNotAllowed, Body: []byte(`{"message":"Pull Request is not mergeable"}`)}, false},
-		"409 head moved":     {&StatusError{Code: http.StatusConflict, Body: expected}, false},
-		"not a StatusError":  {errors.New("Required status check is expected"), false},
-		"nil":                {nil, false},
+		"405 check expected":      {&StatusError{Code: http.StatusMethodNotAllowed, Body: expected}, true},
+		"405 check queued":        {refused(`Required status check \"ci / required\" is queued.`), true},
+		"405 check in progress":   {refused(`Required status check \"ci / required\" is in progress.`), true},
+		"405 check pending":       {refused(`Required status check \"ci / required\" is pending.`), true},
+		"405 checks expected":     {refused(`2 of 2 required status checks are expected.`), true},
+		"405 check failing":       {refused(`Required status check \"ci / required\" is failing.`), false},
+		"405 one of two failing":  {refused(`Required status check \"a\" is queued.\n\nRequired status check \"b\" is failing.`), false},
+		"405 failed, then queued": {refused(`Required status check \"a\" has failed.\n\nRequired status check \"b\" is queued.`), false},
+		"405 review required":     {refused(`At least 1 approving review is required by reviewers with write access.`), false},
+		"405 other":               {&StatusError{Code: http.StatusMethodNotAllowed, Body: []byte(`{"message":"Pull Request is not mergeable"}`)}, false},
+		"wrapped":                 {fmt.Errorf("merge: %w", &StatusError{Code: http.StatusMethodNotAllowed, Body: expected}), true},
+		"409 head moved":          {&StatusError{Code: http.StatusConflict, Body: expected}, false},
+		"not a StatusError":       {errors.New("Required status check is expected"), false},
+		"nil":                     {nil, false},
 	} {
 		if got := ExpectsCheck(tc.err); got != tc.want {
 			t.Errorf("%s: ExpectsCheck = %v, want %v", name, got, tc.want)
 		}
+	}
+}
+
+func TestGitHubPRCommitAuthors(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.URL.RequestURI())
+		switch r.URL.Path {
+		case "/repos/o/ui/pulls/3/commits":
+			if r.URL.Query().Get("page") == "2" {
+				fmt.Fprint(w, `[{"author":{"login":"someone"}}]`)
+				return
+			}
+			commits := []string{`{"author":{"login":"ccf-release-bot[bot]"}}`, `{"author":null}`}
+			for len(commits) < 100 {
+				commits = append(commits, `{"author":{"login":"ccf-release-bot[bot]"}}`)
+			}
+			fmt.Fprintf(w, `[%s]`, strings.Join(commits, ","))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	g := &GitHub{BaseURL: srv.URL, Owner: "o"}
+	authors, err := g.PRCommitAuthors(context.Background(), "ui", 3)
+	if err != nil || len(authors) != 101 || authors[0] != "ccf-release-bot[bot]" || authors[1] != "" || authors[100] != "someone" {
+		t.Errorf("PRCommitAuthors = %d authors %.3q…, %v; want both pages, \"\" for an unlinked author", len(authors), authors, err)
+	}
+	if want := "/repos/o/ui/pulls/3/commits?per_page=100&page=1\n/repos/o/ui/pulls/3/commits?per_page=100&page=2"; strings.Join(got, "\n") != want {
+		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
+	}
+	if _, err := g.PRCommitAuthors(context.Background(), "ui", 4); err == nil {
+		t.Error("PRCommitAuthors of a missing PR: want an error")
 	}
 }

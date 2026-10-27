@@ -1,8 +1,8 @@
 // Command attention-digest posts the open PRs of the manifest's repos that wait for a person to
 // Slack, once a week, for the attention-digest workflow:
 //
-//	attention-digest list [--manifest repos.mock.yaml] [--repos a,b]
-//	attention-digest post [--manifest repos.mock.yaml] [--repos a,b] [--owner org] [--dry-run] [flags]
+//	attention-digest list [--manifest repos.yaml] [--repos a,b]
+//	attention-digest post [--manifest repos.yaml] [--repos a,b] [--owner org] [--dry-run] [flags]
 //
 // list prints the selected repo names, comma-separated, to scope the token: every repo in the
 // manifest (the workflows repo included) unless --repos names a subset. post reads the open PRs
@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -28,10 +27,6 @@ import (
 	"github.com/compliance-framework/workflows/internal/notify"
 	"github.com/compliance-framework/workflows/internal/slackkit"
 )
-
-// defaultManifest is the mocks until the digest is proven on them; the workflow passes the
-// manifest explicitly.
-const defaultManifest = "repos.mock.yaml"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Getenv, os.Stdout, time.Now); err != nil {
@@ -47,7 +42,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return errors.New(usage)
 	}
 	fs := flag.NewFlagSet("attention-digest "+args[0], flag.ContinueOnError)
-	path := fs.String("manifest", defaultManifest, "path to the repo manifest")
+	path := fs.String("manifest", manifest.DefaultPath, "path to the repo manifest")
 	repos := fs.String("repos", "", "comma-separated repo names (default: every repo in the manifest)")
 	owner := fs.String("owner", "compliance-framework", "the repos' owner")
 	bot := fs.String("bot", notify.ReleaseBotLogin, "login of the release bot, which opens Renovate, ccf-bump and release PRs")
@@ -129,24 +124,17 @@ func post(ctx context.Context, getenv func(string) string, stdout io.Writer, car
 	return nil
 }
 
-// selectRepos returns the repos named in list, or every repo in the manifest if list is empty,
-// in manifest order. Named repos must be in the manifest.
+// selectRepos returns the repos named in list, or every active repo in the manifest
+// (manifest.ActiveRepos) if list is empty, in manifest order. Named repos must be in the manifest
+// and active.
 func selectRepos(m *manifest.Manifest, list string) ([]string, error) {
-	names := splitList(list)
-	var unknown []string
-	for _, n := range names {
-		if !slices.ContainsFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n }) {
-			unknown = append(unknown, n)
-		}
-	}
-	if len(unknown) > 0 {
-		return nil, fmt.Errorf("not in the manifest: %s", strings.Join(unknown, ", "))
+	repos, err := m.Select(splitList(list), false)
+	if err != nil {
+		return nil, err
 	}
 	var out []string
-	for _, r := range m.Repos {
-		if len(names) == 0 || slices.Contains(names, r.Name) {
-			out = append(out, r.Name)
-		}
+	for _, r := range repos {
+		out = append(out, r.Name)
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no repos selected")

@@ -38,10 +38,10 @@ func Board(st *State, reposURL, issueURL string, now time.Time) slackkit.Message
 			switch {
 			case r.Phase == Skipped:
 				tr.Pill = slackkit.PillSkipped
+			case r.Hold != NoHold: // a released repo holds for the gate
+				tr.Pill = slackkit.PillHeld
 			case r.Phase == Released:
 				tr.Pill = slackkit.PillDone
-			case r.Hold != NoHold:
-				tr.Pill = slackkit.PillHeld
 			case r.Phase == Waiting:
 				tr.Pill = slackkit.PillPending
 			}

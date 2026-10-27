@@ -18,6 +18,9 @@ type PR struct {
 	MergeSHA  string
 	AutoMerge bool // auto-merge is enabled
 	Labels    []string
+	// Fork: the head branch lives in another repo (or a deleted one), so anyone could have
+	// named it like release-please's; the train never merges such a PR.
+	Fork bool
 }
 
 // Check is a check run, or a commit status mapped onto one (Name is the context).
@@ -37,6 +40,7 @@ type Run struct {
 	Status     string
 	Conclusion string
 	URL        string
+	Attempt    int // run_attempt: 1, and one more after each re-run
 }
 
 // Issue is a tracking issue.
@@ -62,7 +66,8 @@ type Repos interface {
 	DefaultBranch(ctx context.Context, repo string) (branch, sha string, err error)
 	// File returns nil, nil when path doesn't exist at ref.
 	File(ctx context.Context, repo, ref, path string) ([]byte, error)
-	// OpenPR returns the open PR whose head branch starts with headPrefix, or nil.
+	// OpenPR returns the oldest open PR whose head branch, in the repo itself (not a fork), starts
+	// with headPrefix, or nil.
 	OpenPR(ctx context.Context, repo, headPrefix string) (*PR, error)
 	PR(ctx context.Context, repo string, number int) (*PR, error)
 	Checks(ctx context.Context, repo, sha string) ([]Check, error)
@@ -71,7 +76,12 @@ type Repos interface {
 	// Runs returns the workflow runs of event at head commit sha.
 	Runs(ctx context.Context, repo, event, sha string) ([]Run, error)
 	TagsAt(ctx context.Context, repo, sha string) ([]string, error)
+	// Tags returns every tag of repo and the commit it points at.
+	Tags(ctx context.Context, repo string) (map[string]string, error)
 	Release(ctx context.Context, repo, tag string) (body, url string, err error)
+	// LatestFinal returns repo's highest final release tag (vX.Y.Z, not a draft or prerelease),
+	// as ccf-bump sync targets it, or "" when it has none.
+	LatestFinal(ctx context.Context, repo string) (string, error)
 	RerunFailed(ctx context.Context, repo string, runID int64) error
 	// EnsureIssue opens an issue unless an open one with the same title exists.
 	EnsureIssue(ctx context.Context, repo, title, body string) (url string, err error)

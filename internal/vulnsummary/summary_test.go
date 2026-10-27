@@ -67,7 +67,7 @@ func TestCountsString(t *testing.T) {
 
 func TestMessage(t *testing.T) {
 	s := Summary{
-		Owner: "o", Scope: "4 repo(s) in repos.mock.yaml", Checked: 3,
+		Owner: "o", Scope: "4 repo(s) in mock.yaml", Checked: 3,
 		Repos: []RepoCounts{
 			{Repo: "b", Counts: Counts{1, 0, 1}},
 			{Repo: "a", Counts: Counts{0, 1, 0, 2}},
@@ -75,7 +75,7 @@ func TestMessage(t *testing.T) {
 		Failed: []Failure{{Repo: "e", Err: errors.New("GET /x: 403 Forbidden: <disabled>")}},
 	}
 	got := Message(s, Links{Server: "https://github.com/", Run: "https://github.com/o/workflows/actions/runs/1"})
-	want := ":shield: *5 open Dependabot alerts* in o (4 repo(s) in repos.mock.yaml): 1 critical, 1 high, 1 medium, 2 low\n" +
+	want := ":shield: *5 open Dependabot alerts* in o (4 repo(s) in mock.yaml): 1 critical, 1 high, 1 medium, 2 low\n" +
 		"• <https://github.com/o/b/security/dependabot|b>: 2 (1 critical, 1 medium)\n" +
 		"• <https://github.com/o/a/security/dependabot|a>: 3 (1 high, 2 low)\n" +
 		"1 other repo has no open alerts.\n" +

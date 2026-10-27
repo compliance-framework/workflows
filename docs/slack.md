@@ -26,8 +26,8 @@ So a colored message is sent as:
 
 ```json
 {
-  "text": "CI failing: compliance-framework/mock-api#12 ci",
-  "blocks": [{"type": "header", "text": {"type": "plain_text", "text": ":red_circle: CI failing · mock-api", "emoji": true}}],
+  "text": "CI failing: compliance-framework/api#12 ci",
+  "blocks": [{"type": "header", "text": {"type": "plain_text", "text": ":red_circle: CI failing · api", "emoji": true}}],
   "attachments": [{"color": "#D1242F", "fallback": "...", "blocks": ["section", "fields", "actions", "context"]}]
 }
 ```

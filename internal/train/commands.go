@@ -62,6 +62,10 @@ func (e *Engine) apply(ctx context.Context, st *State, author string, c Command)
 		return nil
 	}
 	r := st.Repo(c.Repo)
+	if g := st.GateCheck(c.Repo); g != nil && (r == nil || r.Phase == Released) {
+		e.gateCommand(ctx, st, author, c, g)
+		return nil
+	}
 	switch {
 	case r == nil:
 		return fmt.Errorf("%s is not in this train", c.Repo)
@@ -79,6 +83,13 @@ func (e *Engine) apply(ctx context.Context, st *State, author string, c Command)
 		r.Phase = Waiting
 	case Bumping:
 		r.BumpPR = 0 // run ccf-bump again
+	case ReleasePR:
+		if r.FailedRun != 0 {
+			if err := e.Repos.RerunFailed(ctx, r.Name, r.FailedRun); err != nil {
+				return fmt.Errorf("re-running the failed release-please jobs of %s: %v", r.Name, err)
+			}
+			r.Rerun = true // releasePR waits for the new attempt
+		}
 	case Publishing:
 		if r.FailedRun != 0 {
 			if err := e.Repos.RerunFailed(ctx, r.Name, r.FailedRun); err != nil {

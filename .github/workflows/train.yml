@@ -16,11 +16,6 @@ on:
         type: choice
         options: [start, reconcile]
         default: start
-      manifest:
-        description: Manifest to read the repos from (start)
-        type: choice
-        options: [repos.mock.yaml, repos.yaml]
-        default: repos.mock.yaml
       repos:
         description: Comma-separated repos (start; default every repo with release true)
         type: string
@@ -48,6 +43,10 @@ jobs:
         startsWith(github.event.comment.body, '/') &&
         github.event.comment.user.type != 'Bot')
     runs-on: ubuntu-latest
+    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
+    # (repo-settings), so a workflow on another branch can't read them. Comments, schedules and
+    # repository_dispatch run on main.
+    environment: release
     timeout-minutes: 60
     # One run at a time, at the job level so that skipped runs (other comments) don't queue.
     # GitHub keeps one pending run and cancels older pending ones; every run reads the state and
@@ -58,6 +57,7 @@ jobs:
     permissions:
       contents: read
       issues: write # the tracking issue, with GITHUB_TOKEN
+      actions: write # the gate: dispatches plugin-probe.yml and stack-smoke.yml here, reads their logs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,7 +72,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           SCHEDULE: ${{ github.event.schedule }}
           ACTION: ${{ inputs.action }}
-          MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+          MANIFEST: repos.yaml
           REPOS: ${{ inputs.repos }}
           # Scheduled starts are dry runs until TRAIN_LIVE is true; manual ones follow the input.
           DRY_RUN: ${{ github.event_name == 'schedule' && vars.TRAIN_LIVE != 'true' || github.event_name == 'workflow_dispatch' && inputs.dry_run }}
@@ -104,7 +104,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       # The release bot is installed on every org repo: a token minted with an owner and no
       # repositories would reach all of them, so only mint one for a non-empty list.
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: token
         if: steps.plan.outputs.repos != ''
         with:
@@ -122,9 +122,12 @@ jobs:
           permission-workflows: ${{ steps.plan.outputs.write == 'true' && 'write' || '' }}
       # Comment commands need the commenter's org role. The app may lack Members read: then the
       # step fails, the token is empty and the train refuses commands instead of failing.
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      # Every live run may read commands: one on an open train, and one that starts a live train
+      # and keeps reconciling it (--watch). A dry run closes its train in the run that starts it
+      # and reads none, so write (open, or a live start) is the condition.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: members
-        if: steps.plan.outputs.open == 'true'
+        if: steps.plan.outputs.write == 'true'
         continue-on-error: true
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}

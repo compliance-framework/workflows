@@ -53,15 +53,15 @@ report (`-` for stdout; only one of the two can use stdout). The exit status is 
 fails to load or any policy bundle fails its check, and both reports are still written.
 
 ```console
-$ go run ./cmd/plugin-probe --plugins bin/mock-plugin-1,bin/mock-plugin-2,ghcr.io/compliance-framework/plugin-github-settings:v0.5.0 --json report.json
+$ go run ./cmd/plugin-probe --plugins bin/new-plugin,bin/old-plugin,ghcr.io/compliance-framework/plugin-github-settings:v0.5.0 --json report.json
 ## Plugin probe
 
 Agent library v0.9.0, OPA v1.14.1.
 
 | Plugin | Protocol | Agent library | Result | Notes |
 | --- | --- | --- | --- | --- |
-| `bin/mock-plugin-1` | v2 | v0.9.0 | ok |  |
-| `bin/mock-plugin-2` | v1 | v0.8.1 | ok |  |
+| `bin/new-plugin` | v2 | v0.9.0 | ok |  |
+| `bin/old-plugin` | v1 | v0.8.1 | ok |  |
 | `ghcr.io/compliance-framework/plugin-github-settings:v0.5.0` | v2 | v0.8.0-rc4 | ok |  |
 ```
 
@@ -115,9 +115,9 @@ keychain); public GHCR packages need none.
 To probe plugins that have no OCI release yet, build them and pass the binaries:
 
 ```sh
-git clone --depth 1 https://github.com/compliance-framework/mock-plugin-1 /tmp/mock-plugin-1
-go -C /tmp/mock-plugin-1 build -o /tmp/bin/mock-plugin-1 .
-go run ./cmd/plugin-probe --plugins /tmp/bin/mock-plugin-1 --policies ../mock-plugin-policies-1
+git clone --depth 1 https://github.com/compliance-framework/plugin-github-settings /tmp/plugin-github-settings
+go -C /tmp/plugin-github-settings build -o /tmp/bin/plugin-github-settings .
+go run ./cmd/plugin-probe --plugins /tmp/bin/plugin-github-settings --policies ../plugin-github-settings-policies
 ```
 
 To probe with an unreleased agent, point `go.mod` at it with a temporary `replace` (don't
@@ -130,12 +130,14 @@ A reusable workflow (`workflow_call`, and `workflow_dispatch` for trying it by h
 
 | Input | Default | What |
 | --- | --- | --- |
-| `plugins` | required | Plugins to probe, comma- or newline-separated OCI tags. |
+| `plugins` | none | Plugins to probe, comma- or newline-separated OCI tags. |
 | `agent-ref` | this repo's `go.mod` | An agent version, tag, branch or commit. The job runs `go get github.com/compliance-framework/agent@<ref>`, then moves OPA to the version that agent's `go.mod` requires, and fails if it can't. |
 | `policies` | none | Policy bundles to check, comma- or newline-separated OCI tags. |
 
 The markdown report becomes the job summary, the JSON report is printed to the log and returned
-as the `report` output (one line of JSON), and the job fails as the probe does. It needs only
+as the `report` output (one line of JSON), and the job fails as the probe does. The log also has
+the report on one line starting `ccf-plugin-probe-report `, which the release train's gate reads
+to find protocol v1 plugins. Pass `plugins`, `policies` or both. It needs only
 `contents: read`; the plugins and bundles must be pullable anonymously.
 
 ```yaml
@@ -150,5 +152,5 @@ jobs:
         ghcr.io/compliance-framework/plugin-github-settings:v0.5.0
 ```
 
-Workstream 2 runs the probe locally first; workstream 3 wires the workflow into the agent's CI
-and the release train.
+The release train dispatches it for each plugin and policies repo before helm, with the agent the
+train released (see [train.md](train.md), The gate).

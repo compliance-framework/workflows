@@ -86,6 +86,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		Repos:                 &train.GitHub{BaseURL: api, Token: getenv("GH_TOKEN"), Owner: *owner},
 		Tracker:               tracker,
 		Bumper:                execBumper{path: *bumpPath, log: stdout},
+		Gate:                  tracker, // plugin-probe.yml and stack-smoke.yml in the tracker repo
+		Registry:              "ghcr.io/" + strings.ToLower(*owner),
 		Load:                  load,
 		ReposURL:              server + "/" + *owner,
 		Channel:               getenv("SLACK_CHANNEL"),
@@ -120,8 +122,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	return err
 }
 
-// waiting reports whether is is an open train with a repo in an open stage that waits on
-// GitHub (release-please, checks, a release workflow) rather than on a human.
+// waiting reports whether is is an open train with a repo in an open stage, or a gate check,
+// that waits on GitHub (release-please, checks, a release workflow, a gate run) rather than on
+// a human.
 func waiting(is train.Issue) bool {
 	st, err := train.Parse(is.Body)
 	if !is.Open || err != nil || st.Status != train.StatusOpen {
@@ -129,6 +132,8 @@ func waiting(is train.Issue) bool {
 	}
 	return slices.ContainsFunc(st.Repos, func(r *train.RepoState) bool {
 		return st.StageOpen(r.Stage) && !r.Phase.Done() && r.Hold == train.NoHold
+	}) || slices.ContainsFunc(st.Gate, func(g *train.GateCheck) bool {
+		return g.Result == train.GatePending || g.Result == train.GateRunning
 	})
 }
 
@@ -178,22 +183,35 @@ func selectRepos(ctx context.Context, tracker *train.GitHub, mode, path string, 
 	if err != nil {
 		return err
 	}
+	names, err := trainRepos(m, path, selected)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(stdout, "open=%t\nmanifest=%s\nrepos=%s\n", open, path, strings.Join(names, ","))
+	return err
+}
+
+// trainRepos returns the repos of selected, or every active repo (manifest.ActiveRepos) with
+// release: true, in manifest order. Each selected repo must be one of those.
+func trainRepos(m *manifest.Manifest, path string, selected []string) ([]string, error) {
 	var names []string
-	for _, r := range m.Repos {
+	for _, r := range m.ActiveRepos() {
 		if r.Release && (len(selected) == 0 || slices.Contains(selected, r.Name)) {
 			names = append(names, r.Name)
 		}
 	}
 	for _, s := range selected {
+		if r := m.Repo(s); r != nil && r.Release && !m.Active(*r) {
+			return nil, fmt.Errorf("repo %q is in batch %d, which is not active in %s", s, r.Batch, path)
+		}
 		if !slices.Contains(names, s) {
-			return fmt.Errorf("repo %q is not in %s with release: true", s, path)
+			return nil, fmt.Errorf("repo %q is not in %s with release: true", s, path)
 		}
 	}
 	if len(names) == 0 {
-		return errors.New("no repos selected")
+		return nil, errors.New("no repos selected")
 	}
-	_, err = fmt.Fprintf(stdout, "open=%t\nmanifest=%s\nrepos=%s\n", open, path, strings.Join(names, ","))
-	return err
+	return names, nil
 }
 
 func split(list string) []string {

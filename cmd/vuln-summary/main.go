@@ -1,8 +1,8 @@
 // Command vuln-summary posts a summary of the open Dependabot alerts, per repo and severity, to
 // Slack, for the vuln-summary workflow:
 //
-//	vuln-summary list [--manifest repos.mock.yaml] [--repos a,b]
-//	vuln-summary post [--manifest repos.mock.yaml] [--repos a,b] [--owner org]
+//	vuln-summary list [--manifest repos.yaml] [--repos a,b]
+//	vuln-summary post [--manifest repos.yaml] [--repos a,b] [--owner org]
 //
 // list prints the selected repo names, comma-separated, to scope the token. post reads the open
 // alerts with the token in GH_TOKEN, prints the summary, and posts it to SLACK_CHANNEL with
@@ -19,17 +19,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/compliance-framework/workflows/internal/manifest"
 	"github.com/compliance-framework/workflows/internal/notify"
 	"github.com/compliance-framework/workflows/internal/vulnsummary"
 )
-
-// defaultManifest is the mocks until the summary is proven on them; the workflow passes the
-// manifest explicitly.
-const defaultManifest = "repos.mock.yaml"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Getenv, os.Stdout); err != nil {
@@ -45,7 +40,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return errors.New(usage)
 	}
 	fs := flag.NewFlagSet("vuln-summary "+args[0], flag.ContinueOnError)
-	path := fs.String("manifest", defaultManifest, "path to the repo manifest")
+	path := fs.String("manifest", manifest.DefaultPath, "path to the repo manifest")
 	repos := fs.String("repos", "", "comma- or space-separated repo names (default: every repo in the manifest)")
 	owner := fs.String("owner", "compliance-framework", "the repos' owner")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -113,23 +108,18 @@ func post(ctx context.Context, getenv func(string) string, stdout io.Writer, msg
 	return nil
 }
 
-// selectRepos returns the repos named in list (comma- or space-separated), or every repo in the
-// manifest but the workflows repo (kind workflows) if list is empty, in manifest order. Named
-// repos must be in the manifest.
+// selectRepos returns the repos named in list (comma- or space-separated), or every active repo in
+// the manifest (manifest.ActiveRepos) but the workflows repo (kind workflows) if list is empty, in
+// manifest order. Named repos must be in the manifest and active.
 func selectRepos(m *manifest.Manifest, list string) ([]string, error) {
 	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
-	var unknown []string
-	for _, n := range names {
-		if !slices.ContainsFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n }) {
-			unknown = append(unknown, n)
-		}
-	}
-	if len(unknown) > 0 {
-		return nil, fmt.Errorf("not in the manifest: %s", strings.Join(unknown, ", "))
+	repos, err := m.Select(names, false)
+	if err != nil {
+		return nil, err
 	}
 	var out []string
-	for _, r := range m.Repos {
-		if len(names) == 0 && r.Kind != manifest.KindWorkflows || slices.Contains(names, r.Name) {
+	for _, r := range repos {
+		if len(names) > 0 || r.Kind != manifest.KindWorkflows {
 			out = append(out, r.Name)
 		}
 	}

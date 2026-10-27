@@ -34,30 +34,65 @@ type Options struct {
 // repos the token reaches and whether anything is written.
 var runnerKeys = []string{"platform", "autodiscover", "repositories", "onboarding", "requireConfig", "dryRun", "statusCheckWhen"}
 
-// SelectRepos returns the repos named in list (comma- or space-separated), or every repo in the
-// manifest but the workflows repo (kind workflows) if list is empty, in manifest order. Named
-// repos must be in the manifest.
-func SelectRepos(m *manifest.Manifest, list string) ([]string, error) {
-	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
-	var unknown []string
-	for _, n := range names {
-		if !slices.ContainsFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n }) {
-			unknown = append(unknown, n)
-		}
+// AutomergeLabel marks the PRs the preset auto-merges (the non-major group and non-major
+// vulnerability fixes), which `renovate-config merge` merges after each live run, so a repo gets
+// more than Renovate's one merge per run (docs/renovate.md#the-merge-pass).
+const AutomergeLabel = "renovate:automerge"
+
+// MaxLiveRepos is the most repos one live run works on (Shard). With the preset's prHourlyLimit of 4
+// (non-vulnerability PRs per repo per visit, at most one of them a major), it bounds what one
+// renovate.yml run opens across the org at MaxLiveRepos x 4; vulnerability fixes are not capped
+// (docs/renovate.md#the-org-wide-throttle). It also keeps a live run within the app token's hour.
+const MaxLiveRepos = 15
+
+// CheckDryRun returns an error unless mode is one of Renovate's dryRun values or DryRunOff.
+func CheckDryRun(mode string) error {
+	if !slices.Contains(dryRunModes, mode) {
+		return fmt.Errorf("dry run %q: want one of %s", mode, strings.Join(dryRunModes, ", "))
 	}
-	if len(unknown) > 0 {
-		return nil, fmt.Errorf("not in the manifest: %s", strings.Join(unknown, ", "))
+	return nil
+}
+
+// SelectRepos returns the repos named in list (comma- or space-separated), or every active repo in
+// the manifest (the workflows repo included; manifest.ActiveRepos) if list is empty, in manifest
+// order. Named repos must be in the manifest. They must also be active unless dryRun is a dry run
+// (not DryRunOff): a batch is checked with a dry run before it is switched on.
+func SelectRepos(m *manifest.Manifest, list, dryRun string) ([]string, error) {
+	if err := CheckDryRun(dryRun); err != nil {
+		return nil, err
+	}
+	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
+	repos, err := m.Select(names, dryRun != DryRunOff)
+	if err != nil {
+		return nil, err
 	}
 	var out []string
-	for _, r := range m.Repos {
-		if len(names) == 0 && r.Kind != manifest.KindWorkflows || slices.Contains(names, r.Name) {
-			out = append(out, r.Name)
-		}
+	for _, r := range repos {
+		out = append(out, r.Name)
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no repos selected")
 	}
 	return out, nil
+}
+
+// Shard splits repos into the fewest shards of at most size repos (repo i goes to shard i mod n) and
+// returns shard slot mod n, its index and n. renovate.yml passes its run number as slot, so
+// consecutive runs take the shards in turn and each repo is visited every n runs, however late or
+// far apart GitHub starts them.
+// size <= 0 returns every repo as one shard.
+func Shard(repos []string, size int, slot int64) (shard []string, index, count int) {
+	if size <= 0 || len(repos) <= size {
+		return repos, 0, 1
+	}
+	count = (len(repos) + size - 1) / size
+	index = int(((slot % int64(count)) + int64(count)) % int64(count))
+	for i, r := range repos {
+		if i%count == index {
+			shard = append(shard, r)
+		}
+	}
+	return shard, index, count
 }
 
 // GlobalConfig returns the Renovate global config: every setting of preset (a JSON object), plus
@@ -70,8 +105,8 @@ func GlobalConfig(preset []byte, opts Options) ([]byte, error) {
 	if len(opts.Repos) == 0 {
 		return nil, errors.New("no repos")
 	}
-	if !slices.Contains(dryRunModes, opts.DryRun) {
-		return nil, fmt.Errorf("dry run %q: want one of %s", opts.DryRun, strings.Join(dryRunModes, ", "))
+	if err := CheckDryRun(opts.DryRun); err != nil {
+		return nil, err
 	}
 	dec := json.NewDecoder(bytes.NewReader(preset))
 	dec.UseNumber() // keep the preset's numbers as written

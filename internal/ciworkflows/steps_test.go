@@ -228,6 +228,48 @@ func TestSharedCopies(t *testing.T) {
 	}
 }
 
+// TestLintTimeout: each Go kind workflow takes a lint-timeout-minutes input (number, default
+// 15, the job's former fixed limit) and its golangci-lint job runs for that long. The lint job
+// sets no --timeout of its own (golangci-lint v2 has none by default), so the job's limit is
+// the only one.
+func TestLintTimeout(t *testing.T) {
+	const timeout = "${{ inputs.lint-timeout-minutes }}"
+	for _, file := range []string{goPlugin, goService, goLib} {
+		var wf struct {
+			On struct {
+				Call struct {
+					Inputs map[string]struct {
+						Type    string `yaml:"type"`
+						Default any    `yaml:"default"`
+					} `yaml:"inputs"`
+				} `yaml:"workflow_call"`
+			} `yaml:"on"`
+			Jobs map[string]struct {
+				TimeoutMinutes string `yaml:"timeout-minutes"`
+				Steps          []struct {
+					With map[string]string `yaml:"with"`
+				} `yaml:"steps"`
+			} `yaml:"jobs"`
+		}
+		read(t, file, &wf)
+		in, ok := wf.On.Call.Inputs["lint-timeout-minutes"]
+		if !ok || in.Type != "number" || in.Default != 15 {
+			t.Errorf("%s: lint-timeout-minutes input = %+v (present %v), want type number default 15", file, in, ok)
+		}
+		lint := wf.Jobs["lint"]
+		if lint.TimeoutMinutes != timeout {
+			t.Errorf("%s: lint job timeout-minutes = %q, want %q", file, lint.TimeoutMinutes, timeout)
+		}
+		args := script(t, file, "lint", "Choose the lint arguments")
+		for _, s := range lint.Steps {
+			args += "\n" + s.With["args"]
+		}
+		if strings.Contains(args, "--timeout") {
+			t.Errorf("%s: the golangci-lint arguments set a --timeout; it must then follow lint-timeout-minutes too", file)
+		}
+	}
+}
+
 func TestMakeTargets(t *testing.T) {
 	src := script(t, goService, "make", "make")
 	bin := t.TempDir()
@@ -420,8 +462,8 @@ func TestLintArgs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := run(t, dir, src, append(tc.env, "SHARED=false")...)
-			if got := strings.Join(strings.Fields(r.outputs["args"]), " "); r.failed || got != tc.want {
-				t.Fatalf("args %q, want %q (failed=%v):\n%s", got, tc.want, r.failed, r.out)
+			if got := strings.Join(strings.Fields(r.outputs["args"]), " "); r.failed || got != tc.want || r.outputs["config"] != "" {
+				t.Fatalf("args %q config %q, want %q and no config (failed=%v):\n%s", got, r.outputs["config"], tc.want, r.failed, r.out)
 			}
 		})
 	}
@@ -437,8 +479,8 @@ func TestLintArgs(t *testing.T) {
 		r := run(t, dir, src, "SHARED=true", "NEW_ONLY=true", "BASE_REF=main", "BEFORE=")
 		cfg := filepath.Join(r.temp, "ccf-golangci.yml")
 		want := "--config=" + cfg + " --new-from-merge-base=origin/main"
-		if got := strings.Join(strings.Fields(r.outputs["args"]), " "); r.failed || got != want {
-			t.Fatalf("args %q, want %q (failed=%v):\n%s", got, want, r.failed, r.out)
+		if got := strings.Join(strings.Fields(r.outputs["args"]), " "); r.failed || got != want || r.outputs["config"] != cfg {
+			t.Fatalf("args %q config %q, want %q and config %q (failed=%v):\n%s", got, r.outputs["config"], want, cfg, r.failed, r.out)
 		}
 		if _, err := os.Stat(cfg); err != nil {
 			t.Fatalf("shared config not moved: %v", err)
@@ -471,6 +513,58 @@ func TestGoreleaserCheck(t *testing.T) {
 			warned := strings.Contains(r.out, "::warning::")
 			if r.failed != tc.failed || warned != tc.warning {
 				t.Fatalf("failed=%v warning=%v, want %v/%v:\n%s", r.failed, warned, tc.failed, tc.warning, r.out)
+			}
+		})
+	}
+}
+
+// TestSelfRequired: this repo's own ci.yml reports `ci / required` (what ccf-required requires)
+// after every other job but the advisory ones: anything but success fails, except release-checks
+// skipped (every PR but a release-please one, and every push).
+func TestSelfRequired(t *testing.T) {
+	var wf struct {
+		Jobs map[string]struct {
+			Name  string   `yaml:"name"`
+			Needs []string `yaml:"needs"`
+			If    string   `yaml:"if"`
+		} `yaml:"jobs"`
+	}
+	read(t, "ci.yml", &wf)
+	req := wf.Jobs["required"]
+	// manifest-coverage lists the organisation's repos: an org change or an API error must not
+	// block merges (docs/manifest.md).
+	advisory := []string{"manifest-coverage"}
+	var others []string
+	for name := range wf.Jobs {
+		if name != "required" && !slices.Contains(advisory, name) {
+			others = append(others, name)
+		}
+	}
+	for _, name := range advisory {
+		if _, ok := wf.Jobs[name]; !ok {
+			t.Errorf("ci.yml has no advisory job %s", name)
+		}
+	}
+	slices.Sort(others)
+	if got := slices.Sorted(slices.Values(req.Needs)); req.Name != "ci / required" || !slices.Equal(got, others) || req.If != "${{ always() }}" {
+		t.Errorf("ci.yml required = %+v, want name ci / required, needs %v, if always()", req, others)
+	}
+	need(t, "jq")
+	src := script(t, "ci.yml", "required", "Check the results")
+	for _, tc := range []struct {
+		name, needs, want string
+		failed            bool
+	}{
+		{"release PR", `{"go":{"result":"success"},"actionlint":{"result":"success"},"release-checks":{"result":"success"}}`, "All required jobs succeeded.", false},
+		{"other PR", `{"go":{"result":"success"},"actionlint":{"result":"success"},"release-checks":{"result":"skipped"}}`, "All required jobs succeeded.", false},
+		{"release-checks failed", `{"go":{"result":"success"},"actionlint":{"result":"success"},"release-checks":{"result":"failure"}}`, "release-checks: failure", true},
+		{"go skipped", `{"go":{"result":"skipped"},"actionlint":{"result":"success"},"release-checks":{"result":"skipped"}}`, "go: skipped", true},
+		{"cancelled", `{"go":{"result":"success"},"actionlint":{"result":"cancelled"},"release-checks":{"result":"skipped"}}`, "actionlint: cancelled", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := run(t, t.TempDir(), src, "NEEDS="+tc.needs)
+			if r.failed != tc.failed || !strings.Contains(r.out, tc.want) {
+				t.Fatalf("failed=%v, want %v; output:\n%s", r.failed, tc.failed, r.out)
 			}
 		})
 	}

@@ -4,9 +4,9 @@
 //	release check module-path [--gomod go.mod] [--manifest .release-please-manifest.json]
 //	release check version-guard --base base.json [--head .release-please-manifest.json]
 //	release next-rc --version X.Y.Z [--prefix v]    (existing tags on stdin, one per line)
-//	release preview-tags [--on-main=true|false]     (appends tags=... to $GITHUB_OUTPUT)
+//	release preview-tags [--on-main=true|false]     (appends tags=... and version=... to $GITHUB_OUTPUT)
 //	release release-tags --tag T [--prefix v] [--style image|artifact]
-//	                                               (appends tags=..., final=... and major=vX to $GITHUB_OUTPUT)
+//	                                               (appends tags=..., final=..., major=vX and version=X.Y.Z[-pre] to $GITHUB_OUTPUT)
 //	release chart --tag T [--charts-dir charts]    (appends path=..., name=... and version=... to $GITHUB_OUTPUT)
 //
 // version-guard and preview-tags read the PR from $GITHUB_EVENT_PATH.
@@ -196,17 +196,19 @@ func previewTags(onMain bool, getenv func(string) string, stdout io.Writer) erro
 		return err
 	}
 	pr := e.PullRequest
-	tags, reason := release.PreviewTags(release.Event{
+	ev := release.Event{
 		Name: getenv("GITHUB_EVENT_NAME"), Ref: getenv("GITHUB_REF"), SHA: getenv("GITHUB_SHA"),
 		DefaultBranch: e.Repository.DefaultBranch, PRNumber: pr.Number, Labels: pr.labels(),
 		Fork: pr.Head.Repo.FullName != "" && pr.Head.Repo.FullName != e.Repository.FullName,
-	}, onMain)
+	}
+	tags, reason := release.PreviewTags(ev, onMain)
+	version := release.PreviewVersion(ev, onMain)
 	if len(tags) == 0 {
 		fmt.Fprintln(stdout, "No preview: "+reason+".")
 	} else {
-		fmt.Fprintln(stdout, "Preview tags: "+strings.Join(tags, " "))
+		fmt.Fprintln(stdout, "Preview tags: "+strings.Join(tags, " ")+" (VERSION "+version+")")
 	}
-	return writeOutputs(getenv, "tags="+strings.Join(tags, " "))
+	return writeOutputs(getenv, "tags="+strings.Join(tags, " "), "version="+version)
 }
 
 func releaseTags(tag, prefix, style string, getenv func(string) string, stdout io.Writer) error {
@@ -217,13 +219,17 @@ func releaseTags(tag, prefix, style string, getenv func(string) string, stdout i
 	if err != nil {
 		return err
 	}
+	version, err := release.ReleaseVersion(tag, prefix)
+	if err != nil {
+		return err
+	}
 	kind := "pre-release"
 	if final {
 		kind = "final release"
 	}
 	fmt.Fprintf(stdout, "Release tags for %s (%s): %s\n", tag, kind, strings.Join(tags, " "))
-	major := semver.Major("v" + strings.TrimPrefix(tag, prefix))
-	return writeOutputs(getenv, "tags="+strings.Join(tags, " "), fmt.Sprintf("final=%t", final), "major="+major)
+	major := semver.Major("v" + version)
+	return writeOutputs(getenv, "tags="+strings.Join(tags, " "), fmt.Sprintf("final=%t", final), "major="+major, "version="+version)
 }
 
 func chart(tag, dir string, getenv func(string) string, stdout io.Writer) error {

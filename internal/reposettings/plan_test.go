@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -24,6 +25,17 @@ type fakeRepo struct {
 	// config is the attached org code security configuration (nil: none).
 	config   *SecurityConfiguration
 	rulesets map[int64]Ruleset
+	perms    WorkflowPermissions
+	// forkPolicy is the fork PR approval policy ("": none, as for a private repo).
+	forkPolicy string
+	envs       map[string]*fakeEnv
+}
+
+// fakeEnv is an environment: custom is false for one every branch may use.
+type fakeEnv struct {
+	custom   bool
+	policies []DeploymentPolicy
+	secrets  map[string]string // name -> value
 }
 
 // fakeGitHub keeps repo state in memory, records every call and applies writes to the state. Rulesets
@@ -115,6 +127,115 @@ func asRead(rs Ruleset, hideBypass bool) CurrentRuleset {
 	return out
 }
 
+func (f *fakeGitHub) WorkflowPermissions(_ context.Context, repo string) (WorkflowPermissions, error) {
+	r, err := f.repo("workflow permissions", repo, false)
+	if err != nil {
+		return WorkflowPermissions{}, err
+	}
+	return r.perms, nil
+}
+
+func (f *fakeGitHub) ForkPRApproval(_ context.Context, repo string) (string, error) {
+	r, err := f.repo("fork approval", repo, false)
+	if err != nil {
+		return "", err
+	}
+	return r.forkPolicy, nil
+}
+
+func (f *fakeGitHub) SetWorkflowPermissions(_ context.Context, repo string, p WorkflowPermissions) error {
+	r, err := f.repo(fmt.Sprintf("workflow permissions=%s,approve=%t", p.DefaultWorkflowPermissions, p.CanApprovePullRequestReviews), repo, true)
+	if err == nil {
+		r.perms = p
+	}
+	return err
+}
+
+func (f *fakeGitHub) SetForkPRApproval(_ context.Context, repo, policy string) error {
+	r, err := f.repo("fork approval="+policy, repo, true)
+	if err == nil {
+		r.forkPolicy = policy
+	}
+	return err
+}
+
+func (f *fakeGitHub) DefaultBranch(_ context.Context, repo string) (string, error) {
+	_, err := f.repo("default branch", repo, false)
+	return "main", err
+}
+
+func (f *fakeGitHub) Environment(_ context.Context, repo, name string) (*CurrentEnvironment, error) {
+	r, err := f.repo("environment "+name, repo, false)
+	if err != nil || r.envs[name] == nil {
+		return nil, err
+	}
+	var e CurrentEnvironment
+	if r.envs[name].custom {
+		_ = json.Unmarshal([]byte(`{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}`), &e)
+	}
+	return &e, nil
+}
+
+func (f *fakeGitHub) DeploymentPolicies(_ context.Context, repo, env string) ([]DeploymentPolicy, error) {
+	r, err := f.repo("policies "+env, repo, false)
+	if err != nil {
+		return nil, err
+	}
+	if e := r.envs[env]; e == nil || !e.custom {
+		return nil, fmt.Errorf("%s: 404, no custom policies", env) // as GitHub answers
+	}
+	return slices.Clone(r.envs[env].policies), nil
+}
+
+func (f *fakeGitHub) EnvironmentSecrets(_ context.Context, repo, env string) ([]string, error) {
+	r, err := f.repo("secrets "+env, repo, false)
+	if err != nil || r.envs[env] == nil {
+		return nil, err
+	}
+	return slices.Sorted(maps.Keys(r.envs[env].secrets)), nil
+}
+
+func (f *fakeGitHub) PutEnvironment(_ context.Context, repo, name string) error {
+	r, err := f.repo("put env "+name, repo, true)
+	if err != nil {
+		return err
+	}
+	if r.envs == nil {
+		r.envs = map[string]*fakeEnv{}
+	}
+	if r.envs[name] == nil {
+		r.envs[name] = &fakeEnv{secrets: map[string]string{}}
+	}
+	r.envs[name].custom = true
+	return nil
+}
+
+func (f *fakeGitHub) AddDeploymentPolicy(_ context.Context, repo, env string, p DeploymentPolicy) error {
+	r, err := f.repo("add policy "+env+" "+p.String(), repo, true)
+	if err == nil {
+		f.nextID++
+		p.ID = f.nextID
+		r.envs[env].policies = append(r.envs[env].policies, p)
+	}
+	return err
+}
+
+func (f *fakeGitHub) DeleteDeploymentPolicy(_ context.Context, repo, env string, id int64) error {
+	r, err := f.repo(fmt.Sprintf("delete policy %s %d", env, id), repo, true)
+	if err == nil {
+		r.envs[env].policies = slices.DeleteFunc(r.envs[env].policies, func(p DeploymentPolicy) bool { return p.ID == id })
+	}
+	return err
+}
+
+func (f *fakeGitHub) SetEnvironmentSecret(_ context.Context, repo, env, name, value string) error {
+	r, err := f.repo("secret "+env+" "+name, repo, true)
+	if err == nil {
+		r.envs[env].secrets[name] = value
+	}
+	return err
+}
+
 func (f *fakeGitHub) UpdateMergeSettings(_ context.Context, repo string, s MergeSettings) error {
 	r, err := f.repo("PATCH repo", repo, true)
 	if err == nil {
@@ -169,17 +290,20 @@ func asReturned(rs Ruleset) Ruleset {
 	return out
 }
 
-// githubDefaults is a new repo's state: every merge method, alerts off, security updates on, an
-// old ccf-review ruleset without bypass and an unrelated ruleset.
+// githubDefaults is a new repo's state: every merge method, alerts off, security updates on, Actions
+// allowed to approve PRs, fork PRs approved for first-time contributors only, an old ccf-review
+// ruleset without bypass and an unrelated ruleset.
 func githubDefaults() *fakeRepo {
 	return &fakeRepo{
 		merge: MergeSettings{
 			AllowSquashMerge: true, AllowMergeCommit: true, AllowRebaseMerge: true,
 			SquashMergeCommitTitle: "COMMIT_OR_PR_TITLE", SquashMergeCommitMessage: "COMMIT_MESSAGES",
 		},
-		updates: true,
+		updates:    true,
+		perms:      WorkflowPermissions{DefaultWorkflowPermissions: "write", CanApprovePullRequestReviews: true},
+		forkPolicy: "first_time_contributors",
 		rulesets: map[int64]Ruleset{
-			7: asReturned(defaultBranchRuleset(ReviewRuleset, []BypassActor{}, Rule{Type: "pull_request", Parameters: pullRequestParams(0)})),
+			7: asReturned(defaultBranchRuleset(ReviewRuleset, []BypassActor{}, Rule{Type: "pull_request", Parameters: pullRequestParams(0, false)})),
 			8: asReturned(defaultBranchRuleset("other", []BypassActor{}, Rule{Type: "deletion"})),
 		},
 	}
@@ -194,9 +318,19 @@ func newFake(names ...string) *fakeGitHub {
 	return f
 }
 
+// desired is the desired state without its environments, which TestEnvironment* cover (with
+// secret values).
 func desired(t *testing.T) Desired {
 	t.Helper()
-	d, err := DesiredState(Config{RequiredCheck: DefaultRequiredCheck, RequiredCheckAppID: GitHubActionsAppID, BypassAppID: 42})
+	d := desiredAll(t, false)
+	d.Environments = nil
+	return d
+}
+
+// desiredAll is the full desired state, environments included.
+func desiredAll(t *testing.T, rotate bool) Desired {
+	t.Helper()
+	d, err := DesiredState(Config{RequiredCheck: DefaultRequiredCheck, RequiredCheckAppID: GitHubActionsAppID, BypassAppID: 42, RotateSecrets: rotate})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +373,18 @@ func TestPlanRepoDiff(t *testing.T) {
 		`ruleset[ccf-review].bypass: "none" -> (unset)`,
 		`ruleset[ccf-review].bypass.Integration:42: (unset) -> "always"`,
 		`ruleset[ccf-review].rules.pull_request.required_approving_review_count: 0 -> 1`,
+		`ruleset[ccf-review].rules.pull_request.dismiss_stale_reviews_on_push: false -> true`,
+		`ruleset[ccf-review].rules.pull_request.require_last_push_approval: false -> true`,
 		`ruleset[ccf-review].rules.creation: "on" -> (unset)`,
+		`ruleset[ccf-release-tags]: missing -> create`,
+		`ruleset[ccf-release-tags].target: (unset) -> "tag"`,
+		`ruleset[ccf-release-tags].include: (unset) -> ["refs/tags/v*.*.*","refs/tags/*-v*.*.*"]`,
+		`ruleset[ccf-release-tags].bypass.Integration:42: (unset) -> "always"`,
+		`ruleset[ccf-release-tags].rules.creation: (unset) -> "on"`,
+		`ruleset[ccf-release-tags].rules.update: (unset) -> "on"`,
+		`ruleset[ccf-release-tags].rules.deletion: (unset) -> "on"`,
+		`actions.can_approve_pull_request_reviews: true -> false`,
+		`actions.fork_pr_approval: first_time_contributors -> all_external_contributors`,
 	} {
 		if !slices.Contains(got, want) {
 			t.Errorf("missing change %s", want)
@@ -275,7 +420,7 @@ func TestRunDryRunMakesNoWrites(t *testing.T) {
 	if len(f.reads) == 0 {
 		t.Fatal("dry run read nothing")
 	}
-	for _, want := range []string{"o/a: 28 change(s)", "o/b: 28 change(s)", "  repo.allow_merge_commit: true -> false", "56 change(s) in 2 of 2 repo(s) (dry run"} {
+	for _, want := range []string{"o/a: 41 change(s)", "o/b: 41 change(s)", "  repo.allow_merge_commit: true -> false", "82 change(s) in 2 of 2 repo(s) (dry run"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
@@ -288,7 +433,8 @@ func TestRunApplyIsIdempotent(t *testing.T) {
 	if err := Run(context.Background(), f, opts, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"PATCH repo o/a", "create ccf-required o/a", "update 7 ccf-review o/a", "alerts=true o/a", "updates=false o/a"}
+	want := []string{"PATCH repo o/a", "create ccf-required o/a", "update 7 ccf-review o/a", "create ccf-release-tags o/a",
+		"workflow permissions=write,approve=false o/a", "fork approval=all_external_contributors o/a", "alerts=true o/a", "updates=false o/a"}
 	if !slices.Equal(f.writes, want) {
 		t.Fatalf("writes = %v, want %v", f.writes, want)
 	}
@@ -394,7 +540,7 @@ func TestRunApplyWritesUnknownMergeSettings(t *testing.T) {
 	if err := Run(context.Background(), f, opts, &out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"o/a: 22 change(s), 7 unknown", "22 change(s), 7 unknown in 1 of 1 repo(s) (dry run", unknownHint} {
+	for _, want := range []string{"o/a: 35 change(s), 7 unknown", "35 change(s), 7 unknown in 1 of 1 repo(s) (dry run", unknownHint} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
@@ -486,7 +632,7 @@ func TestRunOrgConfigMatchingIsSkipped(t *testing.T) {
 	for _, want := range []string{
 		`  security.dependabot_security_updates: managed by org configuration "Baseline Security Profile" (disabled)`,
 		`  security.vulnerability_alerts: managed by org configuration "Baseline Security Profile" (enabled)`,
-		"o/a: applied 3 step(s)",
+		"o/a: applied 6 step(s)",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
@@ -558,8 +704,8 @@ func TestRunApplyContinuesAfterFailedStep(t *testing.T) {
 	}
 	for _, want := range []string{
 		"o/a: security.dependabot_security_updates failed: 422",
-		"o/a: partly applied: 1 of 5 step(s) failed",
-		"o/b: applied 5 step(s)",
+		"o/a: partly applied: 1 of 8 step(s) failed",
+		"o/b: applied 8 step(s)",
 		"(applied; steps failed in 1 repo(s))",
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -571,8 +717,8 @@ func TestRunApplyContinuesAfterFailedStep(t *testing.T) {
 	}
 }
 
-// inSync is a fake repo "o/a" already in the desired state, rulesets 7 (ccf-review) and 101
-// (ccf-required) included.
+// inSync is a fake repo "o/a" already in the desired state, rulesets 7 (ccf-review), 101
+// (ccf-required) and 102 (ccf-release-tags) included.
 func inSync(t *testing.T) *fakeGitHub {
 	t.Helper()
 	f := newFake("a")
@@ -596,8 +742,9 @@ func TestPlanRepoRulesetBypass(t *testing.T) {
 		unknowns: []string{
 			`ruleset[ccf-required].bypass: unknown (not readable with Administration read) -> "none"`,
 			`ruleset[ccf-review].bypass: unknown (not readable with Administration read) -> {"Integration:42":"always"}`,
+			`ruleset[ccf-release-tags].bypass: unknown (not readable with Administration read) -> {"Integration:42":"always"}`,
 		},
-		rulesetWrites: []int64{101, 7},
+		rulesetWrites: []int64{101, 7, 102},
 	}, {
 		name: "empty",
 		edit: func(r *fakeRepo) {
@@ -625,8 +772,9 @@ func TestPlanRepoRulesetBypass(t *testing.T) {
 		unknowns: []string{
 			`ruleset[ccf-required].bypass: unknown (not readable with Administration read) -> "none"`,
 			`ruleset[ccf-review].bypass: unknown (not readable with Administration read) -> {"Integration:42":"always"}`,
+			`ruleset[ccf-release-tags].bypass: unknown (not readable with Administration read) -> {"Integration:42":"always"}`,
 		},
-		rulesetWrites: []int64{101, 7},
+		rulesetWrites: []int64{101, 7, 102},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := inSync(t)
@@ -662,10 +810,10 @@ func TestRunApplyWritesUnknownBypass(t *testing.T) {
 	if err := Run(context.Background(), f, opts, &out); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"update 101 ccf-required o/a", "update 7 ccf-review o/a"}; !slices.Equal(f.writes, want) {
+	if want := []string{"update 101 ccf-required o/a", "update 7 ccf-review o/a", "update 102 ccf-release-tags o/a"}; !slices.Equal(f.writes, want) {
 		t.Errorf("writes = %v, want each ruleset written once: %v", f.writes, want)
 	}
-	for _, want := range []string{"o/a: 0 change(s), 2 unknown", "o/a: applied 2 step(s)", unknownHint} {
+	for _, want := range []string{"o/a: 0 change(s), 3 unknown", "o/a: applied 3 step(s)", unknownHint} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
@@ -679,5 +827,29 @@ func TestRunApplyWritesUnknownBypass(t *testing.T) {
 	}
 	if len(f.writes) > 0 || !strings.Contains(out.String(), "o/a: up to date") {
 		t.Errorf("writes = %v, output:\n%s", f.writes, out.String())
+	}
+}
+
+// TestPlanActions: the default workflow permissions are kept as they are; a repo without a fork PR
+// approval setting (private) is skipped, not failed.
+func TestPlanActions(t *testing.T) {
+	f := inSync(t)
+	r := f.repos["o/a"]
+	if r.perms.DefaultWorkflowPermissions != "write" {
+		t.Errorf("default workflow permissions = %q, want write kept", r.perms.DefaultWorkflowPermissions)
+	}
+	r.perms.CanApprovePullRequestReviews, r.forkPolicy = true, ""
+	var out bytes.Buffer
+	if err := Run(context.Background(), f, Options{Owner: "o", Repos: []string{"a"}, Desired: desired(t), Apply: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"workflow permissions=write,approve=false o/a"}; !slices.Equal(f.writes, want) {
+		t.Errorf("writes = %v, want %v", f.writes, want)
+	}
+	for _, want := range []string{"o/a: 1 change(s)", "  actions.can_approve_pull_request_reviews: true -> false",
+		"  actions.fork_pr_approval: the repo has no such setting (private); skipped"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
 	}
 }

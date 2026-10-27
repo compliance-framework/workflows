@@ -16,7 +16,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// OrgPrefix is the module path prefix of every compliance-framework module, mocks included.
+// OrgPrefix is the module path prefix of every compliance-framework module.
 const OrgPrefix = "github.com/compliance-framework/"
 
 // MajorApprovedLabel is the PR label that allows a major version increase.

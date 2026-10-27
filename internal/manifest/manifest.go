@@ -1,5 +1,5 @@
-// Package manifest loads and validates the repo manifest (repos.yaml or
-// repos.mock.yaml) that the shared workflows and tools operate on.
+// Package manifest loads and validates the repo manifest (repos.yaml) that the shared
+// workflows and tools operate on.
 package manifest
 
 import (
@@ -62,6 +62,9 @@ type Repo struct {
 	Release bool `yaml:"release"`
 	// Charts lists the chart names in a helm repo.
 	Charts []string `yaml:"charts,omitempty"`
+	// Batch is the rollout batch of a plugin or policy repo (1 or more); 0 marks a core repo,
+	// which is always active. Tools act only on the active repos (ActiveRepos).
+	Batch int `yaml:"batch,omitempty"`
 }
 
 // Manifest is the parsed and validated manifest file.
@@ -72,6 +75,8 @@ type Manifest struct {
 	IncludePatterns []string `yaml:"include_patterns,omitempty"`
 	// Exclude lists repo names that IncludePatterns must not pick up.
 	Exclude []string `yaml:"exclude,omitempty"`
+	// ActiveBatches are the batches whose repos the tools act on, on top of the core repos.
+	ActiveBatches []int `yaml:"active_batches,omitempty"`
 	// Repos are the repos, in file order.
 	Repos []Repo `yaml:"repos"`
 }
@@ -84,12 +89,14 @@ type rawRepo struct {
 	DependsOn []string `yaml:"depends_on"`
 	Release   *bool    `yaml:"release"`
 	Charts    []string `yaml:"charts"`
+	Batch     *int     `yaml:"batch"`
 }
 
 type rawManifest struct {
 	Holidays        []string  `yaml:"holidays"`
 	IncludePatterns []string  `yaml:"include_patterns"`
 	Exclude         []string  `yaml:"exclude"`
+	ActiveBatches   []int     `yaml:"active_batches"`
 	Repos           []rawRepo `yaml:"repos"`
 }
 
@@ -125,11 +132,19 @@ func Parse(data []byte) (*Manifest, error) {
 		Holidays:        raw.Holidays,
 		IncludePatterns: raw.IncludePatterns,
 		Exclude:         raw.Exclude,
+		ActiveBatches:   raw.ActiveBatches,
 		Repos:           make([]Repo, 0, len(raw.Repos)),
 	}
 	for i, r := range raw.Repos {
 		if r.Release == nil {
 			return nil, fmt.Errorf("repos[%d] (%q): release must be set to true or false", i, r.Name)
+		}
+		batch := 0
+		if r.Batch != nil {
+			if *r.Batch < 1 {
+				return nil, fmt.Errorf("repos[%d] (%q): batch %d: batches are numbered from 1 (leave it out for a core repo)", i, r.Name, *r.Batch)
+			}
+			batch = *r.Batch
 		}
 		m.Repos = append(m.Repos, Repo{
 			Name:      r.Name,
@@ -137,6 +152,7 @@ func Parse(data []byte) (*Manifest, error) {
 			DependsOn: r.DependsOn,
 			Release:   *r.Release,
 			Charts:    r.Charts,
+			Batch:     batch,
 		})
 	}
 	if err := m.Validate(); err != nil {
@@ -148,7 +164,8 @@ func Parse(data []byte) (*Manifest, error) {
 // Validate checks the manifest's invariants: unique names, known kinds,
 // dependencies that exist and form no cycle (and none on a helm repo from a
 // non-helm repo, since helm repos release last), at most one workflows repo
-// (release: false, outside the dependency graph), ISO holidays and valid globs.
+// (release: false, outside the dependency graph), ISO holidays, valid globs and the batch rules
+// (validateBatches).
 func (m *Manifest) Validate() error {
 	if len(m.Repos) == 0 {
 		return errors.New("manifest has no repos")
@@ -211,6 +228,9 @@ func (m *Manifest) Validate() error {
 		if _, err := path.Match(p, ""); err != nil {
 			return fmt.Errorf("include pattern %q: %w", p, err)
 		}
+	}
+	if err := m.validateBatches(); err != nil {
+		return err
 	}
 	if _, err := m.stages(func(Repo) bool { return true }); err != nil {
 		return err

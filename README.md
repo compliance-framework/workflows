@@ -21,7 +21,6 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | Path | What |
 | --- | --- |
 | `repos.yaml` | Manifest of the product repos: `name`, `kind`, `depends_on`, `release`, `charts`, plus top-level `holidays`, `include_patterns` and `exclude`. |
-| `repos.mock.yaml` | The same schema for the `mock-*` repos, used to develop and test changes without touching product repos. |
 | `internal/manifest` | Loads and validates a manifest; `Stages()` (release order) and `NextWorkingWeekday()`. |
 | `internal/slackkit` | The Block Kit message kit for the Slack messages: blocks, the status bar, and a client that posts, replies and edits in place ([docs/slack.md](docs/slack.md)). |
 | `internal/notify` | The CI incident rules (which runs, incident key, transitions), the incident and needs-human cards, and a plain-text Slack client on `internal/slackkit` ([docs/notify.md](docs/notify.md)). |
@@ -37,13 +36,14 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 
 ```yaml
 holidays: ["2026-12-25", "2027-01-01"]   # ISO dates that are not working days
-include_patterns: []                     # repo name globs, used from workstream 3
-exclude: []                              # repo names the globs must not pick up
+active_batches: []                       # plugin/policy batches the tools act on (docs/manifest.md)
+include_patterns: ["plugin-*"]           # repo name globs the org coverage check uses
+exclude: [plugin-aws]                    # repo names the globs must not pick up
 repos:
   - name: agent
     kind: go-service          # go-service | go-plugin | go-lib | policies | ui | helm | action | workflows
     depends_on: [api, gooci]  # repos that release before this one
-    release: true             # required; whether the release tooling acts on it
+    release: true             # required; whether the release tooling acts on it (repo-settings manages every active repo)
   - name: helm-charts
     kind: helm
     depends_on: [api, ui, agent]
@@ -56,7 +56,12 @@ dependencies on unknown repos, cycles, and a non-helm repo depending on a helm r
 repo is of kind `workflows` (this repo, the source of the shared-workflow pins ccf-bump moves); it
 needs `release: false`, has no `depends_on`, and no repo depends on it.
 
-`Stages()` groups the repos with `release: true` into release stages. Every repo's dependencies are in earlier stages,
+Plugin and policy repos carry a `batch` (1 or more); the tools act on them only once their batch
+is in `active_batches`, and `go run ./cmd/manifest --org compliance-framework` checks the manifest
+against the organisation's repos (in an advisory CI job that doesn't gate merges). Batches,
+activation and the coverage check: [docs/manifest.md](docs/manifest.md).
+
+`Stages()` groups the active repos with `release: true` into release stages. Every repo's dependencies are in earlier stages,
 and each stage is sorted by name. Repos of kind `helm` always release last, after every
 non-helm repo, because the charts pin the versions of everything else. For `repos.yaml`:
 
@@ -71,8 +76,11 @@ stage 4: helm-charts
 `NextWorkingWeekday(date)` returns `date` if it is a working weekday, and otherwise the next day
 that is neither a weekend nor a manifest holiday (2027-01-01 becomes 2027-01-04).
 
-Every tool takes `--manifest` (default `repos.yaml`), and every workflow takes a `manifest`
-input, so the same code runs against `repos.mock.yaml`.
+The workflows that read a manifest (Renovate, ccf-bump, the train, repo-settings, plugin health, the
+attention digest and the vulnerability summary) read `repos.yaml`; they have no `manifest` input.
+The tools take `--manifest` (default `repos.yaml`), which their tests point at fixtures such as
+`internal/manifest/testdata/mock.yaml`. There is no mock test bed: changes are verified by dry runs
+and unit tests.
 
 ## How repos consume the workflows
 
@@ -111,8 +119,7 @@ jobs:
 ```
 
 Each `kind` gets its own CI workflow (`ci-<kind>.yml`, see [Kind CI workflows](#kind-ci-workflows)),
-plus release workflows later. The mock repos adopt each one before the
-product repos do. Consumers pin `@<sha> # vX.Y.Z`, the commit a release tag points at, never
+plus release workflows later. Consumers pin `@<sha> # vX.Y.Z`, the commit a release tag points at, never
 `@main` or a tag: a SHA can't move under the caller, and each update is a reviewable
 [ccf-bump](docs/ccf-bump.md) PR; this repo's tags never move.
 The `permissions` above are the ones `ci-common.yml` and `notify-failure.yml` need (see
@@ -175,20 +182,21 @@ Go comes from the caller's `go.mod`.
 
 | Job | Checks |
 | --- | --- |
-| `golangci-lint` | golangci-lint (version pinned in the workflow) with the repo's config, or this repo's `.golangci.yml` when it has none. |
+| `golangci-lint` | golangci-lint (version pinned in the workflow) with the repo's config, or this repo's `.golangci.yml` when it has none. Then `golangci-lint config verify` checks that config against the JSON schema of that version, downloaded from the golangci-lint repo at its tag, so golangci-lint.run isn't needed (the action's own verify, which fetches from there, is off). If that download fails it verifies with the schema golangci-lint fetches from golangci-lint.run, retrying only schema load failures; if neither host answers, the step warns and passes. An invalid config fails the job. |
 | `go` | `gofmt -l .` (prints the diff), `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test ./...`. |
 | `goreleaser` | GoReleaser (version pinned in the workflow): `goreleaser check` (deprecated properties only warn), `goreleaser build --snapshot --clean --single-target`. |
 
 | Input | Default | What |
 | --- | --- | --- |
 | `lint-new-from-merge-base` | `true` | Report only issues the change adds: `--new-from-merge-base=origin/<base>` on PRs, `--new-from-rev=<before>` on pushes (everything when there is no such commit). `false` lints everything. |
+| `lint-timeout-minutes` | `15` | The `golangci-lint` job's `timeout-minutes`. golangci-lint itself sets no `--timeout` (v2 has none by default), so this is the one limit. |
 
 #### `ci-policies.yml` (kind `policies`)
 
 | Job | Checks |
 | --- | --- |
 | `opa` | `opa fmt --list --fail` (prints the diff), `opa check --strict`, `opa test`, `opa build --bundle`. |
-| `regal` | `regal lint` with the repo's `.regal/config.yaml` (or `.regal.yaml`), or this repo's `.regal/config.yaml` when it has none. That base config ignores CCF layout rules (package/directory mismatch, tests in the policy's package, no entrypoint, line length, and `opa-fmt`, which the `opa` job checks) and makes idiomatic, performance and style findings warnings. |
+| `regal` | `regal lint` with the repo's `.regal/config.yaml` (or `.regal.yaml`), or this repo's `.regal/config.yaml` when it has none. That base config ignores CCF layout rules (package/directory mismatch, tests in the policy's package, no entrypoint, line length, and `opa-fmt`, which the `opa` job checks) and makes idiomatic, performance and style findings warnings. It also ignores `prefer-string-interpolation`: a template string isn't equivalent to `sprintf` (an undefined argument renders `<undefined>` instead of leaving the rule undefined), and an older agent's OPA may not parse one. Regal reads no data files, so with the base config the job adds each top-level key of the bundle's `data.json`/`data.yaml` files (`data.<dir>.<key>` for one in a subdirectory) to `unresolved-reference`'s `except-paths`; other unresolved `data.` references still fail. |
 
 | Input | Default | What |
 | --- | --- | --- |
@@ -216,7 +224,7 @@ The snippets below show only the `uses:` and `with:` keys of that `ci` job.
 
 | Job | Checks |
 | --- | --- |
-| `golangci-lint` | As in `ci-go-plugin.yml` (same job and `lint-new-from-merge-base` input). |
+| `golangci-lint` | As in `ci-go-plugin.yml` (same job, with the `lint-new-from-merge-base` and `lint-timeout-minutes` inputs). |
 | `go` | `gofmt -l .`, then the prepare command, `go vet ./...`, `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test -race ./...`, `go build ./...`. |
 | `make` | The prepare command, then each of `make-targets` (all run even if one fails). With no targets it does nothing and succeeds. |
 
@@ -236,7 +244,7 @@ The snippets below show only the `uses:` and `with:` keys of that `ci` job.
 
 | Job | Checks |
 | --- | --- |
-| `golangci-lint` | As in `ci-go-plugin.yml` (same job and `lint-new-from-merge-base` input). |
+| `golangci-lint` | As in `ci-go-plugin.yml` (same job, with the `lint-new-from-merge-base` and `lint-timeout-minutes` inputs). |
 | `go` | `gofmt -l .`, `go test ./...`. |
 | `goreleaser` | `goreleaser check` (deprecated properties only warn). |
 
@@ -308,8 +316,11 @@ The bot is installed on every org repo, so the job refuses to mint a token when 
 is empty or `github.repository` isn't `compliance-framework/<that name>`: a token minted with
 an owner and no repositories would reach the whole org.
 
-Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, via `secrets: inherit`. Outputs:
-`releases-created` and `paths-released` (JSON list of package paths), from the action.
+Secrets: `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`, from the caller's `release`
+environment (the job names it; [Repo settings](#repo-settings) creates it, limited to the default
+branch and release tags, and copies the secrets in). Callers keep `secrets: inherit`: the
+`workflow_call` secrets are optional, and an environment secret wins over an inherited one.
+Outputs: `releases-created` and `paths-released` (JSON list of package paths), from the action.
 
 **Shared defaults.** `release-please/defaults.json` holds the settings every repo uses:
 `bump-minor-pre-major: true` (breaking changes bump the minor before 1.0),
@@ -372,7 +383,7 @@ an earlier one failed (rules in `internal/release`):
 
 | Check | Fails when |
 | --- | --- |
-| `internal-deps-final` | A `github.com/compliance-framework/*` requirement in `go.mod` (the `mock-*` repos included) isn't a final semver (a pre-release or pseudo-version), or `go.mod` replaces one. |
+| `internal-deps-final` | A `github.com/compliance-framework/*` requirement in `go.mod` isn't a final semver (a pre-release or pseudo-version), or `go.mod` replaces one. |
 | `version-guard` | A package's major version is higher in the PR's `.release-please-manifest.json` than at the base (0.x to 1.0 included; a new package counts from 0.0.0), and the PR lacks the `release:major-approved` label. |
 | `go-module-path` | The module path's major suffix doesn't match the root package's (`.`) new version: none for v0 and v1, `/vN` for vN with N >= 2. |
 
@@ -406,8 +417,8 @@ It never publishes `latest`, which only final releases move. What it publishes d
 | `kind` | Kinds | Publishes |
 | --- | --- | --- |
 | `image` | `go-service`, `ui`, `action` | Container images, `linux/amd64` and `linux/arm64` (`publish-image.yml`). |
-| `go-plugin` | `go-plugin` | `goreleaser release --snapshot --clean` (nothing is released), then `gooci upload` of `dist/` with the `org.ccf.plugin.protocol.version` annotation. |
-| `policies` | `policies` | `opa build` of `directory`, then `gooci upload-single` of the bundle. |
+| `go-plugin` | `go-plugin` | `goreleaser release --snapshot --clean` (nothing is released), then `gooci upload` of `dist/` with the `org.ccf.plugin.protocol.version` annotation, once; `crane tag` points the other tags at it. |
+| `policies` | `policies` | `opa build` of `directory`, then `gooci upload-single` of the bundle, once; `crane tag` points the other tags at it. |
 
 A plugin or policy repo that wants PR previews only sets `on-main: false`.
 
@@ -431,7 +442,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: preview-${{ github.ref }}
+  # PR number, not github.ref: a merged PR's events carry the base branch as github.ref.
+  group: preview-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   preview:
@@ -450,8 +462,9 @@ A plugin repo calls it with `with: {kind: go-plugin, on-main: false}` (a policy 
 
 The image build is a separate reusable workflow, `publish-image.yml`, that `preview.yml`
 and `release-go-image.yml` call as `./.github/workflows/publish-image.yml`: inputs `images`
-(as above) and `tags` (space-separated tag names without the repository, each checked
-against the registry's tag syntax), permissions `contents: read` and `packages: write`. It
+(as above), `tags` (space-separated tag names without the repository, each checked
+against the registry's tag syntax) and `version` (the `VERSION` build arg, below),
+permissions `contents: read` and `packages: write`. It
 builds each image natively, `linux/amd64` on `ubuntu-latest` and `linux/arm64` on
 `ubuntu-24.04-arm` (no QEMU), with the OCI `source` and `revision` labels, and pushes each
 build by digest only. A `merge` job per image then creates one manifest list from the two
@@ -460,6 +473,20 @@ digests (passed between jobs as `digests-<name>-<arch>` artifacts, kept a day) a
 on the index, which GHCR uses to link the package to the repo. It publishes whatever tags it
 is given; the caller decides them. If any build fails, no image is tagged, and two
 `images` entries with the same name (case-insensitive) fail the run before any build.
+
+**`VERSION` build arg.** Every image build gets exactly one build arg, `VERSION`, for a
+Dockerfile that stamps it into the binary (`ARG VERSION=dev`, as agent's do). The workflows
+compute it, and callers can't pass build args of their own: build args are kept in the
+image's history and provenance, so they are no place for anything but a plain version. A
+release builds with its tag without the prefix (`v1.2.3` → `1.2.3`, `v1.2.3-rc1` →
+`1.2.3-rc1`; the `version` output of `cmd/release release-tags`). A preview builds with
+`main-<sha7>` on a push to the default branch and `pr-<number>-<sha7>` on a PR (`cmd/release
+preview-tags`, `PreviewVersion` in `internal/release`), where `<sha7>` is the built commit's
+(`GITHUB_SHA`, also the image's `revision` label); it is not a semver on purpose, so a preview
+never passes for a release. `publish-image.yml` fails unless `version` matches
+`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`, and passes it to `docker/build-push-action` as data, never
+through a shell line. A Dockerfile without `ARG VERSION` ignores it: docker warns about the
+unused build arg and the build goes on.
 
 #### `cut-prerelease.yml`
 
@@ -495,16 +522,16 @@ A repo calls its kind's release workflow when a release is published: by release
 candidate, both as ccf-release-bot so the event starts workflows. Each one decides its tags
 from the release's tag name (`github.event.release.tag_name`), never from the release's
 `prerelease` flag (rules in `internal/release`, `ReleaseTags`), and ends with
-[`release-finished.yml`](#release-finishedyml). They need `secrets: inherit` for the
-release-bot secrets.
+[`release-finished.yml`](#release-finishedyml). Its `dispatch` job reads the release-bot secrets
+from the caller's `release` environment (release tags may use it); callers keep `secrets: inherit`.
 
 | Workflow | Kind | Publishes |
 | --- | --- | --- |
-| `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`. |
+| `release-go-image.yml` | `go-service` | Container images (one or more), native `linux/amd64` and `linux/arm64`, built with `VERSION=<the tag without its prefix>` ([`VERSION` build arg](#previewyml)). |
 | `release-ui.yml` | `ui` | The same as `release-go-image.yml` (it calls it), with the ui's single image. |
-| `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release; the config needs `release.prerelease: auto`), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`. |
+| `release-go-plugin.yml` | `go-plugin` | `goreleaser release --clean` (the archives go on the GitHub release; the config needs `release.prerelease: auto`), then `gooci upload` of `dist/` with `--annotate="org.ccf.plugin.protocol.version=<protocol-version>"`, once; `crane tag` points `latest` at it. |
 | `release-go-lib.yml` | `go-lib` | `goreleaser release --clean` of the release tag: the binaries and archives go on the GitHub release (the config needs `release.prerelease: auto`). |
-| `release-policies.yml` | `policies` | `opa build` of `directory` at `opa-version`, then `gooci upload-single` of the bundle. |
+| `release-policies.yml` | `policies` | `opa build` of `directory` at `opa-version`, then `gooci upload-single` of the bundle, once; `crane tag` points `latest` at it. |
 | `release-helm.yml` | `helm` | `helm package` of the released chart at the tag's version, then `helm push` to `registry`. |
 | `release-action.yml` | `action` | Nothing: it moves the major tag (`v0` today) to the release commit. |
 
@@ -518,6 +545,16 @@ Plugin and policy (gooci) tags keep the `v`, as the agent configs reference them
 pre-release. gooci is built from source at the pinned version (`go install
 github.com/compliance-framework/gooci@v0.0.7`) and reads the registry login from
 `docker/login-action`.
+
+All of a build's plugin or policy tags name one manifest, as the agent records the digest it
+pulled (`_plugin_digest`, `_policy_digest`): each gooci upload makes a new manifest, so the
+artifact is uploaded once, to the first tag (`v1.2.3`, or `main` / `pr-<number>` for a preview),
+and the "Tag the rest" step points the others (`latest`, `sha-<7>`) at that digest with `crane
+tag`, a registry-side tag with no re-upload, then fails unless every tag resolves to it. crane
+(`go install github.com/google/go-containerregistry/cmd/crane@v0.20.7`) is from
+go-containerregistry, the library gooci is built on, reads the same Docker login, and v0.20.7
+needs no newer Go than gooci (1.24). `internal/ciworkflows` pins that every gooci upload is
+single and followed by the one "Tag the rest" step.
 
 | Input | Default | What |
 | --- | --- | --- |
@@ -656,7 +693,7 @@ The tail of every release workflow, called as a job with `needs` on every other 
 
 Inputs: `needs` (the caller's `toJSON(needs)`) and `images` (the packages to prune, as for
 `publish-image.yml`; only `name` is read). Secrets: `RELEASE_BOT_APP_ID` and
-`RELEASE_BOT_PRIVATE_KEY`. Permissions: `packages: write`.
+`RELEASE_BOT_PRIVATE_KEY`, from the caller's `release` environment (the `dispatch` job). Permissions: `packages: write`.
 
 ## Releasing workflows
 
@@ -665,7 +702,8 @@ This repo releases itself with release-please (`simple`; `release-please-config.
 `release-please.yml` on every push to `main`, as ccf-release-bot with a token scoped to this
 repo. Merging the release PR tags `vX.Y.Z` on the merge commit and publishes the GitHub
 release. It is in both manifests as `kind: workflows` with `release: false`: the train doesn't
-release it, and Renovate and vuln-summary leave it out unless it is named.
+release it, and vuln-summary leaves it out unless it is named. Renovate covers it like every
+other manifest repo.
 
 - **Tags never move.** There is no floating `v1`: callers pin a release's commit SHA, and
   `ccf-bump sync` moves the pins to the latest final release (`@<sha> # vX.Y.Z`) within a
@@ -679,8 +717,9 @@ release it, and Renovate and vuln-summary leave it out unless it is named.
   release PR propose `2.0.0`. `ci.yml` calls `release-checks.yml`, so the PR needs the
   `release:major-approved` label (`module-path: false`: the module path keeps no `/v2`, the
   major is the workflows' interface, not a Go API). After it merges, ccf-bump reports each
-  caller's v1 pins as conflicts: move each repo by hand, mocks first, adapting the inputs the
-  release notes list, to `@<v2 sha> # v2.0.0`; from then on ccf-bump keeps it current.
+  caller's v1 pins as conflicts: move each repo by hand, adapting the inputs the release notes
+  list, to `@<v2 sha> # v2.0.0`; from then on ccf-bump keeps it current. There is no mock test
+  bed: each move is checked by the caller's CI on its PR.
 - **The `workflows-ref` input** of `notify-failure.yml` now defaults to the commit it is called
   at; ccf-bump deletes it from callers when it moves their pin.
 
@@ -692,43 +731,78 @@ desired state, defined in `internal/reposettings`:
 - **Merges**: squash only, with the PR title and body as the commit title and message
   (`PR_TITLE`, `PR_BODY`); auto-merge allowed; head branches deleted on merge.
 - **Security**: Dependabot alerts on; Dependabot security updates off (Renovate handles dependency updates).
+- **Actions**: GitHub Actions can't approve pull requests (`can_approve_pull_request_reviews`
+  off: otherwise a workflow of the PR author's could approve their PR and satisfy `ccf-review`);
+  fork PR workflows of every outside contributor wait for a maintainer's approval
+  (`all_external_contributors`; a private repo has no such setting and is skipped). The default
+  `GITHUB_TOKEN` permissions are not changed: workflows that don't declare theirs rely on them.
 - **Ruleset `ccf-required`**, on the default branch, with no bypass: a pull request is required,
   the status check `ci / required` must pass (reported by GitHub Actions, app 15368), and force
   pushes and deletion are blocked.
 - **Ruleset `ccf-review`**, on the default branch: one approving review, bypassed by the
-  `ccf-release-bot` app only (its release and Renovate PRs).
+  `ccf-release-bot` app only (its release and Renovate PRs). A new push dismisses earlier
+  approvals, and the last push must be approved by someone other than its pusher, so a reviewed
+  PR can't change before it merges.
+- **Ruleset `ccf-release-tags`**, on the tags `v*.*.*` and `*-v*.*.*` (release-please's, with or
+  without a prerelease suffix): only `ccf-release-bot` creates, moves or deletes them. Release
+  workflows run from the tag, so nobody else can start one on an unreviewed commit. Floating major
+  tags (`v1`) don't match.
+- **Environment `release`**: only the default branch and the tags `v*.*.*` and `*-v*.*.*` may use
+  it (custom deployment branch and tag policies; any other is deleted), and it holds the secrets
+  `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`. Every job that mints a ccf-release-bot token
+  names it (`release-please.yml`, `cut-prerelease.yml`, `release-finished.yml`, and this repo's
+  train, Renovate, ccf-bump, attention digest and vulnerability summary), so a workflow pushed to
+  any other branch, or a PR's, is refused before it starts and never sees the key. Missing
+  secrets are written (encrypted with the environment's public key); present ones are left alone
+  unless `rotate-secrets` is on. Its other protection rules (reviewers, wait timer) aren't managed.
 
-Rulesets are matched by name; other rulesets are left alone. Settings outside this list are not
-read or changed. A repo's required check exists once it calls the shared CI with a `required` job
-(the caller job is named `ci`, so the check is `ci / required`, as on the mocks); until then
-`ccf-required` blocks its merges.
+Every active repo in the manifest (and every repo named in `repos`) gets these settings, the `workflows` repo (`release: false`) too: every
+caller's CI and releases run its code. Rulesets are matched by name; other rulesets are left alone.
+Settings outside this list are not read or changed. A repo's required check exists once it calls
+the shared CI with a `required` job (the caller job is named `ci`, so the check is `ci / required`);
+until then `ccf-required` blocks its merges. This repo's own `ci.yml` has a
+`required` job named `ci / required` for the same check.
 
 Inputs:
 
 | Input | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.yaml` | `repos.mock.yaml` for the mocks. |
-| `repos` | every repo with `release: true` | Comma-separated subset; each must be in the manifest. A repo with `release: false` (the live demo repos) is only selected by naming it. |
+| `repos` | every active repo in the manifest | Comma-separated subset; each must be in the manifest, and may be in a batch that is not active yet ([docs/manifest.md](docs/manifest.md)). |
 | `apply` | `false` | `false` prints the diff and writes nothing; `true` writes it (from `main` only). |
 | `release-bot-app-id` | org variable `RELEASE_BOT_APP_ID` | `ccf-release-bot`'s app ID, the `ccf-review` bypass actor. Set the org variable (Settings, Secrets and variables, Actions, Variables) to the app's ID from its settings page, or pass the input; the run fails if both are empty. |
 | `required-check` | `ci / required` | The status check context `ccf-required` requires. |
+| `rotate-secrets` | `false` | Rewrite every `release` environment secret, not only missing ones: after rotating the ccf-release-bot key. |
 
-Secrets: `REPO_ADMIN_APP_ID` and `REPO_ADMIN_PRIVATE_KEY` (`ccf-repo-admin`). The app is installed
-on every org repo, so the job lists the selected repos first and mints a token scoped to exactly
-those (`repositories:`, with Administration `read`, or `write` when applying). It refuses an empty
-selection, and the tool checks the token reaches no other repo before reading anything.
+**The `repo-admin` environment.** The job runs in this repo's `repo-admin` environment, which holds
+`REPO_ADMIN_APP_ID` and `REPO_ADMIN_PRIVATE_KEY` (`ccf-repo-admin`) and the ccf-release-bot
+`RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY` it copies into each repo's `release`
+environment (only on apply; a dry run doesn't get them). Configure it by hand once (it is the one
+thing this tool doesn't manage): deployment branches `main` only, required reviewers (the org
+admins), and "Prevent self-review" on. Then every run, dry runs included, waits for an admin's
+approval, and no other branch or workflow can read the keys.
+
+**ccf-repo-admin's permissions** stay set, so a run (and, later, onboarding a new repo) works with
+no permission change: repository **Administration: Read and write** (settings, rulesets,
+environments and their policies, Actions settings), **Environments: Read and write** (environment
+secrets), **Actions: Read** (reading environments and policies) and Metadata: Read. The app is
+installed on every org repo, so the job lists the selected repos first and mints a token scoped to
+exactly those (`repositories:`), with only read access for a dry run (Administration and
+Environments `write` when applying). It refuses an empty selection, and the tool checks the token
+reaches no other repo before reading anything.
 
 Output, per repo, is one line per differing setting, `key: current -> desired`, then a total:
 
 ```console
-compliance-framework/mock-api: 28 change(s)
+compliance-framework/api: 41 change(s)
   repo.allow_merge_commit: true -> false
   security.dependabot_security_updates: enabled -> disabled
+  actions.can_approve_pull_request_reviews: true -> false
   ruleset[ccf-required]: missing -> create
   ruleset[ccf-review].rules.pull_request.required_approving_review_count: 0 -> 1
+  ruleset[ccf-release-tags]: missing -> create
   ...
-compliance-framework/mock-ui: up to date
-28 change(s) in 1 of 2 repo(s) (dry run, nothing written; re-run with apply to write)
+compliance-framework/ui: up to date
+41 change(s) in 1 of 2 repo(s) (dry run, nothing written; re-run with apply to write)
 ```
 
 GitHub leaves the merge settings out of `GET /repos/{owner}/{repo}` for a token with
@@ -753,23 +827,43 @@ if it sets another value it prints a warning (`... wants disabled, org enforces 
 in the org configuration`), counted as `N warning(s)`, which doesn't fail the run. Change those in
 the org configuration, not here.
 
-Apply runs each step on its own: the merge settings, each ruleset, then the security settings. A
+Apply runs each step on its own: the merge settings, each ruleset, the Actions settings, then the security settings. A
 failed step (say a 422) is printed (`<repo>: <step> failed: ...`) and doesn't stop the others; the
 repo ends with `applied N step(s)` or `partly applied: F of N step(s) failed`, and the run fails at
 the end if any step failed.
 
 How to run it:
 
-1. **Dry run** (anyone, any time): Actions, `repo-settings`, Run workflow, with `apply` off. Or
-   `gh workflow run repo-settings.yml -f manifest=repos.mock.yaml`. `ccf-repo-admin` has
-   Administration **read** only, so a dry run can't change anything. Review the diff.
-2. **Apply** (a human, never an agent): in the `ccf-repo-admin` app settings, temporarily grant
-   **Administration: Read and write** and accept the new permission on the org installation. Run
-   the workflow from `main` with the same inputs and `apply` on. Run it again with `apply` on:
-   every repo should be `up to date` and nothing is written (the sync is idempotent). A dry run
-   can't show this, since its token is always read-only: a repo that is otherwise in sync shows
-   `0 change(s), 9 unknown` (7 merge settings, 2 ruleset bypass lists). Then set Administration back to **read**.
-   Do the mocks first.
+1. **Dry run**: Actions, `repo-settings`, Run workflow, with `apply` off. Or
+   `gh workflow run repo-settings.yml -f repos=api,ui`. An admin approves the
+   `repo-admin` deployment; the token is read-only, so a dry run can't change anything. Review
+   the diff.
+2. **Apply** (a human, never an agent): run it from `main` with the same inputs and `apply` on,
+   and approve the deployment. Run it again with `apply` on: every repo should be `up to date` and
+   nothing is written (the sync is idempotent). A dry run can't show this, since its token is
+   read-only: a repo that is otherwise in sync shows `0 change(s), 10 unknown` (7 merge settings,
+   3 ruleset bypass lists). There is no mock test bed: the dry run is the check.
+
+**Moving the ccf-release-bot secrets into the environments** (once):
+
+1. Grant `ccf-repo-admin` the permissions above (app settings, Permissions; then accept them on
+   the org installation) and create the `repo-admin` environment with its four secrets. Generate a
+   new ccf-release-bot private key for it (app settings, Private keys): the old one was readable
+   by every workflow of every repo the org secret reached.
+2. Merge this change; the jobs that mint a token now name the `release` environment. Until a
+   repo's environment exists, GitHub creates an empty one on first use and the job still gets
+   the org secret, so nothing breaks in between.
+3. Apply `repo-settings`: each repo gets its `release` environment, its policies, then the
+   secrets. Check a release on one repo (release-please on `main`, the release workflow on its
+   tag).
+4. Remove the repos from the org secrets `RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY` (or
+   delete them) and the org secrets `REPO_ADMIN_*`, then delete the old private keys from both
+   apps.
+
+Callers need nothing new: `secrets: inherit` stays (it passes `SLACK_BOT_TOKEN`, which stays an
+org secret since `notify-failure.yml` runs on PRs), and the reusable workflows read the
+release-bot secrets from the environment. The `workflows` repo's own scheduled tools only run
+from `main` now; a dispatch from another branch is refused.
 
 The workflow calls `go run ./cmd/repo-settings sync`. Flags it doesn't expose: `--owner`
 (default `compliance-framework`), `--required-check-app-id` (default `15368`, GitHub Actions; `0`
@@ -778,14 +872,16 @@ runs against a token in `GH_TOKEN` (a personal token isn't an installation token
 `--check-token-scope=false`):
 
 ```sh
-go run ./cmd/repo-settings sync --manifest repos.mock.yaml --repos mock-api --bypass-app-id <id> --check-token-scope=false
+go run ./cmd/repo-settings sync --repos api --bypass-app-id <id> --check-token-scope=false
 ```
 
 ## Renovate
 
-`renovate.yml` runs self-hosted Renovate daily on the manifest's repos, with the shared preset
-`renovate/default.json` (third-party updates on the 8th and 22nd, vulnerability fixes any day,
-non-majors grouped and merged by Renovate as `ccf-release-bot` once the required check passes).
+`renovate.yml` runs self-hosted Renovate hourly on the manifest's repos (a live run on one shard of at most 15; the shards take turns run by run, so a late or dropped run slows the rotation but never skips a shard), with the shared preset
+`renovate/default.json` (third-party updates every day once a release is a week old, at most one new major per repo a visit and about two open, vulnerability fixes any day and never capped,
+non-majors grouped, and security fixes grouped per package manager, merged as `ccf-release-bot` once
+the required check passes: by Renovate, and by a merge pass right after each live run, since
+Renovate merges only one PR per repo per run).
 Scheduled runs are dry runs until the repo variable `RENOVATE_LIVE` is `true`. See
 [docs/renovate.md](docs/renovate.md).
 
@@ -814,7 +910,9 @@ daily in `ccf-bump-merge.yml`). See [docs/ccf-bump.md](docs/ccf-bump.md).
 `train.yml` releases the manifest's repos once a month, stage by stage: it bumps each repo's
 internal dependencies with `ccf-bump`, merges the release PRs, waits for the releases, and tracks it
 all in a `Release train YYYY-MM` issue and a live Slack board with a thread; when it finishes it posts
-the digest draft to #ccf-release-digests. See [docs/train.md](docs/train.md).
+the digest draft to #ccf-release-digests. Before helm, a gate probes the train's plugins and policy
+bundles (`plugin-probe.yml`) and smoke-tests its api, ui and agent (`stack-smoke.yml`). See
+[docs/train.md](docs/train.md).
 
 ## Slack messages
 
@@ -835,6 +933,13 @@ from their published images at given tags and checks they work together (`smoke/
 library, report each one's protocol (v1 or v2) and agent library version, and check policy
 bundles with the agent's OPA version. See [docs/plugin-probe.md](docs/plugin-probe.md).
 
+## Plugin health
+
+`plugin-health.yml` regenerates the pinned "Plugin health" issue (agent library and minors
+behind, protocol, last ccf-bump, last release and status per kept plugin) after each ccf-bump sync
+and finished train, and posts to `#ccf-releases` when the deprecation candidates change. See
+[docs/plugin-health.md](docs/plugin-health.md).
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs `go test ./...`, `go vet ./...`, a `gofmt -l .` check,
@@ -849,6 +954,4 @@ removes them, and until then they stay unchanged:
 
 - `.github/workflows/build.yml`: builds the old assessment-runtime stack with Docker Compose
   (needs the `GH_DEPL_KEY_CONF_SVC` deploy-key secret).
-- `.github/workflows/plugin-release.yml`: the old reusable plugin release workflow (GoReleaser
-  and a `gooci` upload). `.github/actionlint.yaml` silences one shellcheck finding in it.
 - `docker-compose.yml`: the stack that `build.yml` starts.

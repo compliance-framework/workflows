@@ -3,7 +3,8 @@
 # the published images in smoke/compose.yaml, checks that they work together, and tears the
 # stack down. On any failure it prints the container logs before the teardown.
 #
-#   SMOKE_API_TAG=0.21.0 SMOKE_UI_TAG=2.12.1 SMOKE_AGENT_TAG=0.9.0 smoke/run.sh
+#   SMOKE_API_TAG=0.21.0 SMOKE_UI_TAG=2.12.1 SMOKE_AGENT_TAG=0.9.0 \
+#     SMOKE_PLUGIN_TAG=v0.2.0 SMOKE_POLICY_TAG=v0.2.0 smoke/run.sh
 #
 # Checks:
 #   1. api: GET /api/health/ready is 200 (the API listens only after its migrations ran), and
@@ -11,13 +12,19 @@
 #   2. ui: GET / is 200 and serves the app's index.html.
 #   3. agent: with a key created in the API for this run, the agent's instance shows in
 #      GET /api/admin/agents/{id}/instances and the API has recorded a heartbeat from it.
+#   4. plugin: the agent runs plugin-file-attestation with its policies against
+#      smoke/fixtures/attested-file.txt, and POST /api/evidence/search finds at least one
+#      evidence record from it (labels provider=file, type=attestation, source=local and the
+#      agent's _agent).
 #
 # Settings (environment):
 #   SMOKE_API_TAG, SMOKE_UI_TAG, SMOKE_AGENT_TAG  image tags (required)
+#   SMOKE_PLUGIN_TAG, SMOKE_POLICY_TAG  tags of ghcr.io/compliance-framework/plugin-file-attestation
+#                   and plugin-file-attestation-policies (required)
 #   SMOKE_API_PORT, SMOKE_UI_PORT  host ports, on 127.0.0.1 (default 18080, 18000)
 #   SMOKE_PROJECT   compose project name (default ccf-smoke)
 #   SMOKE_TIMEOUT   seconds to wait for each check (default 180; the agent heartbeats once a
-#                   minute at a random second)
+#                   minute at a random second and runs the plugin at the start of each minute)
 #   SMOKE_KEEP=1    leave the stack running (no teardown), to debug
 #
 # Needs docker (with compose v2), curl, jq and openssl. Bash 3.2 compatible.
@@ -34,6 +41,7 @@ ADMIN_EMAIL="smoke-admin@example.test"
 AGENT_NAME="smoke-agent"
 
 started=""
+rendered=""
 
 log() { printf '==> %s\n' "$*"; }
 
@@ -58,8 +66,15 @@ compose() {
     docker compose -p "$PROJECT" -f "$SMOKE_DIR/compose.yaml" "$@"
 }
 
+# down_command: the command that tears a stack left up down later. Compose needs every
+# variable smoke/compose.yaml requires, including the rendered agent config.
+down_command() {
+    printf 'SMOKE_API_TAG=%s SMOKE_UI_TAG=%s SMOKE_AGENT_TAG=%s SMOKE_AGENT_CONFIG=%q docker compose -p %s -f %q down -v' \
+        "$SMOKE_API_TAG" "$SMOKE_UI_TAG" "$SMOKE_AGENT_TAG" "$SMOKE_AGENT_CONFIG" "$PROJECT" "$SMOKE_DIR/compose.yaml"
+}
+
 cleanup() {
-    local status=$?
+    local status=$? left_up=""
     trap - EXIT
     if [ -n "$started" ]; then
         if [ "$status" -ne 0 ]; then
@@ -70,13 +85,20 @@ cleanup() {
             echo "---- end of container logs ----" >&2
         fi
         if [ "${SMOKE_KEEP:-}" = "1" ]; then
-            log "SMOKE_KEEP=1: leaving the stack up (docker compose -p $PROJECT -f $SMOKE_DIR/compose.yaml down -v)"
+            left_up=1
+            log "SMOKE_KEEP=1: leaving the stack up ($(down_command))"
         else
             log "Tearing the stack down"
             # A failed teardown does not change the result, but say what is left behind.
-            compose down -v --remove-orphans >/dev/null 2>&1 ||
-                echo "WARNING: could not tear the stack down; run: docker compose -p $PROJECT -f $SMOKE_DIR/compose.yaml down -v" >&2
+            if ! compose down -v --remove-orphans >/dev/null 2>&1; then
+                left_up=1
+                echo "WARNING: could not tear the stack down; run: $(down_command)" >&2
+            fi
         fi
+    fi
+    # A stack left up still mounts the rendered agent config; the down command above needs it.
+    if [ -n "$rendered" ] && [ -z "$left_up" ]; then
+        rm -rf "$rendered"
     fi
     if [ "$status" -eq 0 ]; then
         log "Stack smoke test passed"
@@ -119,7 +141,7 @@ check_settings() {
             '' | *[!0-9]*) fail "$name '$value' is not a whole number" ;;
         esac
     done
-    for name in SMOKE_API_TAG SMOKE_UI_TAG SMOKE_AGENT_TAG; do
+    for name in SMOKE_API_TAG SMOKE_UI_TAG SMOKE_AGENT_TAG SMOKE_PLUGIN_TAG SMOKE_POLICY_TAG; do
         tag="${!name:-}"
         [ -n "$tag" ] || fail "$name is not set"
         # The docker tag grammar; anything else would not be a tag.
@@ -218,10 +240,49 @@ check_agent() {
     log "agent: instance $(printf '%s' "$INSTANCE" | jq -r '"\(."instance-id") (version \(."agent-version" // "?"), mode \(.mode), status \(.status))"') registered and heartbeating"
 }
 
-# TODO(W3): plugin check. The W3 plugin step adds a plugin to smoke/agent-config.yml and checks
-# here, with the stack still up, that its evidence reached the API.
+# render_agent_config: writes smoke/agent-config.yml with the plugin and policy tags filled in
+# to a temporary directory, and exports its path for smoke/compose.yaml. The tags passed
+# check_settings, so they hold no character sed or YAML would treat specially.
+render_agent_config() {
+    rendered="$(mktemp -d "${TMPDIR:-/tmp}/ccf-smoke.XXXXXX")" || fail "could not create a temporary directory"
+    # The agent container reads the file as whatever user its image runs as.
+    chmod 755 "$rendered"
+    SMOKE_AGENT_CONFIG="$rendered/agent-config.yml"
+    sed -e "s|\${SMOKE_PLUGIN_TAG}|$SMOKE_PLUGIN_TAG|g" -e "s|\${SMOKE_POLICY_TAG}|$SMOKE_POLICY_TAG|g" \
+        "$SMOKE_DIR/agent-config.yml" >"$SMOKE_AGENT_CONFIG" || fail "could not render smoke/agent-config.yml"
+    chmod 644 "$SMOKE_AGENT_CONFIG"
+    ! grep -q '\${SMOKE_' "$SMOKE_AGENT_CONFIG" ||
+        fail "smoke/agent-config.yml has a placeholder run.sh does not fill: $(grep -o '\${SMOKE_[A-Z_]*}' "$SMOKE_AGENT_CONFIG" | head -1)"
+    export SMOKE_AGENT_CONFIG
+}
+
+# plugin_evidence: true once the API has at least one evidence record from the plugin, matched
+# by the labels plugin-file-attestation sets for a local file and the agent's _agent label (its
+# key's client-id), so only this run's agent counts.
+plugin_evidence() {
+    local filter
+    filter="$(jq -cn --arg agent "$SMOKE_AGENT_CLIENT_ID" '{filter: {scope: {query: {operator: "and", scopes: [
+        {condition: {label: "provider", operator: "=", value: "file"}},
+        {condition: {label: "type", operator: "=", value: "attestation"}},
+        {condition: {label: "source", operator: "=", value: "local"}},
+        {condition: {label: "_agent", operator: "=", value: $agent}}]}}}}')"
+    api POST "/evidence/search?limit=10" -H 'Content-Type: application/json' -d "$filter"
+    [ "$STATUS" = "200" ] || return 1
+    EVIDENCE="$(printf '%s' "$BODY" | jq -c '.data[0]? // empty')"
+    [ -n "$EVIDENCE" ]
+}
+
+# check_plugin: with the stack still up, waits for the plugin's evidence to reach the API. The
+# plugin runs at the start of each minute, after the agent downloaded it and its policies.
 check_plugin() {
-    :
+    log "Waiting for evidence from plugin-file-attestation $SMOKE_PLUGIN_TAG (policies $SMOKE_POLICY_TAG) (POST /api/evidence/search)"
+    wait_for plugin_evidence || {
+        echo "---- last 50 lines of the agent's log ----" >&2
+        compose logs --no-color --tail 50 agent >&2 || true
+        echo "---- end of the agent's log ----" >&2
+        fail "no evidence from plugin-file-attestation (labels provider=file, type=attestation, source=local, _agent=$SMOKE_AGENT_CLIENT_ID) in POST /api/evidence/search within ${TIMEOUT}s (last response: $STATUS $BODY)"
+    }
+    log "plugin: evidence $(printf '%s' "$EVIDENCE" | jq -r '"\"\(.title // "?")\" (status \(.status.state // "?"))"') from plugin-file-attestation reached the API"
 }
 
 main() {
@@ -229,10 +290,12 @@ main() {
     SMOKE_JWT_SECRET="$(openssl rand -hex 32)"
     mask "$SMOKE_JWT_SECRET"
     export SMOKE_JWT_SECRET SMOKE_API_TAG SMOKE_UI_TAG SMOKE_AGENT_TAG
-    TOKEN="" AGENT_ID="" STATUS="" BODY="" INSTANCE=""
+    TOKEN="" AGENT_ID="" STATUS="" BODY="" INSTANCE="" EVIDENCE=""
 
     trap cleanup EXIT
-    log "Stack: api $SMOKE_API_TAG, ui $SMOKE_UI_TAG, agent $SMOKE_AGENT_TAG (project $PROJECT)"
+    # Before any compose call: smoke/compose.yaml requires SMOKE_AGENT_CONFIG.
+    render_agent_config
+    log "Stack: api $SMOKE_API_TAG, ui $SMOKE_UI_TAG, agent $SMOKE_AGENT_TAG, plugin-file-attestation $SMOKE_PLUGIN_TAG, policies $SMOKE_POLICY_TAG (project $PROJECT)"
     log "Pulling the images"
     compose pull --quiet || fail "could not pull the images"
     started=1

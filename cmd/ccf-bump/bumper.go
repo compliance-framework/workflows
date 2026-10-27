@@ -24,8 +24,11 @@ type bumper struct {
 	o      options
 	m      *manifest.Manifest
 	finals map[string]string // repo -> latest final tag, cached across repos
-	// commits caches "repo@tag" -> the commit SHA the tag points at (shared-workflow pins).
+	// commits caches "repo@tag" -> the commit SHA the tag points at (shared-workflow pins, and the
+	// Go module targets a dry run checks).
 	commits map[string]string
+	// trust caches "repo@tag" -> why the shared-workflow release isn't trusted (nil: it is).
+	trust map[string]error
 	// warnings are problems that don't fail the run (labels, superseded PRs, merges), for the summary.
 	warnings []string
 }
@@ -64,7 +67,7 @@ func (b *bumper) summary() {
 
 // config derives the updaters' settings for repo from its kind and dependencies.
 func (b *bumper) config(r manifest.Repo) bump.Config {
-	c := bump.Config{Owner: b.o.owner, Run: run1}
+	c := bump.Config{Owner: b.o.owner, Run: runner(b.o.owner)}
 	service := ""
 	for _, d := range r.DependsOn {
 		i := slices.IndexFunc(b.m.Repos, func(x manifest.Repo) bool { return x.Name == d })
@@ -88,15 +91,51 @@ func (b *bumper) config(r manifest.Repo) bump.Config {
 	return c
 }
 
-// run1 runs a command in dir (go, or the repo's own sync script), with its output on stderr and
-// without the GitHub token in its environment.
-func run1(ctx context.Context, dir, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir, cmd.Stdout, cmd.Stderr, cmd.Env = dir, os.Stderr, os.Stderr, withoutTokens(os.Environ())
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+// runner returns the bump.Runner that runs a command in dir (go, or the repo's own sync script),
+// with its output on stderr and the environment of commandEnv.
+func runner(owner string) bump.Runner {
+	return func(ctx context.Context, dir, name string, args ...string) error {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Dir, cmd.Stdout, cmd.Stderr, cmd.Env = dir, os.Stderr, os.Stderr, commandEnv(os.Environ(), owner)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+		}
+		return nil
 	}
-	return nil
+}
+
+// commandEnv returns env without the GitHub token (withoutTokens) and with owner's modules in
+// GOPRIVATE, so go fetches them from GitHub directly, never through proxy.golang.org or
+// sum.golang.org (docs/ccf-bump.md#why-org-modules-are-fetched-directly). The pattern is appended
+// to a GOPRIVATE already set, and to GONOPROXY and GONOSUMDB when they are set (they override
+// GOPRIVATE).
+func commandEnv(env []string, owner string) []string {
+	pattern := "github.com/" + owner + "/*"
+	vals := map[string]string{} // the last value of each, as exec uses
+	env = slices.DeleteFunc(withoutTokens(env), func(kv string) bool {
+		k, v, _ := strings.Cut(kv, "=")
+		if k == "GOPRIVATE" || k == "GONOPROXY" || k == "GONOSUMDB" {
+			vals[k] = v
+			return true
+		}
+		return false
+	})
+	add := func(list string) string {
+		if list == "" {
+			return pattern
+		}
+		if slices.Contains(strings.Split(list, ","), pattern) {
+			return list
+		}
+		return list + "," + pattern
+	}
+	env = append(env, "GOPRIVATE="+add(vals["GOPRIVATE"]))
+	for _, k := range []string{"GONOPROXY", "GONOSUMDB"} {
+		if vals[k] != "" {
+			env = append(env, k+"="+add(vals[k]))
+		}
+	}
+	return env
 }
 
 // withoutTokens drops GH_TOKEN and GITHUB_TOKEN from env.
@@ -187,7 +226,8 @@ func (b *bumper) targets(ctx context.Context, cfg bump.Config, refs []bump.Ref) 
 // workflowsTarget sets the target of the shared-workflow pins: a release vX.Y.Z (given, or in
 // sync mode the latest final release of the manifest's workflows repo) becomes its commit SHA
 // with the tag (bump.WorkflowsPin); any other given ref is used as is. Without a workflows repo in
-// the manifest, sync mode leaves the pins alone.
+// the manifest, sync mode leaves the pins alone. A release that trustedRelease refuses is an error
+// when given; in sync mode the pins stay as they are, with a warning.
 func (b *bumper) workflowsTarget(ctx context.Context, t map[string]string, refs []bump.Ref, final func(string) (string, error)) error {
 	if !slices.ContainsFunc(refs, func(r bump.Ref) bool { return r.Dep == bump.DepWorkflows }) {
 		return nil
@@ -216,7 +256,46 @@ func (b *bumper) workflowsTarget(ctx context.Context, t map[string]string, refs 
 		}
 		b.commits[repo+"@"+tag] = sha
 	}
+	err, checked := b.trust[repo+"@"+tag]
+	if !checked {
+		err = b.trustedRelease(ctx, repo, tag, sha)
+		b.trust[repo+"@"+tag] = err
+		if err != nil && !given {
+			b.warn("workflows pins left as they are: %v", err)
+		}
+	}
+	switch {
+	case err != nil && given:
+		return err
+	case err != nil:
+		return nil
+	}
 	t[bump.DepWorkflows] = bump.WorkflowsPin(sha, tag)
+	return nil
+}
+
+// trustedRelease checks that release tag of repo, at commit sha, was published by the release bot
+// (--author) from repo's default branch. The pins move every caller onto that code, and the bump
+// PRs merge without a review, so a release cut by hand from an unreviewed branch must not move them.
+func (b *bumper) trustedRelease(ctx context.Context, repo, tag, sha string) error {
+	author, err := b.e.gh.ReleaseAuthor(ctx, repo, tag)
+	if err != nil {
+		return fmt.Errorf("release %s of %s: %w", tag, repo, err)
+	}
+	if !strings.EqualFold(author, b.o.author) {
+		return fmt.Errorf("release %s of %s was published by %s, not %s", tag, repo, author, b.o.author)
+	}
+	branch, err := b.e.gh.DefaultBranch(ctx, repo)
+	if err != nil {
+		return fmt.Errorf("default branch of %s: %w", repo, err)
+	}
+	on, err := b.e.gh.OnBranch(ctx, repo, sha, branch)
+	if err != nil {
+		return fmt.Errorf("is %s %s on %s: %w", repo, tag, branch, err)
+	}
+	if !on {
+		return fmt.Errorf("release %s of %s is at %s, which is not on %s", tag, repo, sha, branch)
+	}
 	return nil
 }
 
@@ -254,6 +333,11 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	if len(plan.Changes) == 0 {
 		return false, nil
 	}
+	if b.o.dryRun {
+		if err := b.tagged(ctx, plan.Changes); err != nil {
+			return false, err
+		}
+	}
 	if err := bump.ApplyAll(ctx, dir, us, plan.Changes); err != nil {
 		return false, err
 	}
@@ -264,21 +348,30 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if diff == "" {
+	if plan, err = b.settle(ctx, name, dir, us, plan); err != nil {
+		return false, err
+	}
+	switch {
+	case diff == "":
 		fmt.Fprintln(out, "  no file changes")
+		return false, nil
+	case len(plan.Changes) == 0:
+		fmt.Fprintln(out, "  no planned change applied; nothing to push")
 		return false, nil
 	}
 	fmt.Fprint(out, indent(diff))
 	if !b.o.pr {
 		return false, nil
 	}
-	title, body := prText(b.o, plan)
+	held := plan.HoldReasons(r.Kind)
+	title, body := prText(b.o, plan, held)
 	branch := "ccf-bump/" + b.o.mode + "-" + b.e.now().UTC().Format("2006-01-02")
 	if b.o.dryRun {
 		fmt.Fprintf(out, "  dry run: would push %s and open %q\n%s", branch, title, indent(body))
 		label := bump.AutomergeLabel
-		if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
+		if len(held) > 0 {
 			label = bump.NeedsHumanLabel
+			fmt.Fprintf(out, "  dry run: auto-merge: off (%s)\n", strings.Join(held, "; "))
 		}
 		fmt.Fprintf(out, "  dry run: would add label %s\n", label)
 		// Nothing was opened to tell who ccf-bump runs as, so any bot's ccf-bump PR is listed.
@@ -300,10 +393,54 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	if _, err := b.git(ctx, dir, "push", "--quiet", "--force", b.e.remote(b.o.owner, name), "HEAD:refs/heads/"+branch); err != nil {
 		return false, err
 	}
-	return true, b.openPR(ctx, name, branch, title, body, plan)
+	return true, b.openPR(ctx, name, branch, title, body, held)
 }
 
-func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, plan bump.Plan) error {
+// tagged checks, for a dry run, that the version each Go module change moves to is tagged in its
+// repo, before go get asks for it. The train's dry run plans versions its stages have not released
+// yet; asking proxy.golang.org or sum.golang.org about one makes them cache "unknown revision"
+// for about 30 minutes, which failed the live run that followed. Direct fetches (commandEnv) skip
+// them, and this skips go get altogether. Found tags are cached in b.commits, across repos.
+func (b *bumper) tagged(ctx context.Context, changes []bump.Change) error {
+	for _, c := range changes {
+		if _, ok := b.commits[c.Dep+"@"+c.To]; ok || !c.GoModule() {
+			continue
+		}
+		sha, err := b.e.gh.TagCommit(ctx, c.Dep, c.To)
+		if err != nil {
+			return fmt.Errorf("dry run: tag %s of %s not found (not tagged yet?), so go get was not run: %w", c.To, c.Dep, err)
+		}
+		b.commits[c.Dep+"@"+c.To] = sha
+	}
+	return nil
+}
+
+// settle returns the plan with only the changes applied to the checkout in dir (bump.Plan.Settle),
+// so the PR's title, table and needs-human decision follow its diff. A planned change that did
+// not apply is a warning; a script that left its file as it was found it already at the target.
+func (b *bumper) settle(ctx context.Context, name, dir string, us []bump.Updater, plan bump.Plan) (bump.Plan, error) {
+	files, err := b.git(ctx, dir, "diff", "--cached", "--name-only", "-z")
+	if err != nil {
+		return plan, err
+	}
+	changed := strings.Split(strings.TrimSuffix(files, "\x00"), "\x00")
+	after, err := bump.ScanAll(dir, us)
+	if err != nil {
+		return plan, fmt.Errorf("scan after the bump: %w", err)
+	}
+	plan, unchanged, dropped := plan.Settle(after, func(f string) bool { return slices.Contains(changed, f) })
+	for _, c := range unchanged {
+		fmt.Fprintf(b.e.stdout, "  unchanged %-12s %s left %s as it was (already %s)\n", c.Dep, c.Key, c.File, c.To)
+	}
+	for _, c := range dropped {
+		b.warn("%s: planned %s %s -> %s (%s %s) was not applied; it is left out of the PR", name, c.Dep, orDash(c.Pinned()), c.To, c.File, c.Key)
+	}
+	return plan, nil
+}
+
+// openPR opens or updates the bump PR and labels it: needs-human when held lists why it must not
+// be auto-merged, else ccf-bump:automerge.
+func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, held []string) error {
 	pr, err := b.e.gh.OpenPR(ctx, repo, branch)
 	if err != nil {
 		return err
@@ -329,8 +466,8 @@ func (b *bumper) openPR(ctx context.Context, repo, branch, title, body string, p
 	}
 	fmt.Fprintf(b.e.stdout, "  PR: %s\n", pr.URL)
 	b.closeSuperseded(ctx, repo, branch, pr)
-	if slices.ContainsFunc(plan.Changes, bump.Change.Major) {
-		fmt.Fprintln(b.e.stdout, "  auto-merge: off (a major update, or a pin that was not a version)")
+	if len(held) > 0 {
+		fmt.Fprintf(b.e.stdout, "  auto-merge: off (%s)\n", strings.Join(held, "; "))
 		if pr.HasLabel(bump.AutomergeLabel) { // an earlier run the same day was eligible
 			if err := b.e.gh.RemoveLabel(ctx, repo, pr.Number, bump.AutomergeLabel); err != nil {
 				b.warn("%s#%d: remove label %s: %v", repo, pr.Number, bump.AutomergeLabel, err)
@@ -443,7 +580,8 @@ func commitType(plan bump.Plan) string {
 	return "fix"
 }
 
-func prText(o options, plan bump.Plan) (string, string) {
+// prText returns the PR's title and body; held lists why it is not auto-merged (Plan.HoldReasons).
+func prText(o options, plan bump.Plan, held []string) (string, string) {
 	title := commitType(plan) + "(deps): bump " + strings.Join(targetsOf(plan), ", ")
 	var b strings.Builder
 	fmt.Fprintf(&b, "Bumps internal dependencies (ccf-bump, %s mode).\n\n| Dependency | From | To | Where |\n| --- | --- | --- | --- |\n", o.mode)
@@ -458,6 +596,12 @@ func prText(o options, plan bump.Plan) (string, string) {
 		b.WriteString("\nNot changed (conflicts):\n\n")
 		for _, c := range plan.Conflicts {
 			fmt.Fprintf(&b, "- `%s` %s: %s\n", c.File, c.Key, c.Reason)
+		}
+	}
+	if len(held) > 0 {
+		b.WriteString("\nNot auto-merged, a human merges this PR:\n\n")
+		for _, h := range held {
+			fmt.Fprintf(&b, "- %s.\n", h)
 		}
 	}
 	return title, b.String()

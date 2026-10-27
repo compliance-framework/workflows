@@ -1,6 +1,6 @@
 # Bot PRs that need a human
 
-Most bot PRs merge on their own: Renovate merges its non-major group, `ccf-bump merge` merges the
+Most bot PRs merge on their own: Renovate and `renovate.yml`'s merge pass merge the non-major group and security fixes, `ccf-bump merge` merges the
 ccf-bump PRs labelled `ccf-bump:automerge`, and the train merges its bump and release PRs. The rest
 wait for a person: a major update, an OPA bump in the api, a ccf-bump PR it doesn't merge. Without a nudge they sit there until the
 next train trips over them (Renovate majors on `mock-ui`, #13 and #14, waited for weeks).
@@ -14,7 +14,7 @@ Every bot PR that needs a human carries one label, **`needs-human`** (the same n
 | Bot | PRs | How |
 | --- | --- | --- |
 | Renovate (`renovate/default.json`) | Majors, and OPA in the api (its own `renovate/opa` PR, never auto-merged) | The rules add `"addLabels": ["needs-human"]`, merged with any other labels. Renovate sets labels when it opens the PR; GitHub creates the label if the repo lacks it. |
-| ccf-bump | A PR it doesn't merge: a major update or a pin that was not a version, or a PR it failed to label `ccf-bump:automerge` | After opening or updating the PR, ccf-bump adds the label, creating it with the color and description above when the repo lacks it. A failure is a warning: the PR is open either way. `--dry-run` prints `would add label needs-human`. ccf-bump's other label, `ccf-bump:automerge`, is not a human signal: it marks the PRs `ccf-bump merge` merges ([ccf-bump.md](ccf-bump.md#the-merge-pass)). |
+| ccf-bump | A PR it doesn't merge: a major update, a pin that was not a version, or in a helm repo an app update of a minor or more; or a PR it failed to label `ccf-bump:automerge` | After opening or updating the PR, ccf-bump adds the label, creating it with the color and description above when the repo lacks it. A failure is a warning: the PR is open either way. `--dry-run` prints `would add label needs-human`. ccf-bump's other label, `ccf-bump:automerge`, is not a human signal: it marks the PRs `ccf-bump merge` merges ([ccf-bump.md](ccf-bump.md#the-merge-pass)). |
 
 Both run as `ccf-release-bot`; adding and creating a label needs **Pull requests: write** (or
 Issues: write), which their live tokens already have.
@@ -31,7 +31,7 @@ posts a tracked bot PR to the `SLACK_CHANNEL_NEEDS_HUMAN` channel, once per PR, 
   channel instead of a CI incident in `SLACK_CHANNEL_CI_FAILURES` (an incident still opens when
   other jobs failed too). `release-checks` itself stays read-only: it never labels or comments.
 
-The post is a card: "Needs a human · mock-ui", the PR (`compliance-framework/mock-ui#13`, linked)
+The post is a card: "Needs a human · ui", the PR (`compliance-framework/ui#13`, linked)
 and its title, fields Why / CI / Opened by / Waiting, and a Review PR button
 ([notify.md](notify.md#needs-a-human)).
 
@@ -58,8 +58,8 @@ The post is a Block Kit card ([slack.md](slack.md)) with an amber bar: the heade
 2 PRs need a human", then one compact section per repo, in manifest order, with a line per PR:
 
 ```text
-compliance-framework/mock-ui
-• compliance-framework/mock-ui#13 chore(deps): update typescript to v7 · labelled needs-human, open over 7d · 9d
+compliance-framework/ui
+• compliance-framework/ui#13 chore(deps): update typescript to v7 · labelled needs-human, open over 7d · 9d
 compliance-framework/workflows
 • compliance-framework/workflows#52 chore(main): release 2.0.0 · needs release:major-approved (.: v1.4.0 -> v2.0.0) · 3d
 ```
@@ -71,16 +71,15 @@ PR it could not read is listed under "Could not read" and fails the run, after p
 
 | Input (`workflow_dispatch`) | Default | What |
 | --- | --- | --- |
-| `manifest` | `repos.mock.yaml` | The repos to read. A scheduled run has no inputs and uses the `MANIFEST` fallback in the workflow, which equals this default: change both to move to `repos.yaml`. |
 | `dry_run` | `true` | Print the digest instead of posting it. Scheduled runs are dry runs until the repo variable `ATTENTION_DIGEST_LIVE` is `true` (the `RENOVATE_LIVE` pattern). |
 
-The job lists the manifest's repos, then mints a `ccf-release-bot` token scoped to exactly those
+It reads every active repo in `repos.yaml`. The job lists them, then mints a `ccf-release-bot` token scoped to exactly those
 (`repositories:`) with **read-only** permissions: Pull requests (open PRs), Checks (check runs) and
 Contents (release-please manifests). It refuses an empty selection, since an unscoped token would
 reach every org repo. Every GitHub call is a `GET`.
 
 ```sh
-GH_TOKEN=$(gh auth token) go run ./cmd/attention-digest post --manifest repos.mock.yaml --dry-run
+GH_TOKEN=$(gh auth token) go run ./cmd/attention-digest post --repos ui,workflows --dry-run
 ```
 
 ## Setting it up

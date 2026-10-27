@@ -45,7 +45,7 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         id: setup
         with:
-          version: v3.22.0
+          version: v3.22.1
       # kubeconform is built from source at a pinned version, like actionlint in ci-common.yml.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         id: go
@@ -106,10 +106,10 @@ jobs:
           persist-credentials: false
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v3.22.0
-      - uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
+          version: v3.22.1
+      - uses: helm/chart-testing-action@720270857a28afd41e2426521a7801db09e9b510 # v2.9.0
         with:
-          version: 3.14.0
+          version: 3.15.0
       - name: ct lint
         env:
           CHARTS_DIR: ${{ inputs.charts-dir }}

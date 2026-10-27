@@ -7,9 +7,9 @@ read, and links to the org's alerts page and the run. The logic is `cmd/vuln-sum
 rules in `internal/vulnsummary`.
 
 ```text
-:shield: 5 open Dependabot alerts in compliance-framework (10 repo(s) in repos.mock.yaml): 1 critical, 1 high, 1 medium, 2 low
-• mock-api: 2 (1 critical, 1 medium)
-• mock-ui: 3 (1 high, 2 low)
+:shield: 5 open Dependabot alerts in compliance-framework (10 repo(s) in repos.yaml): 1 critical, 1 high, 1 medium, 2 low
+• api: 2 (1 critical, 1 medium)
+• ui: 3 (1 high, 2 low)
 8 other repos have no open alerts.
 All Dependabot alerts · run
 ```
@@ -19,19 +19,17 @@ Severity is the advisory's (`critical`, `high`, `medium`, `low`); anything else 
 
 ## When it runs
 
-- **Schedule**: Mondays at 08:00 UTC, on the default manifest.
+- **Schedule**: Mondays at 08:00 UTC, on `repos.yaml`.
 - **`workflow_dispatch`**: Actions, `vuln-summary`, Run workflow, or
-  `gh workflow run vuln-summary.yml -f manifest=repos.mock.yaml`.
+  `gh workflow run vuln-summary.yml`. It has no inputs.
 
-| Input | Default | What |
-| --- | --- | --- |
-| `manifest` | `repos.mock.yaml` | The repos to summarise: every repo in the manifest. `repos.yaml` for the product repos, once the summary is proven on the mocks: then change both the input's default and the `MANIFEST` fallback in `vuln-summary.yml` (a scheduled run has no inputs and uses the fallback). |
+Both summarise every active repo in `repos.yaml` ([manifest.md](manifest.md)).
 
 ## Secrets and variables
 
 | Name | Kind | What |
 | --- | --- | --- |
-| `RELEASE_BOT_APP_ID`, `RELEASE_BOT_PRIVATE_KEY` | secrets | `ccf-release-bot`, to read the alerts. |
+| `RELEASE_BOT_APP_ID`, `RELEASE_BOT_PRIVATE_KEY` | `release` environment secrets (main only) | `ccf-release-bot`, to read the alerts. |
 | `SLACK_BOT_TOKEN` | secret | Bot token with `chat:write`. Without it the run prints the summary and posts nothing. |
 | `SLACK_CHANNEL_VULNS` | variable | Channel ID to post to. Empty means `SLACK_CHANNEL_CI_FAILURES`. |
 
@@ -67,8 +65,8 @@ alerts on for the manifest's repos (see the README, "Repo settings").
 ## Running it locally
 
 ```sh
-go run ./cmd/vuln-summary list --manifest repos.mock.yaml
-GH_TOKEN=<token> go run ./cmd/vuln-summary post --manifest repos.mock.yaml [--repos mock-api,mock-ui]
+go run ./cmd/vuln-summary list
+GH_TOKEN=<token> go run ./cmd/vuln-summary post [--repos api,ui]
 ```
 
 Without `SLACK_BOT_TOKEN` it only prints the message. `--owner` defaults to

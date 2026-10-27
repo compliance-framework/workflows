@@ -1,5 +1,115 @@
 # Changelog
 
+## [1.7.0](https://github.com/compliance-framework/workflows/compare/v1.6.0...v1.7.0) (2026-10-14)
+
+
+### Features
+
+* **renovate:** group security fixes into one PR per manager ([#125](https://github.com/compliance-framework/workflows/issues/125)) ([913fa4b](https://github.com/compliance-framework/workflows/commit/913fa4bf599f1cc9077dede7847d453617572455))
+* **renovate:** merge green Renovate PRs after each run ([#129](https://github.com/compliance-framework/workflows/issues/129)) ([9d26388](https://github.com/compliance-framework/workflows/commit/9d2638893413c29013dcf79bf00499b1b5b60661))
+
+
+### Bug Fixes
+
+* **ccf-bump:** fetch org modules directly, not through the public proxy ([#140](https://github.com/compliance-framework/workflows/issues/140)) ([987851d](https://github.com/compliance-framework/workflows/commit/987851dfb9e64fb23b4b48747bc3560220c06840))
+* **ccf-bump:** ignore templated refs and hold only for applied changes ([#127](https://github.com/compliance-framework/workflows/issues/127)) ([1e897fc](https://github.com/compliance-framework/workflows/commit/1e897fc995272fb652374e9cfb5d5216c9888888))
+* **deps:** update module golang.org/x/net to v0.60.0 [security] ([#134](https://github.com/compliance-framework/workflows/issues/134)) ([504d18d](https://github.com/compliance-framework/workflows/commit/504d18d47f0d9e883c3c3776a01f99000ce59136))
+* **deps:** update module google.golang.org/grpc to v1.83.2 [security] ([#123](https://github.com/compliance-framework/workflows/issues/123)) ([40f3ffa](https://github.com/compliance-framework/workflows/commit/40f3ffaad5e0b5be7b992fad42fffd10c24415d2))
+* **train:** /retry re-runs a failed release-please run ([#139](https://github.com/compliance-framework/workflows/issues/139)) ([78b07c8](https://github.com/compliance-framework/workflows/commit/78b07c89cd23a63eb67e23b3cdc6bd963e52d820))
+* **train:** bump helm to the latest final release of each dependency ([#141](https://github.com/compliance-framework/workflows/issues/141)) ([224b0b9](https://github.com/compliance-framework/workflows/commit/224b0b94b62b33b0496a7c8b1c8bbf2a536da962))
+* **train:** check commenters' org role in the run that starts a train ([#135](https://github.com/compliance-framework/workflows/issues/135)) ([4286ab1](https://github.com/compliance-framework/workflows/commit/4286ab1de214ffcfb406ddb98544ef5707a00cc2))
+* **train:** re-probe a fix release only once it is published ([#133](https://github.com/compliance-framework/workflows/issues/133)) ([92edb34](https://github.com/compliance-framework/workflows/commit/92edb340410897f601f278a1bede78d7975385fe))
+* **train:** read the gate run ID from the dispatch response ([#131](https://github.com/compliance-framework/workflows/issues/131)) ([5986720](https://github.com/compliance-framework/workflows/commit/59867205d06be2e5b8a8cbcd0404293c620231fa))
+
+## [1.6.0](https://github.com/compliance-framework/workflows/compare/v1.5.2...v1.6.0) (2026-10-13)
+
+
+### Features
+
+* **manifest:** activate batch 1 ([#111](https://github.com/compliance-framework/workflows/issues/111)) ([8abeeb2](https://github.com/compliance-framework/workflows/commit/8abeeb269b118a4f1d5aee800d852bf465f9d7fe))
+* **manifest:** activate batch 2 ([#115](https://github.com/compliance-framework/workflows/issues/115)) ([36095fc](https://github.com/compliance-framework/workflows/commit/36095fccfbff118b76259890acdfa534e623bea6))
+* **manifest:** activate batch 3 ([#121](https://github.com/compliance-framework/workflows/issues/121)) ([105e29d](https://github.com/compliance-framework/workflows/commit/105e29d60b709c2eda2a8238c115073c0f149762))
+* **manifest:** add the plugins and policy repos ([#108](https://github.com/compliance-framework/workflows/issues/108)) ([4733ca9](https://github.com/compliance-framework/workflows/commit/4733ca9612a63efdfaac3041a3a8fb0d829ca99d))
+* **manifest:** gate repos by batch ([#107](https://github.com/compliance-framework/workflows/issues/107)) ([75cd984](https://github.com/compliance-framework/workflows/commit/75cd984f3585e36818e7e1c564a586b576e92761))
+* **plugin-health:** GitHub and registry clients, issue and Slack publishing ([#118](https://github.com/compliance-framework/workflows/issues/118)) ([056718f](https://github.com/compliance-framework/workflows/commit/056718fc2c99eaec732b4ad43565f0e5fbb54244))
+* **plugin-health:** plugin-health command and workflow ([#119](https://github.com/compliance-framework/workflows/issues/119)) ([62a582f](https://github.com/compliance-framework/workflows/commit/62a582f6c229380a6507c211e8caf2efd149eccd))
+* **plugin-health:** status rules and the report table ([#117](https://github.com/compliance-framework/workflows/issues/117)) ([667c764](https://github.com/compliance-framework/workflows/commit/667c764d0b1a7af874ff432be4edf9b2ad8bb107))
+* **renovate:** throttle Renovate and ccf-bump sync for plugin batches ([#110](https://github.com/compliance-framework/workflows/issues/110)) ([39214c2](https://github.com/compliance-framework/workflows/commit/39214c2878d2fe1a03d20e0eee162e6d03cb67bf))
+* **smoke:** plugin-file-attestation evidence check ([#116](https://github.com/compliance-framework/workflows/issues/116)) ([39f6e87](https://github.com/compliance-framework/workflows/commit/39f6e872fb12385107945944d58a01186339b731))
+* **train:** gate the helm stage on plugin-probe and stack-smoke ([#112](https://github.com/compliance-framework/workflows/issues/112)) ([ef062e2](https://github.com/compliance-framework/workflows/commit/ef062e29c9b0a98dfce6faf5e12e1b60d6fe69c3))
+* **train:** run the train gate from train.yml ([#113](https://github.com/compliance-framework/workflows/issues/113)) ([94fd9d4](https://github.com/compliance-framework/workflows/commit/94fd9d460246bd83a64a285373a4e8cafaedc2a9))
+
+
+### Bug Fixes
+
+* **deps:** update module golang.org/x/crypto to v0.56.0 [security] ([#98](https://github.com/compliance-framework/workflows/issues/98)) ([d077235](https://github.com/compliance-framework/workflows/commit/d0772355dfd96d0f8304db2f3d3b9c72d7447947))
+* **deps:** update module google.golang.org/grpc to v1.83.1 [security] ([#101](https://github.com/compliance-framework/workflows/issues/101)) ([866570c](https://github.com/compliance-framework/workflows/commit/866570c82fccba91b642399d36ae0d6ad89acb70))
+
+## [1.5.2](https://github.com/compliance-framework/workflows/compare/v1.5.1...v1.5.2) (2026-10-13)
+
+
+### Bug Fixes
+
+* **ci-policies:** treat data.json keys as known to Regal and drop prefer-string-interpolation ([#103](https://github.com/compliance-framework/workflows/issues/103)) ([7b29ebf](https://github.com/compliance-framework/workflows/commit/7b29ebfa3908eff9b5bd339e5ef82852dbe7b34b))
+* **ci:** don't fail lint when golangci-lint.run is unreachable ([#105](https://github.com/compliance-framework/workflows/issues/105)) ([749a8fc](https://github.com/compliance-framework/workflows/commit/749a8fc4554b6f913ccc35f9c68af842e9a1c39d))
+
+## [1.5.1](https://github.com/compliance-framework/workflows/compare/v1.5.0...v1.5.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **ccf-bump:** helm app updates of a minor or more need a human ([#92](https://github.com/compliance-framework/workflows/issues/92)) ([5ca9b77](https://github.com/compliance-framework/workflows/commit/5ca9b770fd7dcfd4d667bc508daf228fcefaca5d))
+
+## [1.5.0](https://github.com/compliance-framework/workflows/compare/v1.4.0...v1.5.0) (2026-10-09)
+
+
+### Features
+
+* **release:** pass the release VERSION to image builds ([#90](https://github.com/compliance-framework/workflows/issues/90)) ([1b6e7c6](https://github.com/compliance-framework/workflows/commit/1b6e7c6f6b521701ce5f83c13169eb8f62406361))
+
+## [1.4.0](https://github.com/compliance-framework/workflows/compare/v1.3.2...v1.4.0) (2026-10-09)
+
+
+### Features
+
+* **ci:** lint-timeout-minutes input on the Go CI workflows ([#88](https://github.com/compliance-framework/workflows/issues/88)) ([1956c6e](https://github.com/compliance-framework/workflows/commit/1956c6e6149a91c12fc0eb05223d65a191ae629b))
+
+## [1.3.2](https://github.com/compliance-framework/workflows/compare/v1.3.1...v1.3.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* **ccf-bump,train:** a queued or in-progress required check is pending, not a refusal ([#86](https://github.com/compliance-framework/workflows/issues/86)) ([b3e60a6](https://github.com/compliance-framework/workflows/commit/b3e60a632c5a0285591792becff54816516798ac))
+
+## [1.3.1](https://github.com/compliance-framework/workflows/compare/v1.3.0...v1.3.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **release:** publish plugin and policy artifacts once, tag the rest to the same digest ([#85](https://github.com/compliance-framework/workflows/issues/85)) ([ce2ecaa](https://github.com/compliance-framework/workflows/commit/ce2ecaa55dadb940670aa3ff8482ec7fe462ce20))
+* **renovate:** security updates are fix(deps), so they release ([#83](https://github.com/compliance-framework/workflows/issues/83)) ([43a4a30](https://github.com/compliance-framework/workflows/commit/43a4a30e2aa21f300ba2d6b95271d0b27cf90ddf))
+
+## [1.3.0](https://github.com/compliance-framework/workflows/compare/v1.2.0...v1.3.0) (2026-10-08)
+
+
+### Features
+
+* **repo-settings:** manage the workflows repo; tag ruleset, strict review and Actions settings ([8e4c27b](https://github.com/compliance-framework/workflows/commit/8e4c27b2a824715c293364128670d9c6361dadfa))
+* **repo-settings:** manage the workflows repo; tag ruleset, strict review and Actions settings ([ddf5d7c](https://github.com/compliance-framework/workflows/commit/ddf5d7c92cdde97c3d7cea914f40cbfced3b528f))
+* **repo-settings:** release environment for the ccf-release-bot secrets ([9b8311e](https://github.com/compliance-framework/workflows/commit/9b8311e7c03804e28b785d6bfd2d7ad63b31ef0e))
+* **repo-settings:** release environment for the ccf-release-bot secrets ([6a44da0](https://github.com/compliance-framework/workflows/commit/6a44da050f0f2a9a382101c2457387de1d9ddc2f))
+
+
+### Bug Fixes
+
+* **ccf-bump:** move workflows pins only to bot releases on the default branch ([2a9b345](https://github.com/compliance-framework/workflows/commit/2a9b345009652e8fb1006baf7a778b5f52b36172))
+* **ccf-bump:** move workflows pins only to bot releases on the default branch ([86b1188](https://github.com/compliance-framework/workflows/commit/86b11887aeb6096e32b705efa36dece825cb4897))
+* **ci:** pass ci / required when release-checks is skipped ([d628ff2](https://github.com/compliance-framework/workflows/commit/d628ff2c8ac629e451f5aed1c2795eeab6bcc23d))
+* **ci:** pass ci / required when release-checks is skipped ([1e26f5f](https://github.com/compliance-framework/workflows/commit/1e26f5fa51f3639a32af471ac32cd67a28034c67))
+* **ci:** pass ci / required when release-checks is skipped ([7ded49c](https://github.com/compliance-framework/workflows/commit/7ded49c636195ae57dcd73481faad999e504b5fb))
+* **train:** never adopt a fork's PR as the release PR ([f1565f7](https://github.com/compliance-framework/workflows/commit/f1565f70b08952d6c04263445e7e18dc4acc77af))
+* **train:** never adopt a fork's PR as the release PR ([443ecdd](https://github.com/compliance-framework/workflows/commit/443ecdd710cf5ec432452a452e2076fc9b5d4126))
+
 ## [1.2.0](https://github.com/compliance-framework/workflows/compare/v1.1.1...v1.2.0) (2026-10-08)
 
 

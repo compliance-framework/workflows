@@ -18,11 +18,11 @@ on:
         default: oci://ghcr.io/compliance-framework/helm-charts
     secrets:
       RELEASE_BOT_APP_ID:
-        description: "ccf-release-bot App ID"
-        required: true
+        description: "ccf-release-bot App ID (the caller's `release` environment secret is used first)"
+        required: false
       RELEASE_BOT_PRIVATE_KEY:
-        description: "ccf-release-bot private key"
-        required: true
+        description: "ccf-release-bot private key (the caller's `release` environment secret is used first)"
+        required: false
 
 permissions: {}
 
@@ -67,7 +67,7 @@ jobs:
           "$RUNNER_TEMP/release" chart --tag "$TAG" --charts-dir "$CHARTS_DIR"
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v3.22.0
+          version: v3.22.1
       # At the tag's version: a release candidate is tagged on the default branch, whose
       # Chart.yaml still has the previous version until the release PR merges.
       - name: Package and push the chart

@@ -113,6 +113,28 @@ func (g *GitHub) TagCommit(ctx context.Context, repo, tag string) (string, error
 	return c.SHA, err
 }
 
+// ReleaseAuthor returns the login of the account that published repo's release tag.
+func (g *GitHub) ReleaseAuthor(ctx context.Context, repo, tag string) (string, error) {
+	var r struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+	}
+	err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/releases/tags/%s", g.Owner, repo, url.PathEscape(tag)), nil, &r)
+	return r.Author.Login, err
+}
+
+// OnBranch reports whether commit sha is on repo's branch: its head or one of its ancestors.
+func (g *GitHub) OnBranch(ctx context.Context, repo, sha, branch string) (bool, error) {
+	var c struct {
+		Status string `json:"status"`
+	}
+	// base...head: "ahead" (or "identical") means the branch contains the commit; per_page=1
+	// keeps the commit list in the response short.
+	err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/compare/%s...%s?per_page=1", g.Owner, repo, url.PathEscape(sha), url.PathEscape(branch)), nil, &c)
+	return c.Status == "ahead" || c.Status == "identical", err
+}
+
 // File returns the content of path in repo at ref.
 func (g *GitHub) File(ctx context.Context, repo, ref, path string) ([]byte, error) {
 	var f struct {
@@ -258,6 +280,33 @@ func (g *GitHub) PullRequest(ctx context.Context, repo string, number int) (*PR,
 	return &pr, err
 }
 
+// PRCommitAuthors returns the author login of each commit of PR number, oldest first; "" for a
+// commit whose author GitHub can't link to an account. GitHub lists at most 250 commits.
+func (g *GitHub) PRCommitAuthors(ctx context.Context, repo string, number int) ([]string, error) {
+	var out []string
+	for page := 1; page <= 3; page++ {
+		var commits []struct {
+			Author *struct {
+				Login string `json:"login"`
+			} `json:"author"`
+		}
+		if err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d/commits?per_page=100&page=%d", g.Owner, repo, number, page), nil, &commits); err != nil {
+			return nil, err
+		}
+		for _, c := range commits {
+			login := ""
+			if c.Author != nil {
+				login = c.Author.Login
+			}
+			out = append(out, login)
+		}
+		if len(commits) < 100 {
+			break
+		}
+	}
+	return out, nil
+}
+
 // CheckRun is a run of a check on a commit.
 type CheckRun struct {
 	ID         int64     `json:"id"`
@@ -307,12 +356,36 @@ func RequiredCheck(runs []CheckRun) (running, newest *CheckRun) {
 	return nil, newest
 }
 
+// checkMention matches each required status check a 405 body names; checkState matches each
+// "Required status check \"<name>\" is <state>" (or "status checks ... are <state>"), capturing
+// the state.
+var (
+	checkMention = regexp.MustCompile(`(?i)status checks?\b`)
+	checkState   = regexp.MustCompile(`(?i)status checks?\b.*?\b(?:is|are) (in progress|[a-z]+)`)
+)
+
+// pendingStates are the states GitHub reports for a required check that hasn't concluded yet.
+var pendingStates = map[string]bool{"expected": true, "queued": true, "in progress": true, "pending": true}
+
 // ExpectsCheck reports whether err is GitHub refusing a merge because a required status check is
-// still expected (it hasn't reported on the head yet, or a new run of it is in progress).
+// still pending: expected (it hasn't reported on the head yet), queued, in progress or pending
+// (a new run of it started). Every check the body names must have a pending state, so a failing
+// check, or one phrased in a way the match doesn't know, is never mistaken for a pending one.
 func ExpectsCheck(err error) bool {
 	var se *StatusError
-	return errors.As(err, &se) && se.Code == http.StatusMethodNotAllowed &&
-		bytes.Contains(se.Body, []byte("status check")) && bytes.Contains(se.Body, []byte("is expected"))
+	if !errors.As(err, &se) || se.Code != http.StatusMethodNotAllowed {
+		return false
+	}
+	states := checkState.FindAllSubmatch(se.Body, -1)
+	if len(states) == 0 || len(states) != len(checkMention.FindAllIndex(se.Body, -1)) {
+		return false
+	}
+	for _, m := range states {
+		if !pendingStates[string(bytes.ToLower(m[1]))] {
+			return false
+		}
+	}
+	return true
 }
 
 // Merge squash-merges the PR if its head is still sha, with title as the commit title.

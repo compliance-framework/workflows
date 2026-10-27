@@ -5,12 +5,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/compliance-framework/workflows/internal/manifest"
 )
 
 func TestStartPostsTheParentMessage(t *testing.T) {
 	w := mockWorld(t)
 	w.tick() // release-please has opened stage 1's release PRs
-	if err := w.engine(trainDay).Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Scheduled: true}); err != nil {
+	if err := w.engine(trainDay).Start(ctx, StartOptions{Manifest: "mock.yaml", Scheduled: true}); err != nil {
 		t.Fatal(err)
 	}
 	st := w.state(1)
@@ -53,7 +55,7 @@ func TestStartSchedule(t *testing.T) {
 		if tt.existing != "" {
 			w.issues = append(w.issues, &Issue{Number: 1, Title: tt.existing, Labels: []string{LabelTrain, LabelDone}})
 		}
-		if err := w.engine(day(tt.now)).Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api"}, Scheduled: true}); err != nil {
+		if err := w.engine(day(tt.now)).Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api"}, Scheduled: true}); err != nil {
 			t.Fatal(err)
 		}
 		got := ""
@@ -68,7 +70,7 @@ func TestStartSchedule(t *testing.T) {
 	w := newWorld(t)
 	w.repo("mock-api", "0.1.0")
 	w.issues = append(w.issues, &Issue{Number: 1, Title: "Release train 2026-12", Labels: []string{LabelTrain, LabelDone}})
-	if err := w.engine(day("2026-12-09")).Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api"}}); err != nil {
+	if err := w.engine(day("2026-12-09")).Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := w.issues[len(w.issues)-1].Title; got != "Release train 2026-12 (2)" {
@@ -82,13 +84,13 @@ func TestEscalation(t *testing.T) {
 	w.get("mock-api").failChecks = true
 	w.get("mock-api").pending("0.2.0")
 	nov := w.engine(time.Date(2026, 11, 2, 8, 0, 0, 0, time.UTC))
-	if err := nov.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Repos: []string{"mock-api"}}); err != nil {
+	if err := nov.Start(ctx, StartOptions{Manifest: "mock.yaml", Repos: []string{"mock-api"}}); err != nil {
 		t.Fatal(err)
 	}
 	dec := w.engine(trainDay)
 	for range 2 {
 		w.tick()
-		if err := dec.Start(ctx, StartOptions{Manifest: "repos.mock.yaml", Scheduled: true}); err != nil {
+		if err := dec.Start(ctx, StartOptions{Manifest: "mock.yaml", Scheduled: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -103,12 +105,28 @@ func TestEscalation(t *testing.T) {
 	}
 }
 
-func TestDryRunPlansTheW1Stages(t *testing.T) {
+func TestDryRunPlansReposYAMLStages(t *testing.T) {
 	w := newWorld(t)
 	w.repo("api", "0.21.0").pending("0.22.0")
 	w.repo("gooci", "0.0.7").pending("0.0.8")
 	for _, n := range []string{"agent", "ui", "agent-action", "helm-charts"} {
 		w.repo(n, "0.1.0").bumped = true
+	}
+	// Every batch of repos.yaml is active: the released plugin and policy repos join stage 3, with nothing
+	// to release or bump.
+	m, err := manifest.Load("../../repos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var batch []string
+	for _, r := range m.ActiveRepos() {
+		if r.Batch != 0 && r.Release {
+			w.repo(r.Name, "0.1.0")
+			batch = append(batch, r.Name)
+		}
+	}
+	if len(batch) != 64 {
+		t.Fatalf("the active batches have %d released repos, want every batch's 64: %v", len(batch), batch)
 	}
 	w.tick() // release-please has opened the release PRs
 	e := w.engine(trainDay)
@@ -120,6 +138,12 @@ func TestDryRunPlansTheW1Stages(t *testing.T) {
 		t.Fatalf("issue %q open=%v labels=%v merges=%v", is.Title, is.Open, is.Labels, w.merges)
 	}
 	plan := w.comments[1][0].Body
+	stage3, _, _ := strings.Cut(plan[strings.Index(plan, "\n3. ")+1:], "\n")
+	for _, n := range batch {
+		if !strings.Contains(stage3, "; "+n+" (nothing to bump; nothing to release)") {
+			t.Errorf("stage 3 lacks %s: %s", n, stage3)
+		}
+	}
 	for _, want := range []string{
 		"1. api (would release v0.22.0 from [api#", "](https://github.com/compliance-framework/api/pull/",
 		"gooci (would release v0.0.8 from [gooci#", "](https://github.com/compliance-framework/gooci/pull/",

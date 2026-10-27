@@ -1,0 +1,110 @@
+name: plugin-health
+
+# Regenerates the pinned "Plugin health" issue, one row per kept plugin, and posts to #ccf-releases
+# when the deprecation candidates change (docs/plugin-health.md). The logic is cmd/plugin-health.
+# It runs after each ccf-bump-sync run and after each train run that finished a train; there is
+# no schedule.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print the table only; don't write the issue or post
+        type: boolean
+        default: false
+  # The train runs hourly; plan regenerates the report only once a train issue has closed.
+  workflow_run:
+    workflows: [ccf-bump-sync, train]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-health
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: plan
+    # workflow_run fires for runs on any branch; only main's runs (the live ones) count.
+    if: >-
+      github.event_name == 'workflow_dispatch' || (
+        github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+        github.event.workflow_run.conclusion != 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read # the report's issue and the train issues
+    outputs:
+      due: ${{ steps.plan.outputs.due }}
+      repos: ${{ steps.plan.outputs.repos }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Plan
+        id: plan
+        env:
+          ISSUE_TOKEN: ${{ github.token }}
+          MANIFEST: repos.yaml
+          EVENT: ${{ github.event_name }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: |
+          set -o pipefail
+          go run ./cmd/plugin-health plan --manifest "$MANIFEST" --event "$EVENT" --workflow "$WORKFLOW" | tee -a "$GITHUB_OUTPUT"
+
+  report:
+    name: report
+    needs: [plan]
+    if: needs.plan.outputs.due == 'true'
+    runs-on: ubuntu-latest
+    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
+    # (repo-settings), so a workflow on another branch can't read them.
+    environment: release
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write # the report's issue, with GITHUB_TOKEN
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check the repo list
+        env:
+          REPOS: ${{ needs.plan.outputs.repos }}
+        run: |
+          # An empty list would mint a token for every repo the app is installed on (all of them).
+          if [ -z "$REPOS" ]; then
+            echo "::error::no repos selected"
+            exit 1
+          fi
+      # Read-only, scoped to the agent and the plugins. GHCR images are read anonymously.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: token
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ needs.plan.outputs.repos }}
+          permission-contents: read
+          permission-pull-requests: read
+          permission-checks: read
+      - name: Regenerate the report
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ISSUE_TOKEN: ${{ github.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ vars.SLACK_CHANNEL_RELEASES }}
+          MANIFEST: repos.yaml
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: |
+          set -o pipefail
+          go run ./cmd/plugin-health report --manifest "$MANIFEST" --dry-run="$DRY_RUN" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -118,10 +118,41 @@ jobs:
         run: |
           args=()
           if [ "$SHARED" = "true" ]; then
+            cfg="$RUNNER_TEMP/ccf-regal.yaml"
             # Moved out of the tree so Regal doesn't lint the clone.
-            mv .ccf-workflows/.regal/config.yaml "$RUNNER_TEMP/ccf-regal.yaml"
+            mv .ccf-workflows/.regal/config.yaml "$cfg"
             rm -rf .ccf-workflows
-            args=(--config-file "$RUNNER_TEMP/ccf-regal.yaml")
+            # Regal reads only .rego files, so a policy reading a value from the bundle's data
+            # files gets unresolved-reference. A data file in <dir>/a/b puts its top-level keys
+            # at data.a.b.<key>; those paths (and anything below them) become the rule's
+            # except-paths. A path segment that isn't a plain identifier never reaches the rule
+            # (Regal cuts the reference at its first [), so it's left out.
+            except=""
+            while IFS= read -r -d '' f; do
+              rel="${f#"$POLICY_DIR"}"
+              rel="$(dirname "${rel#/}")"
+              prefix=data
+              if [ "$rel" != . ]; then
+                prefix="data.${rel//\//.}"
+              fi
+              if ! [[ "$prefix" =~ ^data(\.[A-Za-z_][A-Za-z0-9_]*)*$ ]]; then
+                continue
+              fi
+              format=yaml
+              if [[ "$f" == *.json ]]; then
+                format=json
+              fi
+              except+="$(PREFIX="$prefix" yq -p "$format" -o yaml \
+                'select(tag == "!!map") | keys | .[] | select(test("^[A-Za-z_][A-Za-z0-9_]*$")) | strenv(PREFIX) + "." + .' "$f")"$'\n'
+            done < <(find "$POLICY_DIR" -type f \( -name data.json -o -name data.yaml -o -name data.yml \) -print0)
+            except="$(sort -u <<< "$except" | sed '/^$/d')"
+            if [ -n "$except" ]; then
+              echo "Data paths Regal treats as known:"
+              echo "$except"
+              EXCEPT="$(jq -R '., . + ".**"' <<< "$except" | jq -sc .)" \
+                yq -i '.rules.imports."unresolved-reference"."except-paths" += env(EXCEPT)' "$cfg"
+            fi
+            args=(--config-file "$cfg")
           fi
           regal lint "${args[@]}" --format github "$POLICY_DIR"
 

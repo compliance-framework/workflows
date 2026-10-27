@@ -1,6 +1,5 @@
-# Manifest of the mock repos used to develop and test the shared workflows and
-# tools without touching product repos. Same schema as repos.yaml; pass it with
-# --manifest repos.mock.yaml (tools) or the `manifest` input (workflows).
+# A test manifest in repos.yaml's schema, with mock-* repo names: one repo of each kind, two
+# plugins and two policy repos, every repo active. The tools' tests load it.
 
 holidays:
   - "2026-12-25"
@@ -61,7 +60,8 @@ repos:
 
   # This repo: the source of the shared-workflow pins ccf-bump moves
   # (`uses: compliance-framework/workflows/.github/workflows/<f>@<sha> # vX.Y.Z`).
-  # It releases itself (self-release.yml), outside the train.
+  # It releases itself (self-release.yml), outside the train. repo-settings gives it the same
+  # settings as every other repo: every caller's CI and releases run its code.
   - name: workflows
     kind: workflows
     release: false

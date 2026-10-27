@@ -12,14 +12,18 @@ import (
 	"github.com/compliance-framework/workflows/internal/release"
 )
 
-// bump runs ccf-bump with what earlier stages released, then merges its PR.
+// bump runs ccf-bump with what earlier stages released and its dependencies' latest final
+// releases (bumpSets), then merges its PR.
 func (e *Engine) bump(ctx context.Context, st *State, r *RepoState) error {
-	sets := st.released(r.Stage)
-	if len(sets) == 0 {
-		r.next(ReleasePR)
-		return nil
-	}
 	if r.BumpPR == 0 {
+		sets, err := e.bumpSets(ctx, st, r)
+		if err != nil {
+			return err
+		}
+		if len(sets) == 0 {
+			r.next(ReleasePR)
+			return nil
+		}
 		// Always run ccf-bump rather than adopt an open bump PR: one left from an earlier train
 		// would pin older versions. A rerun the same day updates the PR it opened.
 		res, err := e.Bumper.Bump(ctx, st.Manifest, r.Name, sets, false)
@@ -102,13 +106,19 @@ func (e *Engine) releasePR(ctx context.Context, r *RepoState) error {
 	switch {
 	case err != nil:
 		return err
+	case run != nil && r.Rerun && run.ID == r.FailedRun && r.FailedAttempt > 0 && run.Attempt <= r.FailedAttempt:
+		// Right after /retry re-ran it, GitHub can still list the failed attempt.
+		r.wait("waiting for the re-run of release-please on %s: %s", short(sha), run.URL)
+		return nil
 	case run == nil || run.Status != "completed":
 		r.wait("waiting for release-please on %s", short(sha))
 		return nil
 	case run.Conclusion != "success":
-		r.hold(Blocked, false, "release-please failed on %s: %s", short(sha), run.URL)
+		r.FailedRun, r.FailedAttempt, r.Rerun = run.ID, run.Attempt, false
+		r.hold(Blocked, false, "release-please failed on %s: %s; re-run it, or `/retry %s`", short(sha), run.URL, r.Name)
 		return nil
 	}
+	r.FailedRun, r.FailedAttempt, r.Rerun = 0, 0, false
 	pr, err := e.Repos.OpenPR(ctx, r.Name, ReleaseBranchPrefix+branch)
 	switch {
 	case err != nil:
@@ -142,6 +152,13 @@ func (e *Engine) merge(ctx context.Context, r *RepoState) error {
 	pr, err := e.Repos.PR(ctx, r.Name, r.ReleasePR)
 	if err != nil {
 		return err
+	}
+	if pr.Fork {
+		// OpenPR never adopts a fork's PR, but a state written before it checked could hold one.
+		r.ReleasePR = 0
+		r.next(ReleasePR)
+		r.Detail = fmt.Sprintf("%s is from a fork, not release-please: ignored", e.prLink(r.Name, pr.Number))
+		return nil
 	}
 	if !pr.Merged && !pr.Open {
 		r.ReleasePR = 0
@@ -227,9 +244,30 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 		}
 		return nil
 	}
-	runs, err := e.Repos.Runs(ctx, r.Name, "release", r.MergeSHA)
-	if err != nil {
+	pending, failed, err := e.releaseWorkflows(ctx, r.Name, r.MergeSHA, tags)
+	switch {
+	case err != nil:
 		return err
+	case failed != nil:
+		r.FailedRun = failed.ID
+		r.hold(Blocked, false, "the release workflow failed for %s: %s; re-run it, or `/retry %s`", failed.HeadBranch, failed.URL, r.Name)
+		return nil
+	case len(pending) > 0:
+		r.wait("waiting for the release workflow of %s", strings.Join(pending, ", "))
+		return nil
+	}
+	r.FailedRun = 0
+	r.next(Released)
+	return nil
+}
+
+// releaseWorkflows reads the release workflows of tags, release-please's tags on sha: the first
+// failed run (the latest of a tag and workflow), else the tags still waiting for theirs (none ran,
+// or one hasn't finished). A tag is published once neither lists it.
+func (e *Engine) releaseWorkflows(ctx context.Context, repo, sha string, tags []string) (pending []string, failed *Run, err error) {
+	runs, err := e.Repos.Runs(ctx, repo, "release", sha)
+	if err != nil {
+		return nil, nil, err
 	}
 	latest := map[string]Run{} // tag and workflow -> latest run
 	for _, run := range runs {
@@ -238,7 +276,6 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 			latest[k] = run
 		}
 	}
-	var pending []string
 	for _, tag := range tags {
 		found := false
 		for _, k := range slices.Sorted(maps.Keys(latest)) {
@@ -250,22 +287,14 @@ func (e *Engine) publish(ctx context.Context, r *RepoState) error {
 			if run.Status != "completed" {
 				pending = append(pending, tag)
 			} else if run.Conclusion != "success" {
-				r.FailedRun = run.ID
-				r.hold(Blocked, false, "the release workflow failed for %s: %s; re-run it, or `/retry %s`", tag, run.URL, r.Name)
-				return nil
+				return nil, &run, nil
 			}
 		}
 		if !found {
 			pending = append(pending, tag)
 		}
 	}
-	if len(pending) > 0 {
-		r.wait("waiting for the release workflow of %s", strings.Join(pending, ", "))
-		return nil
-	}
-	r.FailedRun = 0
-	r.next(Released)
-	return nil
+	return pending, nil, nil
 }
 
 // releaseTags keeps release-please's release tags among tags: [<component>-]vX.Y.Z[-<pre-release>]

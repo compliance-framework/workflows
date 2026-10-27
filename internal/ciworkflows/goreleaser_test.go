@@ -25,9 +25,6 @@ func goreleaserReleases(t *testing.T) []string {
 	var users []string
 	for _, path := range files {
 		file := filepath.Base(path)
-		if file == "plugin-release.yml" { // legacy, unchanged until removed (README)
-			continue
-		}
 		var wf struct {
 			Jobs map[string]struct {
 				Steps []map[string]any `yaml:"steps"`

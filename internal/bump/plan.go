@@ -7,11 +7,14 @@ package bump
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
+
+	"github.com/compliance-framework/workflows/internal/manifest"
 )
 
 // Dependency names that are not repos: OPA (policy repos copy it from the agent's go.mod) and the
@@ -24,7 +27,7 @@ const (
 // Ref is one pinned version of a dependency, as found in a repo.
 type Ref struct {
 	Updater string // the updater that found it, and rewrites it
-	Dep     string // the repo it pins (e.g. "mock-api"), DepOPA or DepWorkflows
+	Dep     string // the repo it pins (e.g. "api"), DepOPA or DepWorkflows
 	Key     string // what is pinned: a module path, an image, a YAML path, a workflow path
 	Current string // as written: "v0.1.0", "0.1.0", "alpine:3.20"; "" when unknown
 	File    string // path relative to the repo root
@@ -184,6 +187,40 @@ func (p *Plan) decideWorkflows(r Ref, target string) {
 	p.Changes = append(p.Changes, Change{Ref: r, To: target})
 }
 
+// Settle keeps, of the plan's changes, those that ApplyAll applied: after is a ScanAll of the
+// checkout once they were applied, and changed reports whether a file differs from the commit the
+// checkout was cloned at. A change is applied when its file changed and its pin moved (after has
+// one fewer pin identical to the one it moves). A pin whose current version can't be read (the ui
+// conformance script's, Current "") is applied when its file changed; when it didn't, the file
+// already matched the target and the pin is returned in unchanged and added to UpToDate. Any other
+// change that did not apply is returned in dropped, for a warning. Neither is in the settled plan,
+// so a PR lists, and is held for, only what its diff does.
+func (p Plan) Settle(after []Ref, changed func(file string) bool) (settled Plan, unchanged, dropped []Change) {
+	left := map[Ref]int{} // pins still as they were
+	for _, r := range after {
+		left[r]++
+	}
+	settled = p
+	settled.Changes, settled.UpToDate = nil, slices.Clone(p.UpToDate)
+	for _, c := range p.Changes {
+		switch {
+		case c.Current == "" && !changed(c.File):
+			unchanged = append(unchanged, c)
+			settled.UpToDate = append(settled.UpToDate, c.Ref)
+		case c.Current == "":
+			settled.Changes = append(settled.Changes, c)
+		case left[c.Ref] > 0:
+			left[c.Ref]-- // identical pins are interchangeable: count off one that stayed
+			dropped = append(dropped, c)
+		case !changed(c.File):
+			dropped = append(dropped, c)
+		default:
+			settled.Changes = append(settled.Changes, c)
+		}
+	}
+	return settled, unchanged, dropped
+}
+
 // Major reports whether the change may break callers: a new major version, or a move from a pin
 // that is not a version. Only changes that are not major are auto-merged.
 func (c Change) Major() bool {
@@ -199,4 +236,47 @@ func (c Change) Major() bool {
 		return true
 	}
 	return semver.Major(from) != semver.Major(c.To)
+}
+
+// Why a bump PR is not auto-merged (Change.HoldReason), in its body and ccf-bump's output.
+const (
+	MajorReason   = "a major update, or a pin that was not a version"
+	HelmAppReason = "a minor (or major) app update in a helm repo: check whether the chart needs new " +
+		"values or templates, push them to this PR if so, then merge"
+)
+
+// movesAppVersion reports whether the change moves an app version a chart deploys: an org image
+// tag in a chart's values.yaml or its Chart.yaml appVersion, the refs of the helm updater.
+func (c Change) movesAppVersion() bool { return c.Updater == helm{}.Name() }
+
+// NeedsHuman reports whether the change must not be auto-merged in a repo of kind.
+func (c Change) NeedsHuman(kind manifest.Kind) bool { return c.HoldReason(kind) != "" }
+
+// HoldReason returns why the change must not be auto-merged in a repo of kind, or "" when it may
+// be. Any major change needs a human. In a helm repo so does an app version move of a minor or
+// more: chart CI can't tell that the new app needs new values or templates, and on 0.x a minor is
+// where breaking changes land. Shared-workflow pins keep the major rule in every repo.
+func (c Change) HoldReason(kind manifest.Kind) string {
+	if kind == manifest.KindHelm && c.movesAppVersion() {
+		from := Canonical(c.Current)
+		if !semver.IsValid(from) || !semver.IsValid(c.To) || semver.MajorMinor(from) != semver.MajorMinor(c.To) {
+			return HelmAppReason
+		}
+	}
+	if c.Major() {
+		return MajorReason
+	}
+	return ""
+}
+
+// HoldReasons returns, once each in the order of the changes, why the plan's PR must not be
+// auto-merged in a repo of kind; none when it may be.
+func (p Plan) HoldReasons(kind manifest.Kind) []string {
+	var out []string
+	for _, c := range p.Changes {
+		if r := c.HoldReason(kind); r != "" && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }

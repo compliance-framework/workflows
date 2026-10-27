@@ -28,6 +28,7 @@ func (e *Engine) plan(ctx context.Context, is Issue, st *State) error {
 		}
 		fmt.Fprintf(&b, "%d. %s\n", stage, strings.Join(line, "; "))
 	}
+	errs = append(errs, e.planGate(st, &b))
 	charts, err := e.chartIssues(ctx, st, true)
 	errs = append(errs, err)
 	for _, c := range charts {
@@ -45,11 +46,41 @@ func (e *Engine) plan(ctx context.Context, is Issue, st *State) error {
 	return errors.Join(errs...)
 }
 
+// planGate writes what the gate would check, with the planned versions, and runs nothing.
+func (e *Engine) planGate(st *State, b *strings.Builder) error {
+	if e.Gate == nil {
+		return nil
+	}
+	m, err := e.Load(st.Manifest)
+	if err != nil {
+		return err
+	}
+	gs := st.GateStage
+	checks := gateChecks(e.Registry, m, st, gs)
+	if len(checks) == 0 {
+		return nil
+	}
+	var lines []string
+	for _, g := range checks {
+		lines = append(lines, g.describe())
+	}
+	where := fmt.Sprintf("before stage %d", gs)
+	if gs > st.Stages() {
+		where = "before the train finishes"
+	}
+	fmt.Fprintf(b, "\nGate %s (not run in a dry run): %s.\n", where, strings.Join(lines, "; "))
+	return nil
+}
+
 // planRepo plans one repo: its bump, the release PR and the version it would release.
 func (e *Engine) planRepo(ctx context.Context, st *State, r *RepoState, details *strings.Builder) error {
 	var notes []string
 	bumped := false
-	if sets := st.released(r.Stage); len(sets) > 0 {
+	sets, err := e.bumpSets(ctx, st, r)
+	if err != nil {
+		return err
+	}
+	if len(sets) > 0 {
 		res, err := e.Bumper.Bump(ctx, st.Manifest, r.Name, sets, true)
 		bumped = res.Changed || err != nil
 		switch {

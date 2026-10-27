@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/compliance-framework/workflows/internal/bump"
 	"github.com/compliance-framework/workflows/internal/manifest"
 	"github.com/compliance-framework/workflows/internal/slackkit"
@@ -30,11 +32,28 @@ type world struct {
 	merges   []string           // "repo#n"
 	releases []string           // repos, in the order their release PRs merged
 	reruns   []int64
-	external []string // issues opened in repos
-	id       int64
+	// lagReruns: a re-run shows up on the next tick, not right after RerunFailed (GitHub lists the
+	// failed attempt for a while); lagged holds those re-runs.
+	lagReruns bool
+	lagged    []int64
+	external  []string // issues opened in repos
+	id        int64
 	// manualBumps: ccf-bump leaves the automerge label off; closedBumps: someone closes the bump PRs.
 	manualBumps, closedBumps bool
 	mergeErrs                []error // returned by the first merges
+	// The gate's runs: probeFail fails the probe of a repo, v1 makes its plugin speak protocol v1,
+	// smokeFail fails stack-smoke.
+	gateRuns           []*gateRun
+	probeFail, v1      map[string]bool
+	smokeFail, noRunID bool     // noRunID: dispatches return no run ID
+	events             []string // "bump <repo>", "dispatch <workflow>", "done <run id>", in order
+}
+
+type gateRun struct {
+	workflow string
+	inputs   map[string]string
+	run      Run
+	log      string
 }
 
 type fakeRepo struct {
@@ -53,10 +72,15 @@ type fakeRepo struct {
 	failChecks, failRelease bool
 	failReleasePlease       bool
 	bumped                  bool // ccf-bump finds pins to move
+	// finals are final releases made outside the train (LatestFinal also reads the tags); lookups
+	// counts the LatestFinal calls.
+	finals  []string
+	lookups int
 }
 
 func newWorld(t *testing.T) *world {
-	return &world{t: t, repos: map[string]*fakeRepo{}, comments: map[int][]Comment{}, admins: []string{"owner"}}
+	return &world{t: t, repos: map[string]*fakeRepo{}, comments: map[int][]Comment{}, admins: []string{"owner"},
+		probeFail: map[string]bool{}, v1: map[string]bool{}}
 }
 
 func (w *world) nextID() int64 { w.id++; return w.id }
@@ -67,7 +91,7 @@ func (w *world) repo(name, version string) *fakeRepo {
 		checks: map[string][]Check{}, runs: map[string][]Run{}, tags: map[string][]string{}, notes: map[string]string{}}
 	r.manifests[r.main] = map[string]string{RootPackage: version}
 	r.rpDone = r.main
-	r.runs["push"+r.main] = []Run{{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: "success"}}
+	r.runs["push"+r.main] = []Run{{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: "success", Attempt: 1}}
 	w.repos[name] = r
 	return r
 }
@@ -83,7 +107,7 @@ func (w *world) get(name string) *fakeRepo { return w.repos[name] }
 
 func (r *fakeRepo) openPR(prefix string) *PR {
 	for _, n := range slices.Sorted(maps.Keys(r.prs)) {
-		if pr := r.prs[n]; pr.Open && strings.HasPrefix(pr.URL, prefix) {
+		if pr := r.prs[n]; pr.Open && !pr.Fork && strings.HasPrefix(pr.URL, prefix) {
 			return pr
 		}
 	}
@@ -98,9 +122,18 @@ func (w *world) green(r *fakeRepo, sha string, ok bool) {
 	r.checks[sha] = append(r.checks[sha], Check{ID: w.nextID(), Name: "ci / required", Status: "completed", Conclusion: c})
 }
 
-// tick plays release-please on every repo whose main moved, and the release workflows of
-// tagged releases.
+// tick plays release-please on every repo whose main moved, the release workflows of
+// tagged releases, and the gate's runs.
 func (w *world) tick() {
+	for _, id := range w.lagged {
+		w.rerun(id)
+	}
+	w.lagged = nil
+	for _, g := range w.gateRuns {
+		if g.run.Status != "completed" {
+			w.finishGateRun(g)
+		}
+	}
 	for _, r := range w.repos {
 		if r.rpDone != r.main {
 			r.rpDone = r.main
@@ -108,7 +141,7 @@ func (w *world) tick() {
 			if r.failReleasePlease {
 				c = "failure"
 			}
-			r.runs["push"+r.main] = append(r.runs["push"+r.main], Run{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: c})
+			r.runs["push"+r.main] = append(r.runs["push"+r.main], Run{ID: w.nextID(), Path: ".github/workflows/release-please.yml", Status: "completed", Conclusion: c, Attempt: 1})
 			if r.next == "" {
 				r.next = "0.1.1" // a patch: the repos the tests bump start at 0.1.0
 			}
@@ -211,21 +244,58 @@ func (w *world) TagsAt(_ context.Context, repo, sha string) ([]string, error) {
 	return slices.Clone(w.get(repo).tags[sha]), nil
 }
 
+func (w *world) Tags(_ context.Context, repo string) (map[string]string, error) {
+	out := map[string]string{}
+	for sha, tags := range w.get(repo).tags {
+		for _, tag := range tags {
+			out[tag] = sha
+		}
+	}
+	return out, nil
+}
+
 func (w *world) Release(_ context.Context, repo, tag string) (string, string, error) {
 	return w.get(repo).notes[tag], "https://github.com/o/" + repo + "/releases/tag/" + tag, nil
 }
 
-// RerunFailed re-runs the run, which passes this time.
-func (w *world) RerunFailed(_ context.Context, repo string, id int64) error {
-	w.reruns = append(w.reruns, id)
-	for _, runs := range w.get(repo).runs {
-		for i := range runs {
-			if runs[i].ID == id {
-				runs[i].Conclusion = "success"
+// LatestFinal returns the highest final release among r.finals and r's tags.
+func (w *world) LatestFinal(_ context.Context, repo string) (string, error) {
+	r := w.get(repo)
+	r.lookups++
+	best := ""
+	for _, tags := range append(slices.Collect(maps.Values(r.tags)), r.finals) {
+		for _, tag := range tags {
+			if v := semver.Canonical(tag); v == tag && semver.Prerelease(v) == "" && (best == "" || semver.Compare(v, best) > 0) {
+				best = v
 			}
 		}
 	}
+	return best, nil
+}
+
+// RerunFailed re-runs the run, which passes this time (on the next tick, with lagReruns).
+func (w *world) RerunFailed(_ context.Context, repo string, id int64) error {
+	w.reruns = append(w.reruns, id)
+	if w.lagReruns {
+		w.lagged = append(w.lagged, id)
+		return nil
+	}
+	w.rerun(id)
 	return nil
+}
+
+// rerun makes run id's next attempt pass.
+func (w *world) rerun(id int64) {
+	for _, r := range w.repos {
+		for _, runs := range r.runs {
+			for i := range runs {
+				if runs[i].ID == id {
+					runs[i].Status, runs[i].Conclusion = "completed", "success"
+					runs[i].Attempt++
+				}
+			}
+		}
+	}
 }
 
 func (w *world) EnsureIssue(_ context.Context, repo, title, body string) (string, error) {
@@ -240,6 +310,7 @@ func (w *world) Bump(_ context.Context, path, repo string, sets map[string]strin
 		s = append(s, k+"="+sets[k])
 	}
 	w.bumps = append(w.bumps, fmt.Sprintf("%s %s dry=%v", repo, strings.Join(s, ","), dryRun))
+	w.events = append(w.events, "bump "+repo)
 	r := w.get(repo)
 	if !r.bumped {
 		return BumpResult{Output: "nothing pinned"}, nil
@@ -341,11 +412,21 @@ func (w *world) state(n int) *State {
 	return st
 }
 
-// engine returns an Engine on w at now, with the manifest files of the repo root.
+// loadManifest loads repos.yaml from the repo root, and any other manifest (mock.yaml) from
+// internal/manifest/testdata.
+func loadManifest(p string) (*manifest.Manifest, error) {
+	if p == manifest.DefaultPath {
+		return manifest.Load("../../" + p)
+	}
+	return manifest.Load("../manifest/testdata/" + p)
+}
+
+// engine returns an Engine on w at now, with loadManifest.
 func (w *world) engine(now time.Time) *Engine {
 	return &Engine{
-		Repos: w, Tracker: w, Members: w, Slack: w, Bumper: w,
-		Load:                  func(p string) (*manifest.Manifest, error) { return manifest.Load("../../" + p) },
+		Repos: w, Tracker: w, Members: w, Slack: w, Bumper: w, Gate: w,
+		Registry:              "ghcr.io/compliance-framework",
+		Load:                  loadManifest,
 		ReposURL:              "https://github.com/compliance-framework",
 		Channel:               "C1",
 		DigestChannel:         "CDIG",
@@ -354,4 +435,78 @@ func (w *world) engine(now time.Time) *Engine {
 		RunURL:                "https://run",
 		Now:                   func() time.Time { return now },
 	}
+}
+
+// Gate.
+
+func (w *world) Dispatch(_ context.Context, workflow string, inputs map[string]string) (Run, error) {
+	id := w.nextID()
+	g := &gateRun{workflow: workflow, inputs: maps.Clone(inputs), run: Run{ID: id, Path: ".github/workflows/" + workflow, Status: "queued", URL: fmt.Sprintf("https://run/%d", id)}}
+	w.gateRuns = append(w.gateRuns, g)
+	w.events = append(w.events, "dispatch "+workflow)
+	if w.noRunID {
+		return Run{}, nil
+	}
+	return g.run, nil
+}
+
+// finishGateRun completes a run: a probe prints its report, and fails for a repo in probeFail.
+func (w *world) finishGateRun(g *gateRun) {
+	const ts = "2026-12-01T08:00:00.0000000Z "
+	failed := w.smokeFail
+	g.log = ts + "##[group]Run smoke/run.sh\n" + ts + "##[endgroup]\n"
+	if g.workflow == ProbeWorkflow {
+		ref := g.inputs["plugins"] + g.inputs["policies"]
+		repo := ref[strings.LastIndex(ref, "/")+1 : strings.LastIndex(ref, ":")]
+		failed = w.probeFail[repo]
+		protocol := 2
+		if w.v1[repo] {
+			protocol = 1
+		}
+		report := fmt.Sprintf(`{"plugins":[{"source":%q,"protocol":%d}]}`, ref, protocol)
+		if g.inputs["policies"] != "" {
+			report = fmt.Sprintf(`{"policies":[{"source":%q}]}`, ref)
+		}
+		g.log = ts + ProbeReportMarker + report + "\n"
+		if failed {
+			g.log += ts + "| `" + ref + "` | - | - | **failed**: plugin exited during Init |\n"
+		}
+	} else if failed {
+		g.log += ts + "SMOKE FAILED: agent heartbeat\n"
+	}
+	w.events = append(w.events, fmt.Sprintf("done %d", g.run.ID))
+	g.run.Status, g.run.Conclusion = "completed", "success"
+	if failed {
+		g.run.Conclusion = "failure"
+		g.log += ts + "##[error]Process completed with exit code 1.\n" + ts + "Post job cleanup.\n"
+	}
+}
+
+func (w *world) gateRun(id int64) *gateRun {
+	for _, g := range w.gateRuns {
+		if g.run.ID == id {
+			return g
+		}
+	}
+	w.t.Fatalf("no gate run %d", id)
+	return nil
+}
+
+func (w *world) WorkflowRun(_ context.Context, id int64) (Run, error) { return w.gateRun(id).run, nil }
+
+func (w *world) RunLog(_ context.Context, id int64) (string, error) { return w.gateRun(id).log, nil }
+
+// dispatched lists the gate's runs as "workflow name=value ...".
+func (w *world) dispatched() []string {
+	var out []string
+	for _, g := range w.gateRuns {
+		var in []string
+		for _, k := range slices.Sorted(maps.Keys(g.inputs)) {
+			if g.inputs[k] != "" {
+				in = append(in, k+"="+g.inputs[k])
+			}
+		}
+		out = append(out, g.workflow+" "+strings.Join(in, " "))
+	}
+	return out
 }

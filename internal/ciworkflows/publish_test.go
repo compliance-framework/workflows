@@ -2,6 +2,7 @@ package ciworkflows_test
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,17 +117,161 @@ func TestReleaseTagsStep(t *testing.T) {
 		t.Fatalf("step %q differs between preview.yml, release-go-image.yml and cut-prerelease.yml", step)
 	}
 	src := script(t, "release-go-image.yml", "tags", "Choose the tags")
-	for _, tc := range []struct{ tag, want string }{
-		{"v1.2.3", "1.2.3 1.2 1 latest"},
-		{"v1.2.3-rc1", "1.2.3-rc1"},
+	for _, tc := range []struct{ tag, want, version string }{
+		{"v1.2.3", "1.2.3 1.2 1 latest", "1.2.3"},
+		{"v1.2.3-rc1", "1.2.3-rc1", "1.2.3-rc1"},
 	} {
 		r := run(t, filepath.Join("..", ".."), src, "TAG="+tc.tag, "PREFIX=v")
-		if r.failed || r.outputs["tags"] != tc.want {
-			t.Fatalf("%s: tags=%q, want %q; output:\n%s", tc.tag, r.outputs["tags"], tc.want, r.out)
+		if r.failed || r.outputs["tags"] != tc.want || r.outputs["version"] != tc.version {
+			t.Fatalf("%s: tags=%q version=%q, want %q %q; output:\n%s", tc.tag, r.outputs["tags"], r.outputs["version"], tc.want, tc.version, r.out)
 		}
 	}
 	if r := run(t, filepath.Join("..", ".."), src, "TAG=", "PREFIX=v"); !r.failed || !strings.Contains(r.out, "no release tag") {
 		t.Fatalf("no tag: want a failure; output:\n%s", r.out)
+	}
+}
+
+// TestImageVersion: every image build gets exactly one build arg, VERSION, from publish-image.yml's
+// version input (required, no caller-supplied build args), handed to build-push-action as data.
+// The release and preview workflows pass their tags job's version output, which cmd/release
+// computes (TestReleaseTagsStep, TestPreviewTagsStep); release-ui.yml calls release-go-image.yml.
+func TestImageVersion(t *testing.T) {
+	type wfile struct {
+		Jobs map[string]struct {
+			Outputs map[string]string `yaml:"outputs"`
+			Uses    string            `yaml:"uses"`
+			With    map[string]string `yaml:"with"`
+			Steps   []struct {
+				Uses string            `yaml:"uses"`
+				With map[string]string `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	var pub wfile
+	read(t, "publish-image.yml", &pub)
+	in := inputs(t, "publish-image.yml")["version"]
+	if in.Type != "string" || !in.Required {
+		t.Errorf("publish-image.yml version input = %+v, want a required string", in)
+	}
+	builds := 0
+	for _, s := range pub.Jobs["build"].Steps {
+		if strings.HasPrefix(s.Uses, "docker/build-push-action@") {
+			builds++
+			if got := s.With["build-args"]; got != "VERSION=${{ inputs.version }}" {
+				t.Errorf("publish-image.yml build-args = %q, want only VERSION from the version input", got)
+			}
+		}
+	}
+	if builds != 1 {
+		t.Errorf("publish-image.yml has %d build-push-action steps, want 1 (in the per-image, per-platform matrix)", builds)
+	}
+	for _, file := range []string{"release-go-image.yml", "preview.yml"} {
+		var wf wfile
+		read(t, file, &wf)
+		image := wf.Jobs["image"]
+		if image.Uses != "./.github/workflows/publish-image.yml" || image.With["version"] != "${{ needs.tags.outputs.version }}" {
+			t.Errorf("%s: image job uses %q with version %q, want publish-image.yml with the tags job's version", file, image.Uses, image.With["version"])
+		}
+		if got := wf.Jobs["tags"].Outputs["version"]; got != "${{ steps.tags.outputs.version }}" {
+			t.Errorf("%s: tags job version output = %q, want the tags step's", file, got)
+		}
+	}
+	var rui wfile
+	read(t, "release-ui.yml", &rui)
+	if rui.Jobs["release"].Uses != "./.github/workflows/release-go-image.yml" {
+		t.Errorf("release-ui.yml no longer calls release-go-image.yml (uses %q): give it a version too", rui.Jobs["release"].Uses)
+	}
+}
+
+// TestNoBuildArgsInput: build args land in an image's history and provenance and could override
+// VERSION, so no workflow takes free-form build args; the image workflows' run scripts read
+// every value from env, never from a ${{ }} expression in the script.
+func TestNoBuildArgsInput(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("workflows: %v %v", files, err)
+	}
+	for _, f := range files {
+		file := filepath.Base(f)
+		for name := range inputs(t, file) {
+			if n := strings.NewReplacer("-", "", "_", "").Replace(strings.ToLower(name)); strings.Contains(n, "buildarg") {
+				t.Errorf("%s: input %q takes build args; pass a narrow, checked input like version instead", file, name)
+			}
+		}
+	}
+	for _, file := range []string{"publish-image.yml", "release-go-image.yml", "release-ui.yml", "preview.yml"} {
+		var wf workflow
+		read(t, file, &wf)
+		for job, j := range wf.Jobs {
+			for _, s := range j.Steps {
+				if strings.Contains(s.Run, "${{") {
+					t.Errorf("%s: job %s step %q interpolates an expression into its script; pass it through env", file, job, s.Name)
+				}
+			}
+		}
+	}
+}
+
+// inputs returns a workflow's workflow_call and workflow_dispatch inputs.
+func inputs(t *testing.T, file string) map[string]struct {
+	Type     string `yaml:"type"`
+	Required bool   `yaml:"required"`
+} {
+	t.Helper()
+	type input = struct {
+		Type     string `yaml:"type"`
+		Required bool   `yaml:"required"`
+	}
+	// Other triggers can be lists (schedule), so only these two are decoded.
+	var wf struct {
+		On struct {
+			Call struct {
+				Inputs map[string]input `yaml:"inputs"`
+			} `yaml:"workflow_call"`
+			Dispatch struct {
+				Inputs map[string]input `yaml:"inputs"`
+			} `yaml:"workflow_dispatch"`
+		} `yaml:"on"`
+	}
+	read(t, file, &wf)
+	out := map[string]input{}
+	maps.Copy(out, wf.On.Dispatch.Inputs)
+	maps.Copy(out, wf.On.Call.Inputs)
+	return out
+}
+
+func TestCheckVersion(t *testing.T) {
+	src := script(t, "publish-image.yml", "build", "Check the version")
+	for v, failed := range map[string]bool{
+		"1.2.3": false, "1.2.3-rc1": false, "main-0123456": false, "pr-12-0123456": false,
+		"": true, "1.2.3 --x": true, "1.2.3\nFOO=bar": true, "$(id)": true, "-x": true, "a/b": true,
+		strings.Repeat("1", 129): true,
+	} {
+		if r := run(t, t.TempDir(), src, "VERSION="+v); r.failed != failed {
+			t.Errorf("version %q: failed=%v, want %v; output:\n%s", v, r.failed, failed, r.out)
+		}
+	}
+}
+
+func TestPreviewTagsStep(t *testing.T) {
+	need(t, "go")
+	src := script(t, "preview.yml", "tags", "Choose the tags")
+	dir := t.TempDir()
+	event := filepath.Join(dir, "event.json")
+	pr := `{"repository": {"full_name": "compliance-framework/mock-agent", "default_branch": "main"},
+		"pull_request": {"number": 12, "labels": [{"name": "preview"}], "head": {"repo": {"full_name": "compliance-framework/mock-agent"}}}}`
+	if err := os.WriteFile(event, []byte(pr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, ref, tags, version string }{
+		{"push", "refs/heads/main", "main sha-0123456", "main-0123456"},
+		{"pull_request", "refs/pull/12/merge", "pr-12", "pr-12-0123456"},
+	} {
+		r := run(t, filepath.Join("..", ".."), src, "ON_MAIN=true", "GITHUB_EVENT_PATH="+event, "GITHUB_EVENT_NAME="+tc.name,
+			"GITHUB_REF="+tc.ref, "GITHUB_SHA=0123456789abcdef")
+		if r.failed || r.outputs["tags"] != tc.tags || r.outputs["version"] != tc.version {
+			t.Fatalf("%s: tags=%q version=%q, want %q %q; output:\n%s", tc.name, r.outputs["tags"], r.outputs["version"], tc.tags, tc.version, r.out)
+		}
 	}
 }
 

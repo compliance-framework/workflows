@@ -7,13 +7,6 @@ on:
   schedule:
     - cron: "0 8 * * 1" # Mondays 08:00 UTC
   workflow_dispatch:
-    inputs:
-      manifest:
-        description: Manifest to read the repos from
-        type: choice
-        options: [repos.mock.yaml, repos.yaml]
-        # The mocks until the summary is proven on them; MANIFEST below is the schedule's.
-        default: repos.mock.yaml
 
 permissions:
   contents: read
@@ -26,10 +19,13 @@ jobs:
   summary:
     name: summary
     runs-on: ubuntu-latest
+    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
+    # (repo-settings), so a workflow on another branch can't read them.
+    environment: release
     timeout-minutes: 10
     env:
       # A scheduled run has no inputs: keep this fallback equal to the input's default.
-      MANIFEST: ${{ inputs.manifest || 'repos.mock.yaml' }}
+      MANIFEST: repos.yaml
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,7 +43,7 @@ jobs:
             exit 1
           fi
           echo "repos=$repos" >> "$GITHUB_OUTPUT"
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: token
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
