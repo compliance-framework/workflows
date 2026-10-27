@@ -102,7 +102,7 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         id: golangci-lint
         with:
-          version: v2.11.4
+          version: v2.15.0
           args: ${{ steps.args.outputs.args }}
           # The action's own verify fetches the schema from golangci-lint.run and fails the job
           # when that host is unreachable; the next step verifies the config instead.
@@ -115,7 +115,7 @@ jobs:
           CONFIG: ${{ steps.args.outputs.config }}
           # The JSON schema of the golangci-lint version above, from its tag, so golangci-lint.run
           # isn't needed. Renovate bumps it with the version (renovate.json, docs/renovate.md).
-          SCHEMA_URL: https://raw.githubusercontent.com/golangci/golangci-lint/v2.11.4/jsonschema/golangci.next.jsonschema.json
+          SCHEMA_URL: https://raw.githubusercontent.com/golangci/golangci-lint/v2.15.0/jsonschema/golangci.next.jsonschema.json
         run: |
           args=()
           if [ -n "$CONFIG" ]; then
@@ -190,9 +190,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          version: v2.18.2
+          version: v2.18.3
           install-only: true
       - name: goreleaser check
         # Exit code 2 means a valid config with deprecated properties: a warning, not a failure.

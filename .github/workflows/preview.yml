@@ -112,9 +112,9 @@ jobs:
         with:
           go-version-file: go.mod
       # A snapshot: the archives gooci uploads, without publishing a release.
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          version: v2.18.2
+          version: v2.18.3
           args: release --snapshot --clean
       - name: Install gooci
         run: go install github.com/compliance-framework/gooci@v0.0.7

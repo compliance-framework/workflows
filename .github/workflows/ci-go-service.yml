@@ -110,7 +110,7 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         id: golangci-lint
         with:
-          version: v2.11.4
+          version: v2.15.0
           args: ${{ steps.args.outputs.args }}
           # The action's own verify fetches the schema from golangci-lint.run and fails the job
           # when that host is unreachable; the next step verifies the config instead.
@@ -123,7 +123,7 @@ jobs:
           CONFIG: ${{ steps.args.outputs.config }}
           # The JSON schema of the golangci-lint version above, from its tag, so golangci-lint.run
           # isn't needed. Renovate bumps it with the version (renovate.json, docs/renovate.md).
-          SCHEMA_URL: https://raw.githubusercontent.com/golangci/golangci-lint/v2.11.4/jsonschema/golangci.next.jsonschema.json
+          SCHEMA_URL: https://raw.githubusercontent.com/golangci/golangci-lint/v2.15.0/jsonschema/golangci.next.jsonschema.json
         run: |
           args=()
           if [ -n "$CONFIG" ]; then
