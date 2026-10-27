@@ -708,7 +708,7 @@ Inputs:
 | Input | Default | What |
 | --- | --- | --- |
 | `manifest` | `repos.yaml` | `repos.mock.yaml` for the mocks. |
-| `repos` | every repo with `release: true` | Comma-separated subset; each must be in the manifest with `release: true`. |
+| `repos` | every repo with `release: true` | Comma-separated subset; each must be in the manifest. A repo with `release: false` (the live demo repos) is only selected by naming it. |
 | `apply` | `false` | `false` prints the diff and writes nothing; `true` writes it (from `main` only). |
 | `release-bot-app-id` | org variable `RELEASE_BOT_APP_ID` | `ccf-release-bot`'s app ID, the `ccf-review` bypass actor. Set the org variable (Settings, Secrets and variables, Actions, Variables) to the app's ID from its settings page, or pass the input; the run fails if both are empty. |
 | `required-check` | `ci / required` | The status check context `ccf-required` requires. |

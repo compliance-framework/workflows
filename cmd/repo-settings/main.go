@@ -6,7 +6,8 @@
 //
 // list prints the selected repo names, comma-separated, to scope the token. sync prints each repo's
 // diff of current vs desired settings, and writes the changes only with --apply. Both select every
-// repo with release: true unless --repos names a subset. sync reads the token from GH_TOKEN.
+// repo with release: true unless --repos names a subset, which may also name repos with release:
+// false (they release themselves). sync reads the token from GH_TOKEN.
 package main
 
 import (
@@ -90,23 +91,23 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 }
 
 // selectRepos returns the repos named in list (comma- or space-separated), or every repo with
-// release: true if list is empty, in manifest order. Named repos must be in the manifest with
-// release: true.
+// release: true if list is empty, in manifest order. Named repos must be in the manifest; a named
+// repo may have release: false, since the settings apply to repos the train leaves out too.
 func selectRepos(m *manifest.Manifest, list string) ([]string, error) {
 	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
 	var unknown []string
 	for _, n := range names {
 		i := slices.IndexFunc(m.Repos, func(r manifest.Repo) bool { return r.Name == n })
-		if i < 0 || !m.Repos[i].Release {
+		if i < 0 {
 			unknown = append(unknown, n)
 		}
 	}
 	if len(unknown) > 0 {
-		return nil, fmt.Errorf("not in the manifest with release: true: %s", strings.Join(unknown, ", "))
+		return nil, fmt.Errorf("not in the manifest: %s", strings.Join(unknown, ", "))
 	}
 	var out []string
 	for _, r := range m.Repos {
-		if r.Release && (len(names) == 0 || slices.Contains(names, r.Name)) {
+		if len(names) == 0 && r.Release || slices.Contains(names, r.Name) {
 			out = append(out, r.Name)
 		}
 	}

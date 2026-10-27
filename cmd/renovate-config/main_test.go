@@ -22,7 +22,7 @@ func TestRunList(t *testing.T) {
 	if err := run([]string{"list", "--manifest", "../../repos.yaml"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "api,gooci,agent,ui,agent-action,helm-charts\n" {
+	if got := out.String(); got != "api,gooci,agent,ui,agent-action,helm-charts,ccf-live-demo-app,ccf-live-demo-sandbox\n" {
 		t.Errorf("list repos.yaml = %q", got)
 	}
 }

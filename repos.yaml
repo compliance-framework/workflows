@@ -47,3 +47,14 @@ repos:
   - name: workflows
     kind: workflows
     release: false
+
+  # The live demo: the portal that provisions a sandbox per visitor, and the app it deploys.
+  # Both cut their own releases (release.yml) and have their own CI, so the train and ccf-bump
+  # leave them out (release: false). repo-settings can still be pointed at them by name.
+  - name: ccf-live-demo-app
+    kind: go-service
+    release: false
+
+  - name: ccf-live-demo-sandbox
+    kind: go-service
+    release: false

@@ -24,7 +24,8 @@ func TestSelectRepos(t *testing.T) {
 		{list: "", want: []string{"a", "c"}},
 		{list: " c, a\n", want: []string{"a", "c"}},
 		{list: "c c", want: []string{"c"}},
-		{list: "a,b", err: "b"},
+		{list: "a,b", want: []string{"a", "b"}},
+		{list: "b", want: []string{"b"}},
 		{list: "x", err: "x"},
 	} {
 		got, err := selectRepos(m, tc.list)
