@@ -62,13 +62,13 @@ func TestSelectReposByBatchReposYAML(t *testing.T) {
 	if len(m.ActiveRepos()) != len(m.Repos) {
 		t.Fatalf("active_batches %v: want every batch of repos.yaml active", m.ActiveBatches)
 	}
-	want := []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts", "workflows", "factory", "ccf-live-demo-sandbox", "ccf-live-demo-app"}
+	want := []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts", "workflows", "ccf-live-demo-sandbox", "ccf-live-demo-app"}
 	for _, r := range m.Repos {
 		if r.Batch != 0 {
 			want = append(want, r.Name)
 		}
 	}
-	if got, err := SelectRepos(m, "", DryRunOff); err != nil || len(got) != 77 || !slices.Equal(got, want) {
+	if got, err := SelectRepos(m, "", DryRunOff); err != nil || len(got) != 76 || !slices.Equal(got, want) {
 		t.Errorf("repos.yaml: got %v, %v; want %v", got, err, want)
 	}
 }

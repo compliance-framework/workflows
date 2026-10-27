@@ -78,14 +78,6 @@ repos:
     kind: workflows
     release: false
 
-  # The CCF Factory (Go service with a web/ Vue app built by its own CI job). Core, so always
-  # active: Renovate and repo-settings act on it. release: false until it has a release workflow
-  # (release-please.yml): with true the train would wait on a release PR that never comes, and
-  # ccf-bump sync takes only release: true repos, so its shared-workflow pins move by hand until then.
-  - name: factory
-    kind: go-service
-    release: false
-
   # The live demo: the portal that provisions a seeded CCF sandbox per visitor, and the demo app
   # it deploys. Core, so always active: Renovate and repo-settings act on them. release: false:
   # each cuts its own releases (release.yml, by hand) and runs its own CI, outside the train.
