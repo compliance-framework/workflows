@@ -90,7 +90,10 @@ func (g goImage) Apply(ctx context.Context, dir string, changes []Change) error 
 			if !ok {
 				continue
 			}
-			newTag := Bare(c.To) + goTag.FindStringSubmatch(tag)[2]
+			newTag := Bare(c.To)
+			if v := goTag.FindStringSubmatch(tag); v != nil {
+				newTag += v[2] // the variant: -alpine
+			}
 			if !pinned {
 				repl[m[2]+":"+m[3]] = newTag
 				continue
