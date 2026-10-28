@@ -15,7 +15,7 @@ import (
 func (b *bumper) mergeAll(ctx context.Context, repos []string) error {
 	m := &automerge.Merger{
 		GH: b.e.gh, Tool: "ccf-bump", Owner: b.o.owner,
-		Label: bump.AutomergeLabel, BranchPrefix: "ccf-bump/", Author: b.o.author, Required: b.o.required,
+		Label: bump.AutomergeLabel, BranchPrefixes: []string{"ccf-bump/"}, Author: b.o.author, Required: b.o.required,
 		Wait: b.o.wait, DryRun: b.o.dryRun,
 		Out: b.e.stdout, Warn: b.warn, Now: b.e.now, Sleep: b.e.sleep,
 	}

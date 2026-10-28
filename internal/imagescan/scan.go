@@ -30,6 +30,7 @@ type RepoResult struct {
 	Targets   []Target // the Dockerfiles' base images
 	Published []Target // the published images (Base.Role empty)
 	Rules     []Rule
+	Patches   []FilePatch // the Dockerfiles whose managed block changes (docs/image-scan.md#os-package-patches)
 	Notes     []string
 	// Errors are what kept the scan from being complete: a Dockerfile that can't be read or
 	// parsed, a base image that can't be scanned. A published image that can't be pulled is a
@@ -67,7 +68,11 @@ func Run(ctx context.Context, env Env, repos []manifest.Repo) []RepoResult {
 			}
 			res.Images = imgs
 		}
+		dockerfiles := map[string][]byte{} // path -> source, for the OS package patches
 		for _, img := range res.Images {
+			if _, done := dockerfiles[img.Dockerfile]; done {
+				continue // a second image built from the same Dockerfile
+			}
 			src, ok, err := env.Files.File(ctx, repo.Name, img.Dockerfile)
 			if err != nil {
 				errorf("read %s: %v", img.Dockerfile, err)
@@ -87,6 +92,7 @@ func Run(ctx context.Context, env Env, repos []manifest.Repo) []RepoResult {
 				errorf("%s: %v", img.Dockerfile, err)
 				continue
 			}
+			dockerfiles[img.Dockerfile] = src
 			for _, b := range bases {
 				if slices.ContainsFunc(res.Targets, func(t Target) bool { return t.Dockerfile == img.Dockerfile && t.Base == b }) {
 					continue
@@ -110,8 +116,11 @@ func Run(ctx context.Context, env Env, repos []manifest.Repo) []RepoResult {
 				}
 			}
 		}
-		rules, notes := planner.Plan(ctx, repo.Name, res.Targets)
-		res.Rules, res.Notes = rules, append(res.Notes, notes...)
+		pl := planner.Plan(ctx, repo.Name, res.Targets)
+		res.Rules, res.Notes = pl.Rules, append(res.Notes, pl.Notes...)
+		res.Patches = append(res.Patches, osPatches(dockerfiles, res.Targets, pl.Fixed, func(format string, args ...any) {
+			res.Notes = append(res.Notes, fmt.Sprintf(format, args...))
+		})...)
 		out = append(out, res)
 	}
 	return out

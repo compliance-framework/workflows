@@ -379,14 +379,18 @@ func TestRenovateJobs(t *testing.T) {
 					perms = append(perms, k+": "+v)
 				}
 			}
-			if !slices.Equal(perms, []string{"permission-contents: read"}) {
-				t.Errorf("image-scan token permissions %v, want contents: read only", perms)
+			slices.Sort(perms)
+			// Write only on a live run (the os-patches branch and PR); a dry run's token reads.
+			const liveOnly = "${{ env.DRY_RUN == 'off' && 'write' || 'read' }}"
+			if !slices.Equal(perms, []string{"permission-contents: " + liveOnly, "permission-pull-requests: " + liveOnly}) {
+				t.Errorf("image-scan token permissions %v, want contents and pull-requests, write only when live", perms)
 			}
 		case s.Name == "Scan the images":
 			scanned = strings.Contains(s.Run, "go run ./cmd/image-scan scan") &&
 				strings.Contains(s.Run, `--overrides "$RUNNER_TEMP/image-scan/overrides.json"`) &&
 				strings.Contains(s.Run, `--summary "$GITHUB_STEP_SUMMARY"`) &&
 				strings.Contains(s.Run, "--cache-dir ~/.cache/osv-scanner") &&
+				strings.Contains(s.Run, `--author "${SLUG}[bot]"`) &&
 				s.Env["GH_TOKEN"] == "${{ steps.token.outputs.token }}"
 		case strings.HasPrefix(s.Uses, "actions/upload-artifact@"):
 			uploaded = s.If == "${{ !cancelled() }}" && s.With["name"] == "image-scan-overrides" && s.With["if-no-files-found"] == "ignore"
@@ -394,6 +398,10 @@ func TestRenovateJobs(t *testing.T) {
 	}
 	if !minted || !scanned || !uploaded {
 		t.Errorf("image-scan: token %v, scan step %v, overrides upload after a failure too %v", minted, scanned, uploaded)
+	}
+	// The os-patches commits are the bot's: the same identity step as ccf-bump-sync.yml's.
+	if got, want := script(t, "renovate.yml", "image-scan", "Commit as the release bot"), script(t, "ccf-bump-sync.yml", "sync", "Commit as the release bot"); !strings.Contains(want, strings.TrimSpace(strings.Split(got, "\n")[0])) || !strings.Contains(got, "GIT_AUTHOR_EMAIL=${id}+${SLUG}[bot]@users.noreply.github.com") {
+		t.Errorf("image-scan's commit identity step:\n%s\nwant it as in ccf-bump-sync.yml:\n%s", got, want)
 	}
 
 	if !slices.Equal(ren.Needs, []string{"select", "image-scan"}) || ren.If != "${{ !cancelled() && needs.select.result == 'success' }}" {

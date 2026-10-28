@@ -2,15 +2,18 @@
 // and plans their fixes as Renovate package rules, for renovate.yml's image-scan job:
 //
 //	image-scan list [--manifest repos.yaml] --repos a,b [--dry-run full]
-//	image-scan scan [--manifest repos.yaml] --repos a,b --overrides file [--summary file] [--cache-dir dir] [--owner org]
+//	image-scan scan [--manifest repos.yaml] --repos a,b --overrides file [--summary file] [--cache-dir dir] [--owner org] [--dry-run full] [--author ccf-release-bot[bot]]
 //
 // list prints the repos of --repos (renovate-config list's selection) whose kind has Dockerfiles
 // (go-service, ui, action), comma-separated, to scope the job's token; it prints an empty line
 // when there are none. scan reads each repo's images from its caller workflows (GH_TOKEN, read
 // only), scans the base images of their Dockerfiles and the published :main and :latest images
 // with osv-scanner (run with Docker) plus the runtime check, writes the Renovate rules it plans as
-// a JSON list to --overrides and a report to --summary. It exits non-zero, after writing both, if
-// an image could not be scanned. The rules are in internal/imagescan; see docs/image-scan.md.
+// a JSON list to --overrides and a report to --summary. On a live run (--dry-run off) it then
+// keeps each repo's image-scan/os-patches branch and PR in line with the OS package patches it
+// plans, committing as GIT_AUTHOR_NAME <GIT_AUTHOR_EMAIL> with GH_TOKEN (Contents and Pull
+// requests write); a dry run only logs them. It exits non-zero, after all that, if an image could
+// not be scanned or a PR not updated. The rules are in internal/imagescan; see docs/image-scan.md.
 package main
 
 import (
@@ -46,6 +49,7 @@ type deps struct {
 	scanner  imagescan.ImageScanner
 	registry imagescan.Registry
 	eol      imagescan.Cycler
+	patches  imagescan.PatchGitHub
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string, stdout io.Writer, d *deps) error {
@@ -61,6 +65,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	summary := fs.String("summary", "", "scan: append the report here (renovate.yml passes $GITHUB_STEP_SUMMARY)")
 	cacheDir := fs.String("cache-dir", "", "scan: osv-scanner's offline database cache; empty queries the OSV API")
 	scannerImage := fs.String("scanner", imagescan.ScannerImage, "scan: the osv-scanner image")
+	author := fs.String("author", "ccf-release-bot[bot]", "scan: the bot's login (the token's identity); an OS patch PR with anyone else's commit is left alone")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -101,8 +106,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		if base == "" {
 			base = "https://api.github.com"
 		}
+		gh := &bump.GitHub{BaseURL: base, Token: getenv("GH_TOKEN"), Owner: *owner}
 		d = &deps{
-			files: &imagescan.GitHubFiles{GH: &bump.GitHub{BaseURL: base, Token: getenv("GH_TOKEN"), Owner: *owner}},
+			files:   &imagescan.GitHubFiles{GH: gh},
+			patches: gh,
 			scanner: &imagescan.Scanner{
 				Run:      imagescan.ExecRunner{},
 				Image:    *scannerImage,
@@ -154,8 +161,23 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 			failed = append(failed, r.Repo)
 		}
 	}
+	pub := &imagescan.Publisher{
+		GH: d.patches, Author: *author, DryRun: *dryRun != renovate.DryRunOff, Out: stdout,
+		Identity: bump.Identity{Name: getenv("GIT_AUTHOR_NAME"), Email: getenv("GIT_AUTHOR_EMAIL")},
+	}
+	for _, r := range results {
+		if len(r.Errors) > 0 {
+			// Its plan may miss a Dockerfile: closing or rewriting the PR on that would be wrong.
+			fmt.Fprintf(stdout, "%s: OS package patches skipped, the scan is incomplete\n", r.Repo)
+			continue
+		}
+		if err := pub.Publish(ctx, r.Repo, r.Patches); err != nil {
+			fmt.Fprintf(stdout, "::warning::image-scan: %s: OS package patch PR: %v\n", r.Repo, err)
+			failed = append(failed, r.Repo)
+		}
+	}
 	if len(failed) > 0 {
-		return fmt.Errorf("could not scan everything in %s (the rules for the rest are written)", strings.Join(compact(failed), ", "))
+		return fmt.Errorf("could not scan or patch everything in %s (the rules for the rest are written)", strings.Join(compact(failed), ", "))
 	}
 	return nil
 }

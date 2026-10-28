@@ -1,0 +1,16 @@
+ARG BASE=alpine:3.24
+FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
+RUN <<EOF
+FROM is not an instruction here
+EOF
+
+FROM \
+    ${BASE} \
+    AS runtime
+# image-scan:os-patches begin
+# Managed by compliance-framework/workflows image-scan (docs/image-scan.md#os-package-patches); removed once the base image ships the fixes.
+RUN apk upgrade --no-cache musl
+# image-scan:os-patches end
+USER app
+COPY --from=builder /out/app /app
+ENTRYPOINT ["/app"]

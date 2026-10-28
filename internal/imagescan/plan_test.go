@@ -161,7 +161,11 @@ func TestPlan(t *testing.T) {
 				targets = append(targets, Target{Dockerfile: "Dockerfile", Base: Base{Ref: ref, Stage: x.stage, Role: x.role}, Scan: scan})
 			}
 			p := &Planner{Owner: "compliance-framework", Scanner: s, Registry: tc.registry, EOL: eolServer(t, tc.eolDown)}
-			rules, notes := p.Plan(context.Background(), "ui", targets)
+			pl := p.Plan(context.Background(), "ui", targets)
+			rules, notes := pl.Rules, pl.Notes
+			if (len(pl.Fixed) > 0) != strings.HasPrefix(tc.rules, "rule1") {
+				t.Errorf("Fixed = %v, want the image rule 1 moves and nothing else", pl.Fixed)
+			}
 			if tc.rules == "" {
 				if len(rules) != 0 {
 					t.Errorf("rules = %v, want none", rules)

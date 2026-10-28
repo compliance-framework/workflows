@@ -31,6 +31,7 @@ type Stage struct {
 	From     string // the image or stage it builds on, with the global ARGs substituted
 	Platform string // the --platform flag, substituted; "" without one
 	Line     int    // the 1-based line of the FROM keyword
+	End      int    // the 1-based last line of the FROM instruction (after its continuations)
 	Parent   int    // the index of the stage From names (FROM <alias>), or -1 for an image
 }
 
@@ -73,7 +74,7 @@ func ParseDockerfile(src []byte) (*Dockerfile, error) {
 			if err != nil {
 				return nil, fmt.Errorf("line %d: %w", in.line, err)
 			}
-			s.Index, s.Line = len(d.Stages), in.line
+			s.Index, s.Line, s.End = len(d.Stages), in.line, in.end
 			d.Stages = append(d.Stages, s)
 		}
 	}
@@ -116,13 +117,20 @@ func parseFrom(rest string, args map[string]string, earlier []Stage) (Stage, err
 // --target.
 func (d *Dockerfile) Final() int { return len(d.Stages) - 1 }
 
-// Bases returns the image each stage starts from, skipping scratch and FROM <stage>, in order. The
-// stage the final stage builds on, through any FROM <stage> chain, is RoleFinal.
-func (d *Dockerfile) Bases() ([]Base, error) {
+// FinalBase returns the index of the stage that starts from the final image's base: the final
+// stage, followed back through FROM <stage>.
+func (d *Dockerfile) FinalBase() int {
 	final := d.Final()
 	for d.Stages[final].Parent >= 0 {
 		final = d.Stages[final].Parent
 	}
+	return final
+}
+
+// Bases returns the image each stage starts from, skipping scratch and FROM <stage>, in order. The
+// stage the final stage builds on, through any FROM <stage> chain, is RoleFinal.
+func (d *Dockerfile) Bases() ([]Base, error) {
+	final := d.FinalBase()
 	var out []Base
 	for _, s := range d.Stages {
 		if s.Parent >= 0 || s.Scratch() {
@@ -145,8 +153,8 @@ func (d *Dockerfile) Bases() ([]Base, error) {
 }
 
 type instruction struct {
-	line int
-	text string
+	line, end int // its first and last line
+	text      string
 }
 
 // instructions splits a Dockerfile into instructions: comment lines dropped (also inside a
@@ -179,14 +187,14 @@ func instructions(src string) []instruction {
 		}
 		cur = append(cur, trimmed)
 		text := strings.Join(strings.Fields(strings.Join(cur, " ")), " ")
-		out = append(out, instruction{line: start, text: text})
+		out = append(out, instruction{line: start, end: i + 1, text: text})
 		cur = nil
 		if m := heredocStart.FindStringSubmatch(text); m != nil {
 			heredoc = m[1]
 		}
 	}
 	if len(cur) > 0 {
-		out = append(out, instruction{line: start, text: strings.Join(strings.Fields(strings.Join(cur, " ")), " ")})
+		out = append(out, instruction{line: start, end: strings.Count(src, "\n") + 1, text: strings.Join(strings.Fields(strings.Join(cur, " ")), " ")})
 	}
 	return out
 }

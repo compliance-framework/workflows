@@ -31,7 +31,8 @@ type mergeEnv struct {
 // merge merges the green Renovate PRs of --repos (renovate.yml passes its run's shard, which its
 // token is scoped to) as the token's identity: Renovate itself merges at most one PR per repo per
 // run (docs/renovate.md#the-merge-pass). A PR qualifies when it is labelled renovate:automerge,
-// from a renovate/* branch of the repo itself, opened by --author, every commit authored by
+// from a renovate/* branch, or an image-scan/* one (image-scan's OS package patches,
+// docs/image-scan.md#os-package-patches), of the repo itself, opened by --author, every commit authored by
 // --author (nobody pushed to it), and not labelled needs-human; it merges once the newest run of
 // --required-check on its head succeeded. --dry-run off merges; any other value prints what it
 // would merge.
@@ -64,7 +65,7 @@ func merge(ctx context.Context, args []string, e mergeEnv) error {
 	gh := e.github(*owner)
 	mg := &automerge.Merger{
 		GH: gh, Commits: gh, Tool: "renovate-config", Owner: *owner,
-		Label: renovate.AutomergeLabel, BranchPrefix: "renovate/", Author: *author, Required: *required,
+		Label: renovate.AutomergeLabel, BranchPrefixes: []string{"renovate/", "image-scan/"}, Author: *author, Required: *required,
 		Wait: *wait, DryRun: *dryRun != renovate.DryRunOff,
 		Out: e.stdout, Now: e.now, Sleep: e.sleep,
 		Warn: func(format string, args ...any) {

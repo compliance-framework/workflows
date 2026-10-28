@@ -1,0 +1,6 @@
+FROM nginx:stable-alpine
+# image-scan:os-patches begin
+# Managed by compliance-framework/workflows image-scan (docs/image-scan.md#os-package-patches); removed once the base image ships the fixes.
+RUN apk upgrade --no-cache brotli-libs curl
+# image-scan:os-patches end
+USER nginx

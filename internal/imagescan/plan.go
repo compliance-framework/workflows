@@ -59,8 +59,17 @@ type Planner struct {
 	cycles   map[string][]Cycle
 }
 
-// Plan returns repo's rules (rule 1 by image, then rule 2) and the notes on what it left.
-func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Rule, []string) {
+// Planned is a repo's plan.
+type Planned struct {
+	Rules []Rule   // rule 1 by image, then rule 2
+	Notes []string // what each image got, or why it got nothing
+	// Fixed holds the base images (Ref.String()) rule 1 moves to a newer image that fixes their
+	// findings, which the OS package patches leave alone.
+	Fixed map[string]bool
+}
+
+// Plan returns repo's plan.
+func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) Planned {
 	var notes []string
 	note := func(format string, args ...any) { notes = append(notes, fmt.Sprintf(format, args...)) }
 	type fix struct {
@@ -73,6 +82,7 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 		newTags  []string // the candidates' tags, for "patch"
 	}
 	security := map[string]*fix{} // by dep and kind
+	fixed := map[string]bool{}
 	var majors []Rule
 	majorKeys := map[string]bool{}
 	seen := map[string]bool{}
@@ -142,6 +152,7 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 		if kind == "patch" {
 			f.newTags = append(f.newTags, cand.Tag)
 		}
+		fixed[ref.String()] = true
 		note("%s: %s fixes %s (rule 1)", where, cand, strings.Join(cves(act), ", "))
 	}
 
@@ -181,7 +192,7 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 		rule.PRBodyNotes = []string{bodyNote(header, f.findings)}
 		rules = append(rules, rule)
 	}
-	return append(rules, majors...), notes
+	return Planned{Rules: append(rules, majors...), Notes: notes, Fixed: fixed}
 }
 
 // eolRule applies rule 2 to an image of an eolLines product. eol is false when the image's release
