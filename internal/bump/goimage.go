@@ -137,8 +137,9 @@ func (Crane) GoVersion(ctx context.Context, ref string) (string, error) {
 	return "", fmt.Errorf("config of %s sets no GOLANG_VERSION", ref)
 }
 
-// RegistryError is a failure to read the registry while planning the golang images (FollowGo):
-// nothing was written. ccf-bump fails the repo's bump on it, and only warns in a dry run.
+// RegistryError is a failure to read an outside source while planning the golang images
+// (FollowGo: the image registry) or the toolchain line (KeepToolchain: go.dev's releases): that
+// step wrote nothing. ccf-bump fails the repo's bump on it, and only warns in a dry run.
 type RegistryError struct{ Err error }
 
 func (e *RegistryError) Error() string { return "registry: " + e.Err.Error() }

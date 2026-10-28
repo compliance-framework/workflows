@@ -33,11 +33,13 @@ type Config struct {
 	Run       Runner
 	// Registry reads the golang images FollowGo moves (their digests and the Go they ship).
 	Registry Registry
+	// GoReleases lists the stable Go releases, for KeepToolchain (GoDev).
+	GoReleases GoReleases
 }
 
 // Updaters returns every updater for c; one with nothing to do in a checkout finds no refs.
 func Updaters(c Config) []Updater {
-	us := []Updater{goMod{c}, goInstall{c}, workflowRef{c}, helm{c}, goImage{c}}
+	us := []Updater{goMod{c}, goInstall{c}, workflowRef{c}, helm{c}, goImage{c}, goToolchain{c}}
 	if c.Source != "" {
 		us = append(us, dockerfile{c})
 	}

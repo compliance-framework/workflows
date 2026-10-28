@@ -26,6 +26,9 @@ const (
 	DepOPA       = "opa"
 	DepWorkflows = "workflows"
 	DepGo        = "golang"
+	// DepToolchain is the go.mod toolchain line, which KeepToolchain keeps (standard-library
+	// security fixes reach a repo only through it).
+	DepToolchain = "go toolchain"
 )
 
 // Ref is one pinned version of a dependency, as found in a repo.
@@ -94,6 +97,8 @@ type Plan struct {
 	Conflicts []Conflict
 	UpToDate  []Ref
 	NoTarget  []Ref // no target version: no final release, or not asked for
+	// Holds are reasons not to auto-merge that no change carries (ToolchainDropped).
+	Holds []string
 }
 
 // TagTime returns the commit time of dep's tag; it is needed only to compare a pseudo-version.
@@ -121,8 +126,8 @@ func Bare(v string) string {
 func Decide(refs []Ref, targets map[string]string, tagTime TagTime) (Plan, error) {
 	var p Plan
 	for _, r := range refs {
-		if r.Dep == DepGo {
-			continue // its target is the go line go get leaves: FollowGo plans it
+		if r.Dep == DepGo || r.Dep == DepToolchain {
+			continue // their targets follow the go line go get leaves: FollowGo and KeepToolchain plan them
 		}
 		target, ok := targets[r.Dep]
 		if !ok || target == "" {
@@ -241,8 +246,11 @@ func (c Change) Major() bool {
 		return c.pinnedVersion() == "" || tag == "" || semver.Major(c.pinnedVersion()) != semver.Major(tag)
 	}
 	from, to := Canonical(c.Current), c.To
-	if c.Dep == DepGo { // golang image pins: the versions of their tags, without variant or digest
+	switch c.Dep {
+	case DepGo: // golang image pins: the versions of their tags, without variant or digest
 		from, to = Canonical(goPinVersion(c.Current)), Canonical(goPinVersion(c.To))
+	case DepToolchain: // go1.26.1
+		from, to = Canonical(strings.TrimPrefix(c.Current, "go")), Canonical(strings.TrimPrefix(c.To, "go"))
 	}
 	if !semver.IsValid(from) || !semver.IsValid(to) {
 		return true
@@ -287,6 +295,11 @@ func (p Plan) HoldReasons(kind manifest.Kind) []string {
 	var out []string
 	for _, c := range p.Changes {
 		if r := c.HoldReason(kind); r != "" && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	for _, r := range p.Holds {
+		if !slices.Contains(out, r) {
 			out = append(out, r)
 		}
 	}

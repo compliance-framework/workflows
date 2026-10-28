@@ -74,9 +74,31 @@ for its releases).
 | ui sync script | `scripts/sync-agentconfig-conformance.sh <tag>` (writes the conformance fixture; its current version is unknown) | the ui's `go-service` dependency |
 | helm | `charts/*/values.yaml` image tags next to `repository: ghcr.io/<owner>/<repo>` (empty tags follow appVersion and stay empty); `Chart.yaml` `appVersion` | the image's repo; appVersion tracks the first org image whose tag is empty or equals appVersion |
 | `uses: <owner>/workflows/...@<ref>` in a job | workflow files; the job's `workflows-ref` input is deleted when its pin moves | the latest final release of the `kind: workflows` repo (sync), or `--set workflows=<ref>` |
+| `toolchain goX.Y.Z` | the root `go.mod`, only in a repo that had the line, only when `go get` dropped it ([below](#the-toolchain-line)) | the newest stable patch of the new `go` line's minor, above the `go` line |
 | `FROM golang:<version>[-variant][@sha256:...]` | the root `Dockerfile*` and `*.Dockerfile` files, any stage, after `--platform=` and other flags; `golang`, `docker.io/golang` or `docker.io/library/golang` | the higher of the root `go.mod`'s `go` and `toolchain` lines, once the Go modules moved ([below](#golang-builder-images)) |
 
 Files are edited in place, so comments and layout stay. Chart versions are left to release-please.
+
+### The toolchain line
+
+Go standard-library security fixes reach a repo only through its `go.mod` `toolchain` line:
+Renovate matches OSV's `stdlib` vulnerabilities for that line alone, never for the `go` line
+([renovate.md](renovate.md)). `go get` removes the line when it raises the `go` line to or past it,
+and `go mod tidy` removes one equal to the `go` line ([Go toolchains](#go-toolchains)). So after the
+Go module changes are applied (only when the plan moves one), ccf-bump checks the line of a repo
+whose `go.mod` had one when it was cloned. If it is gone, ccf-bump writes it back:
+
+- at the newest stable patch of the new `go` line's minor that is above the `go` line, from
+  `https://go.dev/dl/?mode=json&include=all` (`go 1.26.3` gets `toolchain go1.26.10`);
+- else at the old `toolchain` if that is still above the `go` line;
+- then runs `go mod tidy` again and fails the repo's bump if the line didn't survive.
+
+The restored line is a change like any other: it is in the PR's title and table (`go toolchain`,
+`go1.26.2` → `go1.26.10`), auto-merged as a patch or minor, and the golang builder images below
+follow it. When no release is above the new `go` line (it is the newest patch), the PR goes without
+the line and needs a human, saying why: until the line is back, the repo gets no standard-library
+security PRs. A repo that never had a `toolchain` line gets none. Failing to read go.dev fails a live
+bump, and only warns in a dry run, like the registry below.
 
 ### golang builder images
 
@@ -221,10 +243,9 @@ from `go 1.25.0`:
 | `go1.26.6` (above the new `go` line) | `go1.26.6`, kept | |
 | `go1.25.3` or `go1.26.1` (at or below the new `go` line) | removed (`go: removed toolchain go1.26.1`) | a `toolchain` line no higher than the `go` line is redundant; `go mod tidy` removes one equal to the `go` line too |
 
-So a raise of the `go` line past a repo's `toolchain` line drops the line, and with it Renovate's
-standard-library security PRs for that repo ([renovate.md](renovate.md)), until it is added again.
-ccf-bump does not add it back: a `toolchain` line equal to the new `go` line would be removed by the
-next `go mod tidy`.
+So a raise of the `go` line to or past a repo's `toolchain` line drops the line, and with it
+Renovate's standard-library security PRs for that repo ([renovate.md](renovate.md)). ccf-bump puts
+it back ([The toolchain line](#the-toolchain-line)).
 
 ## Why org modules are fetched directly
 

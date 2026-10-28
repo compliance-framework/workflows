@@ -67,7 +67,7 @@ func (b *bumper) summary() {
 
 // config derives the updaters' settings for repo from its kind and dependencies.
 func (b *bumper) config(r manifest.Repo) bump.Config {
-	c := bump.Config{Owner: b.o.owner, Run: runner(b.o.owner), Registry: b.e.registry}
+	c := bump.Config{Owner: b.o.owner, Run: runner(b.o.owner), Registry: b.e.registry, GoReleases: b.e.goReleases}
 	service := ""
 	for _, d := range r.DependsOn {
 		i := slices.IndexFunc(b.m.Repos, func(x manifest.Repo) bool { return x.Name == d })
@@ -203,7 +203,7 @@ func (b *bumper) targets(ctx context.Context, cfg bump.Config, refs []bump.Ref) 
 		return v, nil
 	}
 	for _, r := range refs {
-		if r.Dep == bump.DepWorkflows || r.Dep == bump.DepOPA || r.Dep == bump.DepGo {
+		if r.Dep == bump.DepWorkflows || r.Dep == bump.DepOPA || r.Dep == bump.DepGo || r.Dep == bump.DepToolchain {
 			continue
 		}
 		v, err := final(r.Dep)
@@ -357,19 +357,33 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	if err := bump.ApplyAll(ctx, dir, us, plan.Changes); err != nil {
 		return false, err
 	}
-	// go get may have raised the go line: the golang builder images follow it.
-	plan, followed, err := bump.FollowGo(ctx, dir, us, plan)
-	var regErr *bump.RegistryError
-	switch {
-	case errors.As(err, &regErr) && b.o.dryRun:
-		// The train dry-runs every hour: a registry blip must not fail its plan. Nothing was
-		// written, and the live run checks again (and fails on it).
-		b.warn("%s: dry run: golang images not planned: %v", name, err)
-	case err != nil:
-		return false, err
+	// go get may have raised the go line: the toolchain line is kept, then the golang builder
+	// images follow both.
+	for _, step := range []struct {
+		what   string
+		follow func(bump.Plan) (bump.Plan, []bump.Change, error)
+	}{
+		{"toolchain line not kept", func(p bump.Plan) (bump.Plan, []bump.Change, error) { return bump.KeepToolchain(ctx, dir, us, refs, p) }},
+		{"golang images not planned", func(p bump.Plan) (bump.Plan, []bump.Change, error) { return bump.FollowGo(ctx, dir, us, p) }},
+	} {
+		next, followed, err := step.follow(plan)
+		var regErr *bump.RegistryError
+		switch {
+		case errors.As(err, &regErr) && b.o.dryRun:
+			// The train dry-runs every hour: a registry or go.dev blip must not fail its plan.
+			// The step wrote nothing, and the live run checks again (and fails on it).
+			b.warn("%s: dry run: %s: %v", name, step.what, err)
+			continue
+		case err != nil:
+			return false, err
+		}
+		plan = next
+		if len(followed) > 0 {
+			fmt.Fprint(out, report(bump.Plan{Changes: followed}))
+		}
 	}
-	if len(followed) > 0 {
-		fmt.Fprint(out, report(bump.Plan{Changes: followed}))
+	for _, h := range plan.Holds {
+		fmt.Fprintf(out, "  hold      %s\n", h)
 	}
 	if _, err := b.git(ctx, dir, "add", "-A"); err != nil {
 		return false, err
@@ -594,7 +608,7 @@ func releaseURL(owner string, c bump.Change) string {
 	switch c.Dep {
 	case bump.DepOPA:
 		return "https://github.com/open-policy-agent/opa/releases/tag/" + c.To
-	case bump.DepGo:
+	case bump.DepGo, bump.DepToolchain:
 		return "https://go.dev/doc/devel/release"
 	case bump.DepWorkflows:
 		if ref, tag := bump.SplitWorkflowsPin(c.To); tag == "" {

@@ -58,13 +58,14 @@ type GitHub interface {
 
 // env is everything run depends on, so tests can fake it.
 type env struct {
-	gh       GitHub
-	getenv   func(string) string
-	stdout   io.Writer
-	now      func() time.Time
-	sleep    func(time.Duration)
-	remote   func(owner, repo string) string // clone/push URL
-	registry bump.Registry                   // the golang images' registry (bump.Config.Registry)
+	gh         GitHub
+	getenv     func(string) string
+	stdout     io.Writer
+	now        func() time.Time
+	sleep      func(time.Duration)
+	remote     func(owner, repo string) string // clone/push URL
+	registry   bump.Registry                   // the golang images' registry (bump.Config.Registry)
+	goReleases bump.GoReleases                 // the stable Go releases (bump.Config.GoReleases)
 }
 
 func main() {
@@ -77,7 +78,7 @@ func main() {
 		gh:     &bump.GitHub{BaseURL: base, Token: getenv("GH_TOKEN"), Owner: "compliance-framework"},
 		getenv: getenv, stdout: os.Stdout, now: time.Now, sleep: time.Sleep,
 		remote:   func(owner, repo string) string { return "https://github.com/" + owner + "/" + repo + ".git" },
-		registry: bump.Crane{},
+		registry: bump.Crane{}, goReleases: bump.GoDev,
 	}
 	if err := run(context.Background(), os.Args[1:], e); err != nil {
 		fmt.Fprintln(os.Stderr, "::error::ccf-bump: "+err.Error())
