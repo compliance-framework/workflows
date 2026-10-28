@@ -1,2 +1,5 @@
 lisa-addressed:
 - CORE-DOC-001: the go directive rule and docs now say go get raises consumers' go line and ccf-bump moves their golang images
+
+lisa-selfreview:
+pass 2: approve (no new findings; docker-majors question stays open for reviewers)
