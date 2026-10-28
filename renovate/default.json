@@ -35,6 +35,17 @@
       "semanticCommitType": "fix"
     },
     {
+      "description": "Dockerfile base images are pinned by digest (a pinDigest PR, then digest PRs when the tag is rebuilt), so a floating tag such as nginx:stable-alpine or debian:bookworm-slim picks up upstream rebuilds with their OS and runtime CVE fixes through a PR, not silently at the next build. In the final stage these are fix(deps) (the final depType rule) and join the non-major group.",
+      "matchManagers": ["dockerfile"],
+      "pinDigests": true
+    },
+    {
+      "description": "A docker digest or pinDigest update often has no release timestamp (a floating tag such as stable-alpine is no version to date, and Docker Hub's tag list is not always reachable), and with internalChecksFilter strict the default minimumReleaseAgeBehaviour (timestamp-required) keeps such an update pending for good, so a rebuild with CVE fixes would never get a PR. timestamp-optional lets it through; one that has a timestamp still waits minimumReleaseAge.",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["digest", "pinDigest"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
       "description": "Indirect Go modules (depType indirect, chore(deps) by default) are linked into the binary too, so their updates are fix(deps) and release (security fixes are fix(deps) through vulnerabilityAlerts whatever their depType).",
       "matchManagers": ["gomod"],
       "matchDepTypes": ["indirect"],

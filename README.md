@@ -879,7 +879,8 @@ go run ./cmd/repo-settings sync --repos api --bypass-app-id <id> --check-token-s
 
 `renovate.yml` runs self-hosted Renovate hourly on the manifest's repos (a live run on one shard of at most 15; the shards take turns run by run, so a late or dropped run slows the rotation but never skips a shard), with the shared preset
 `renovate/default.json` (third-party updates every day once a release is a week old, at most one new major per repo a visit and about two open, vulnerability fixes any day and never capped,
-non-majors grouped, and security fixes grouped per package manager, merged as `ccf-release-bot` once
+non-majors grouped, Dockerfile base images pinned by digest so upstream rebuilds come as PRs,
+and security fixes grouped per package manager, merged as `ccf-release-bot` once
 the required check passes: by Renovate, and by a merge pass right after each live run, since
 Renovate merges only one PR per repo per run).
 Scheduled runs are dry runs until the repo variable `RENOVATE_LIVE` is `true`. See
