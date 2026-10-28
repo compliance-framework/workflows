@@ -1,0 +1,4 @@
+lisa-design:
+- Only go.mod's go directive changes: every workflow (train.yml included) uses setup-go go-version-file: go.mod, so they all follow it. No toolchain line added; setup-go reads the go directive.
+- go 1.26.1 strings in test fixtures (cmd/ccf-bump/main_test.go, internal/bump/testdata/service/go.mod) are sample target-repo go.mod contents, not the Go used to run anything, so they stay.
+- go-version: stable in ci-helm/ci-common/preview/release-policies is unrelated to ccf-bump/train and left alone.
