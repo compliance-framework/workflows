@@ -235,6 +235,7 @@ func TestScanLive(t *testing.T) {
 		"tree mock-agent-action tree0 Dockerfile:\nFROM debian:bookworm-slim\n" +
 			"# image-scan:os-patches begin\n" +
 			"# Managed by compliance-framework/workflows image-scan (docs/image-scan.md#os-package-patches); removed once the base image ships the fixes.\n" +
+			"# hadolint ignore=DL3008\n" +
 			"RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade libc6 && rm -rf /var/lib/apt/lists/*\n" +
 			"# image-scan:os-patches end\nUSER app\n",
 		"commit mock-agent-action tree1 on head by ccf-release-bot[bot] <1+ccf-release-bot[bot]@users.noreply.github.com>: fix(deps): patch OS packages in debian:bookworm-slim (CVE-2025-15281)",

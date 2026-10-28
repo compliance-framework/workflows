@@ -217,7 +217,9 @@ RUN apk upgrade --no-cache brotli-libs curl libcurl
 ```
 
 - **Alpine** (`apk`): `RUN apk upgrade --no-cache <packages>`.
-- **Debian and Ubuntu** (`apt-get`): `RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade <packages> && rm -rf /var/lib/apt/lists/*`.
+- **Debian and Ubuntu** (`apt-get`): `RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade <packages> && rm -rf /var/lib/apt/lists/*`,
+  after `# hadolint ignore=DL3008`: the upgrade takes the distribution's current fixed version and
+  pins none, which hadolint (run on the action repos' Dockerfiles by `ci-action.yml`) would fail.
 - **Distroless and scratch**, with no shell or package manager, are skipped with a note. The scan
   finds the package manager by running `command -v apk || command -v apt-get` with the image's
   `/bin/sh` (no network).

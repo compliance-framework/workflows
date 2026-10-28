@@ -31,16 +31,16 @@ func block(pm string, pkgs []string) ([]string, error) {
 			return nil, fmt.Errorf("package %q: not an OS package name", p)
 		}
 	}
-	var run string
 	switch pm {
 	case APK:
-		run = "RUN apk upgrade --no-cache " + strings.Join(pkgs, " ")
+		return []string{BlockBegin, blockNote, "RUN apk upgrade --no-cache " + strings.Join(pkgs, " "), BlockEnd}, nil
 	case APT:
-		run = "RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade " + strings.Join(pkgs, " ") + " && rm -rf /var/lib/apt/lists/*"
-	default:
-		return nil, fmt.Errorf("no package manager to upgrade %s with", strings.Join(pkgs, ", "))
+		// The upgrade takes the distribution's current fixed version, so it pins none: hadolint's
+		// DL3008 (ci-action.yml lints the action repos' Dockerfiles) would fail the PR.
+		return []string{BlockBegin, blockNote, "# hadolint ignore=DL3008",
+			"RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade " + strings.Join(pkgs, " ") + " && rm -rf /var/lib/apt/lists/*", BlockEnd}, nil
 	}
-	return []string{BlockBegin, blockNote, run, BlockEnd}, nil
+	return nil, fmt.Errorf("no package manager to upgrade %s with", strings.Join(pkgs, ", "))
 }
 
 // PatchDockerfile returns src without its managed block and, when pkgs is not empty, with a new

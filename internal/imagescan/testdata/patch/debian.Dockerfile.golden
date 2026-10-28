@@ -6,6 +6,7 @@ FROM ghcr.io/compliance-framework/agent:0.9.3 AS source
 FROM debian:bookworm-slim
 # image-scan:os-patches begin
 # Managed by compliance-framework/workflows image-scan (docs/image-scan.md#os-package-patches); removed once the base image ships the fixes.
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade libbrotli1 libc6 && rm -rf /var/lib/apt/lists/*
 # image-scan:os-patches end
 
