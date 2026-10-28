@@ -121,3 +121,56 @@ func orDash(s string) string {
 	}
 	return s
 }
+
+// MaxCheckRows caps the findings table of `image-scan check` in the step summary (GitHub keeps 1
+// MiB of it); the job log has every finding.
+const MaxCheckRows = 1000
+
+// WriteCheckSummary writes the step summary of `image-scan check`: every finding of the built image,
+// fixable or not, the actionable ones (fixable HIGH and CRITICAL, which fail the check) first, then
+// by severity.
+func WriteCheckSummary(w io.Writer, name string, s *Scan) error {
+	fs := slices.Clone(s.Findings)
+	slices.SortStableFunc(fs, func(a, b Finding) int {
+		switch {
+		case a.Actionable() != b.Actionable():
+			if a.Actionable() {
+				return -1
+			}
+			return 1
+		case a.Score != b.Score:
+			if a.Score > b.Score {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Package, b.Package)
+	})
+	act := len(actionable(fs))
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Image check: %s\n\n", name)
+	switch {
+	case act > 0:
+		fmt.Fprintf(&b, "**%d fixable HIGH or CRITICAL finding(s)**, which fail the check, of %d in all.\n\n", act, len(fs))
+	case len(fs) > 0:
+		fmt.Fprintf(&b, "No fixable HIGH or CRITICAL finding; %d other(s).\n\n", len(fs))
+	default:
+		b.WriteString("No findings.\n\n")
+	}
+	if len(fs) > 0 {
+		b.WriteString("| Package | Type | Installed | Fixed | Severity | Fails | IDs |\n| --- | --- | --- | --- | --- | --- | --- |\n")
+		for i, f := range fs {
+			if i == MaxCheckRows {
+				fmt.Fprintf(&b, "\n%d more in the job log.\n", len(fs)-i)
+				break
+			}
+			fails := ""
+			if f.Actionable() {
+				fails = "yes"
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s |\n", f.Package, f.Type, f.Installed, orDash(strings.Join(f.Fixed, ", ")), f.Severity(), fails, strings.Join(f.CVEs(), ", "))
+		}
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
+}

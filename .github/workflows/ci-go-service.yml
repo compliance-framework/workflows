@@ -1,5 +1,6 @@
 # CI for Go services (kind go-service: api, agent). Calls ci-common.yml and ends in the
-# `required` job, the one status check to require. Callers grant the permissions ci-common.yml
+# `required` job, the one status check to require. The `image` job (ci-image.yml) checks the
+# built images for vulnerabilities, outside it. Callers grant the permissions ci-common.yml
 # needs (actions: read, contents: read, pull-requests: read, security-events: write); see README.
 name: ci-go-service
 
@@ -22,6 +23,10 @@ on:
         description: "Shell command run before go vet, the tests, the build and the make targets (api: make swag)"
         type: string
         default: ""
+      images:
+        description: 'JSON list of {"name", "dockerfile", "context"} for the image check (ci-image.yml); pass the same list as the release workflow. name defaults to the repo name, dockerfile to Dockerfile, context to .'
+        type: string
+        default: '[{}]'
 
 permissions: {}
 
@@ -246,6 +251,19 @@ jobs:
             exit 1
           fi
           [ -n "$TARGETS" ] || echo "No make targets."
+
+  # The built image's check (ci-image.yml): fails on a fixable HIGH or CRITICAL finding, but is
+  # deliberately not in `required`'s needs, so it never gates a merge (Renovate, ccf-bump and the
+  # train gate on ci / required).
+  image:
+    name: image
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed') }}
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/ci-image.yml
+    with:
+      images: ${{ inputs.images }}
+    permissions:
+      contents: read
 
   required:
     name: required

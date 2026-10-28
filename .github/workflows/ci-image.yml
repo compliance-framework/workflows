@@ -1,0 +1,94 @@
+# Builds each of the caller's images for linux/amd64, pushing nothing (so it works for fork PRs),
+# and checks the built image with image-scan (cmd/image-scan check): the same scanner, parser and
+# rules as renovate.yml's image-scan job, on the full image, so a vulnerable package the Dockerfile
+# adds is caught too. Fails on any fixable HIGH or CRITICAL finding, on PRs and on pushes to the
+# default branch alike: a red run on main says the image has one. Every finding goes to the step
+# summary. Called as job `image` by ci-go-service.yml, ci-ui.yml and ci-action.yml, outside their
+# `required` job, so it never gates a merge (docs/image-scan.md#the-ci-check-ci-imageyml).
+name: ci-image
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: 'JSON list of {"name", "dockerfile", "context"}; name defaults to the repo name, dockerfile to Dockerfile, context to .'
+        type: string
+        default: '[{}]'
+
+permissions: {}
+
+jobs:
+  image:
+    name: image (${{ matrix.image.name || github.event.repository.name }})
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(inputs.images) }}
+    env:
+      NAME: ${{ matrix.image.name || github.event.repository.name }}
+      DOCKERFILE: caller/${{ matrix.image.dockerfile || 'Dockerfile' }}
+      CONTEXT: caller/${{ matrix.image.context || '.' }}
+    steps:
+      - name: Check the tools ref
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "::error::job.workflow_sha is empty, so cmd/image-scan can't be fetched"
+            exit 1
+          fi
+      # This repo at the commit this workflow file was called at, for cmd/release and
+      # cmd/image-scan (the preview.yml pattern), and the caller's code under caller/.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: caller
+          persist-credentials: false
+      - name: Find the Dockerfile
+        id: dockerfile
+        run: |
+          if [ -f "$DOCKERFILE" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::${DOCKERFILE#caller/} not found: no image to check for $NAME"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.dockerfile.outputs.found == 'true'
+        with:
+          go-version-file: go.mod
+          cache: false
+      # The single VERSION build arg publish-image.yml gets, in preview.yml's form: pr-<n>-<sha7>
+      # or main-<sha7>, whatever the PR's labels or fork.
+      - name: Choose the version
+        id: version
+        if: steps.dockerfile.outputs.found == 'true'
+        run: go run ./cmd/release build-version
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.dockerfile.outputs.found == 'true'
+      # Loaded into the runner's Docker, never pushed. The layer cache is the GitHub Actions cache,
+      # one scope per image.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        if: steps.dockerfile.outputs.found == 'true'
+        with:
+          context: ${{ env.CONTEXT }}
+          file: ${{ env.DOCKERFILE }}
+          platforms: linux/amd64
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          load: true
+          push: false
+          tags: ci-image:local
+          cache-from: type=gha,scope=ci-image-${{ env.NAME }}
+          cache-to: type=gha,mode=max,scope=ci-image-${{ env.NAME }}
+      - name: Check the image
+        if: steps.dockerfile.outputs.found == 'true'
+        run: go run ./cmd/image-scan check --image ci-image:local --name "$NAME" --summary "$GITHUB_STEP_SUMMARY"

@@ -158,3 +158,26 @@ func TestReleaseTags(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildVersion(t *testing.T) {
+	const sha = "0123456789abcdef"
+	for _, tc := range []struct {
+		name string
+		e    Event
+		want string
+	}{
+		// No preview label and a fork: CI still builds, with the preview's version form.
+		{"unlabelled fork PR", Event{Name: "pull_request", SHA: sha, PRNumber: 7, Fork: true}, "pr-7-0123456"},
+		{"push", Event{Name: "push", Ref: "refs/heads/main", SHA: sha}, "main-0123456"},
+		{"release", Event{Name: "release", SHA: sha}, ""},
+		{"PR without a number", Event{Name: "pull_request", SHA: sha}, ""},
+		{"no SHA", Event{Name: "push", SHA: "abc"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := BuildVersion(tc.e)
+			if got != tc.want || (err == nil) != (tc.want != "") {
+				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}

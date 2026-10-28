@@ -1,6 +1,6 @@
 # CI for Docker GitHub Action repos (kind action: agent-action). Calls ci-common.yml, whose
 # actionlint job lints the workflows, and ends in the `required` job, the one status check to
-# require. Callers grant the permissions ci-common.yml needs (actions: read, contents: read,
+# require. The `image` job (ci-image.yml) checks the built image for vulnerabilities, outside it. Callers grant the permissions ci-common.yml needs (actions: read, contents: read,
 # pull-requests: read, security-events: write); see README.
 name: ci-action
 
@@ -80,6 +80,20 @@ jobs:
           DOCKERFILE: ${{ inputs.dockerfile }}
           CONTEXT: ${{ inputs.context }}
         run: docker build --file "$DOCKERFILE" "$CONTEXT"
+
+  # The action's image, which the runner builds from the Dockerfile on each use, checked like a
+  # service's (ci-image.yml): fails on a fixable HIGH or CRITICAL finding, but is deliberately not
+  # in `required`'s needs, so it never gates a merge (Renovate, ccf-bump and the train gate on
+  # ci / required).
+  image:
+    name: image
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.state == 'closed') }}
+    # A local reference in a called workflow resolves to this repo at the same commit (README).
+    uses: ./.github/workflows/ci-image.yml
+    with:
+      images: ${{ format('[{{"dockerfile":{0},"context":{1}}}]', toJSON(inputs.dockerfile), toJSON(inputs.context)) }}
+    permissions:
+      contents: read
 
   required:
     name: required

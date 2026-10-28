@@ -99,6 +99,26 @@ func PreviewVersion(e Event, onMain bool) string {
 	return "main-" + sha
 }
 
+// BuildVersion returns the VERSION build arg of an image CI builds but doesn't publish
+// (ci-image.yml), with PreviewVersion's form whatever the PR's labels or fork: pr-<number>-<sha7>
+// for a pull request, main-<sha7> for a push. Other events, a PR without a number and an event
+// without a commit SHA are an error.
+func BuildVersion(e Event) (string, error) {
+	if len(e.SHA) < 7 {
+		return "", fmt.Errorf("event %s: no commit SHA", e.Name)
+	}
+	switch e.Name {
+	case "pull_request":
+		if e.PRNumber <= 0 {
+			return "", fmt.Errorf("event %s: no PR number", e.Name)
+		}
+		return "pr-" + strconv.Itoa(e.PRNumber) + "-" + e.SHA[:7], nil
+	case "push":
+		return "main-" + e.SHA[:7], nil
+	}
+	return "", fmt.Errorf("event %s: CI builds images only for pull_request and push", e.Name)
+}
+
 // ReleaseVersion returns the version a release's git tag names: the tag without prefix, which
 // must be X.Y.Z or X.Y.Z-<pre-release> (v1.2.3 -> 1.2.3, v1.2.3-rc1 -> 1.2.3-rc1).
 func ReleaseVersion(tag, prefix string) (string, error) {

@@ -159,7 +159,7 @@ caller snippet, state and migration: [docs/notify.md](docs/notify.md).
 
 Each calls `ci-common.yml` and ends in a job named `required`, the one status check a repo
 needs to require (branch protection shows it as `<caller job> / required`). `required` runs
-with `if: always()`, needs every other job, and fails unless all of them succeeded. On an open
+with `if: always()`, needs every other job but `image` (below), and fails unless all of them succeeded. On an open
 PR or a push none of those jobs is conditional, so a skipped job also fails it; the `pull_request`-only jobs inside
 `ci-common.yml` don't count, because `common` still succeeds when they skip. On a closed PR
 (release-please relabels its release PR after the merge, and callers run CI on `labeled`) every
@@ -167,6 +167,14 @@ job is skipped, `required` too, so a merged PR gets no CI run and no red check. 
 every check runs even if an earlier one failed, so one run reports every problem. Callers
 grant the permissions `ci-common.yml` needs (see the example above); none takes secrets.
 Tool versions are pinned in the workflows.
+
+`ci-go-service.yml`, `ci-ui.yml` and `ci-action.yml` also run job **`image`**
+([`ci-image.yml`](docs/image-scan.md#the-ci-check-ci-imageyml)): it builds each image of the
+`images` input for amd64 (pushing nothing, so fork PRs work) and checks the built image with
+image-scan, failing on any fixable HIGH or CRITICAL vulnerability, on PRs and on `main` alike.
+It is deliberately **not** in `required`'s needs, so it never gates a merge (Renovate, ccf-bump
+and the train gate on `ci / required`); a red `image` on `main` is the signal to act. Every
+finding goes to its step summary.
 
 `ci-common.yml` is called as `./.github/workflows/ci-common.yml`. In a called workflow, a
 local reference means this repo at the same commit as the calling workflow file, not the
@@ -233,12 +241,25 @@ The snippets below show only the `uses:` and `with:` keys of that `ci` job.
 | --- | --- | --- |
 | `make-targets` | `""` | Extra `make` targets, space-separated. |
 | `prepare-command` | `""` | Shell command run first in `go` (after gofmt) and `make`. If it fails, the later checks are skipped. |
+| `images` | `[{}]` | The images the `image` job builds and checks: the same JSON list of `{"name", "dockerfile", "context"}` the repo's release and preview workflows pass to `release-go-image.yml` / `preview.yml`. |
 
 ```yaml
     uses: compliance-framework/workflows/.github/workflows/ci-go-service.yml@<sha> # vX.Y.Z
     with:  # api; agent passes make-targets: check-opa-version
       prepare-command: make swag
       make-targets: test-integration check-diff
+```
+
+agent publishes three images, so its `ci.yml` must pass the same `images` list as its
+`release.yml` and `preview.yml`, or only `Dockerfile` is checked:
+
+```yaml
+    with:  # agent
+      make-targets: check-opa-version
+      images: >-
+        [{"name": "agent", "dockerfile": "Dockerfile", "context": "."},
+         {"name": "agent-ci", "dockerfile": "Dockerfile-ci", "context": "."},
+         {"name": "agent-custodian", "dockerfile": "Dockerfile-custodian", "context": "."}]
 ```
 
 #### `ci-go-lib.yml` (kind `go-lib`)
@@ -263,6 +284,7 @@ One `node` job: Node from the repo's `.nvmrc` (else `node-version`), `npm ci`, t
 | `node-version` | `20` | Node version when the repo has no `.nvmrc`. |
 | `test-script` | `test` | npm script that runs Vitest. |
 | `extra-command` | `""` | Shell command run last, e.g. a drift check. |
+| `images` | `[{}]` | The images the `image` job builds and checks, as for `ci-go-service.yml`. |
 
 ```yaml
     uses: compliance-framework/workflows/.github/workflows/ci-ui.yml@<sha> # vX.Y.Z
@@ -295,6 +317,7 @@ One `node` job: Node from the repo's `.nvmrc` (else `node-version`), `npm ci`, t
 | --- | --- |
 | `hadolint` | [hadolint](https://github.com/hadolint/hadolint) on every tracked `Dockerfile*`, with the repo's `.hadolint.yaml` if any. |
 | `docker` | `docker build --file <dockerfile> <context>`. |
+| `image` | The image check ([`ci-image.yml`](docs/image-scan.md#the-ci-check-ci-imageyml)) of that Dockerfile and context: the image the runner builds on each use of the action. Not in `required`. |
 
 actionlint runs in `ci-common.yml`. Inputs: `dockerfile` (default `Dockerfile`) and `context`
 (default `.`). Caller: `uses: compliance-framework/workflows/.github/workflows/ci-action.yml@<sha> # vX.Y.Z`.
