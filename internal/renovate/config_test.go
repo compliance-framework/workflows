@@ -154,20 +154,23 @@ func TestSharedPreset(t *testing.T) {
 			AddLabels             []string        `json:"addLabels"`
 		} `json:"vulnerabilityAlerts"`
 		PackageRules []struct {
-			MatchManagers         []string `json:"matchManagers"`
-			MatchDepTypes         []string `json:"matchDepTypes"`
-			SemanticCommitType    string   `json:"semanticCommitType"`
-			MatchPackageNames     []string `json:"matchPackageNames"`
-			MatchRepositories     []string `json:"matchRepositories"`
-			MatchUpdateTypes      []string `json:"matchUpdateTypes"`
-			GroupName             string   `json:"groupName"`
-			Automerge             *bool    `json:"automerge"`
-			AutomergeType         string   `json:"automergeType"`
-			Enabled               *bool    `json:"enabled"`
-			AddLabels             []string `json:"addLabels"`
-			PrConcurrentLimit     *int     `json:"prConcurrentLimit"`
-			PrHourlyLimit         *int     `json:"prHourlyLimit"`
-			BranchConcurrentLimit *int     `json:"branchConcurrentLimit"`
+			MatchManagers              []string `json:"matchManagers"`
+			MatchDepTypes              []string `json:"matchDepTypes"`
+			SemanticCommitType         string   `json:"semanticCommitType"`
+			MatchPackageNames          []string `json:"matchPackageNames"`
+			MatchRepositories          []string `json:"matchRepositories"`
+			MatchUpdateTypes           []string `json:"matchUpdateTypes"`
+			GroupName                  string   `json:"groupName"`
+			Automerge                  *bool    `json:"automerge"`
+			AutomergeType              string   `json:"automergeType"`
+			Enabled                    *bool    `json:"enabled"`
+			AddLabels                  []string `json:"addLabels"`
+			PrConcurrentLimit          *int     `json:"prConcurrentLimit"`
+			PrHourlyLimit              *int     `json:"prHourlyLimit"`
+			BranchConcurrentLimit      *int     `json:"branchConcurrentLimit"`
+			PinDigests                 *bool    `json:"pinDigests"`
+			MatchDatasources           []string `json:"matchDatasources"`
+			MinimumReleaseAgeBehaviour string   `json:"minimumReleaseAgeBehaviour"`
 		} `json:"packageRules"`
 	}
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -240,7 +243,7 @@ func TestSharedPreset(t *testing.T) {
 		t.Errorf("vulnerabilityAlerts labels %v, addLabels %v: want none", va.Labels, va.AddLabels)
 	}
 
-	var internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped bool
+	var internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, digestsUndated bool
 	var labelRules int
 	nonMajor := []string{"minor", "patch", "digest", "pin", "pinDigest"}
 	opaNames := []string{"github.com/open-policy-agent/opa", "open-policy-agent/opa", "openpolicyagent/opa"}
@@ -278,6 +281,19 @@ func TestSharedPreset(t *testing.T) {
 		// chore(deps), which :semanticPrefixFixDepsChoreOthers gives depType indirect.
 		case slices.Equal(r.MatchDepTypes, []string{"indirect"}):
 			indirectFix = slices.Equal(r.MatchManagers, []string{"gomod"}) && r.SemanticCommitType == "fix" && r.Enabled == nil
+		// Dockerfile base images are pinned by digest, so an upstream rebuild of a floating tag (OS
+		// and runtime CVE fixes) arrives as a digest PR. For every image: the rule must not narrow
+		// to some, nor turn any back on (internal images stay off through the rule below).
+		case slices.Equal(r.MatchManagers, []string{"dockerfile"}):
+			digestsPinned = r.PinDigests != nil && *r.PinDigests && r.Enabled == nil && r.MatchPackageNames == nil &&
+				r.MatchDepTypes == nil && r.MatchUpdateTypes == nil && r.MatchRepositories == nil
+		// A digest or pinDigest update usually has no release timestamp (a floating tag is no
+		// version, and Docker Hub's tag list can fail), and with internalChecksFilter strict the
+		// default timestamp-required keeps it pending for good. Only those update types: a version
+		// update without a timestamp still waits.
+		case r.MinimumReleaseAgeBehaviour != "":
+			digestsUndated = r.MinimumReleaseAgeBehaviour == "timestamp-optional" && slices.Equal(r.MatchDatasources, []string{"docker"}) &&
+				slices.Equal(r.MatchUpdateTypes, []string{"digest", "pinDigest"}) && r.MatchPackageNames == nil && r.MatchRepositories == nil
 		case off && slices.Contains(r.MatchPackageNames, "github.com/compliance-framework/**") && slices.Contains(r.MatchPackageNames, "ghcr.io/compliance-framework/**"):
 			internalOff = len(r.MatchRepositories) == 0
 		case r.GroupName != "" && slices.Contains(r.MatchPackageNames, "*"):
@@ -294,9 +310,9 @@ func TestSharedPreset(t *testing.T) {
 	if labelRules != 1 {
 		t.Errorf("%d rules add %s, want 1", labelRules, AutomergeLabel)
 	}
-	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped {
-		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v",
-			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped)
+	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped || !digestsPinned || !digestsUndated {
+		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v, Dockerfile digests pinned %v, undated docker digest updates not held %v",
+			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, digestsUndated)
 	}
 }
 
