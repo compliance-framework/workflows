@@ -1,0 +1,2 @@
+lisa-addressed:
+- CORE-DOC-001: the go directive rule and docs now say go get raises consumers' go line and ccf-bump moves their golang images
