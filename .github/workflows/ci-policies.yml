@@ -13,7 +13,7 @@ on:
       opa-version:
         description: "OPA version, without the leading v"
         type: string
-        default: "1.14.1"
+        default: "1.21.3"
       regal-version:
         description: "Regal version, without the leading v"
         type: string
