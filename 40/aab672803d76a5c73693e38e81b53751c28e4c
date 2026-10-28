@@ -1,0 +1,9 @@
+lisa-addressed:
+- pass 1 CORE-TEST-001 RateFromAliases tiers: TestRateFromAliasesTiers (max among BIT aliases, 404 BIT falls through, tier-2 max, scored finding untouched)
+- pass 1 nit needless-exported-type: HTTPError -> httpError
+- pass 1 nit fake-404-body: fake uses the real "Vulnerability not found." message
+- pass 1 nit unclear-footnote: check summary footnote reworded
+- also: testdata/osv-scanner/agent.json compacted to one line per advisory (diff size)
+
+lisa-selfreview:
+- pass 2: approve, no findings (re-read severity.go, plan/scan/summary diffs, docs vs behaviour; go vet, gofmt, go test -race, actionlint green)
