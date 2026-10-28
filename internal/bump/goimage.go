@@ -292,13 +292,37 @@ func (p *goImagePlanner) plan(ctx context.Context, r Ref) (string, error) {
 	return newTag, nil
 }
 
-// FollowGo moves the golang builder images of the root Dockerfiles (DepGo) so they build the go
-// line of the root go.mod, after ApplyAll applied the plan to the checkout in dir: go get raises a
-// consumer's go line to the highest of its dependencies', and the golang image sets
-// GOTOOLCHAIN=local, so a builder older than the line fails the image build. It does so only when
-// the plan moves a Go module. Every registry read happens before anything is written: a
-// *RegistryError leaves the checkout as it was. It returns the plan with the images' changes
-// (applied) and up-to-date pins added, and the changes alone, for the output.
+// toolchainVersion matches a go.mod toolchain name (go1.26.6, go1.27rc1, go1.26.6-custom): group 1
+// is its version.
+var toolchainVersion = regexp.MustCompile(`^go([0-9]+(?:\.[0-9]+){0,2}(?:(?:rc|beta)[0-9]+)?)(?:[-+].*)?$`)
+
+// buildGo returns the Go a module builds with: its toolchain line's version when that is higher
+// than its go line (toolchain go1.26.6 over go 1.26.1), else its go line; "" without a valid go
+// line. A Go that runs the module with GOTOOLCHAIN=local must be at least the go line, and builds
+// it with that Go; the toolchain line is the one setup-go installs and Renovate moves for
+// standard-library fixes (docs/renovate.md), so the images follow it too.
+func buildGo(f *modfile.File) string {
+	if f.Go == nil || !goversion.IsValid("go"+f.Go.Version) {
+		return ""
+	}
+	line := f.Go.Version
+	if f.Toolchain != nil {
+		if m := toolchainVersion.FindStringSubmatch(f.Toolchain.Name); m != nil && goversion.Compare("go"+m[1], "go"+line) > 0 {
+			line = m[1]
+		}
+	}
+	return line
+}
+
+// FollowGo moves the golang builder images of the root Dockerfiles (DepGo) so they build the Go
+// the root go.mod asks for (buildGo: the higher of its go and toolchain lines; "the go line" in
+// this file), after ApplyAll applied the plan to the checkout in dir: go get raises a consumer's
+// go line to the highest of its dependencies'. An image older than that fails the build where it
+// keeps the golang image's GOTOOLCHAIN=local, and downloads the toolchain on every build where the
+// stage sets GOTOOLCHAIN=auto. It does so only when the plan moves a Go module. Every registry read
+// happens before anything is written: a *RegistryError leaves the checkout as it was. It returns
+// the plan with the images' changes (applied) and up-to-date pins added, and the changes alone,
+// for the output.
 func FollowGo(ctx context.Context, dir string, us []Updater, p Plan) (Plan, []Change, error) {
 	i := slices.IndexFunc(us, func(u Updater) bool { _, ok := u.(goImage); return ok })
 	if i < 0 || !slices.ContainsFunc(p.Changes, Change.GoModule) {
@@ -311,18 +335,19 @@ func FollowGo(ctx context.Context, dir string, us []Updater, p Plan) (Plan, []Ch
 	if err != nil {
 		return p, nil, err
 	}
-	f, err := modfile.ParseLax("go.mod", data, nil)
+	f, err := modfile.Parse("go.mod", data, nil) // not ParseLax, which skips the toolchain line
 	if err != nil {
 		return p, nil, err
 	}
-	if f.Go == nil || !goversion.IsValid("go"+f.Go.Version) {
+	line := buildGo(f)
+	if line == "" {
 		return p, nil, nil
 	}
 	refs, err := ScanAll(dir, us[i:i+1])
 	if err != nil {
 		return p, nil, err
 	}
-	pl := &goImagePlanner{reg: us[i].(goImage).c.Registry, goLine: f.Go.Version, digests: map[string]string{}, versions: map[string]string{}}
+	pl := &goImagePlanner{reg: us[i].(goImage).c.Registry, goLine: line, digests: map[string]string{}, versions: map[string]string{}}
 	var changes []Change
 	var current []Ref
 	for _, r := range refs {

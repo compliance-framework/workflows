@@ -74,18 +74,23 @@ for its releases).
 | ui sync script | `scripts/sync-agentconfig-conformance.sh <tag>` (writes the conformance fixture; its current version is unknown) | the ui's `go-service` dependency |
 | helm | `charts/*/values.yaml` image tags next to `repository: ghcr.io/<owner>/<repo>` (empty tags follow appVersion and stay empty); `Chart.yaml` `appVersion` | the image's repo; appVersion tracks the first org image whose tag is empty or equals appVersion |
 | `uses: <owner>/workflows/...@<ref>` in a job | workflow files; the job's `workflows-ref` input is deleted when its pin moves | the latest final release of the `kind: workflows` repo (sync), or `--set workflows=<ref>` |
-| `FROM golang:<version>[-variant][@sha256:...]` | the root `Dockerfile*` and `*.Dockerfile` files, any stage, after `--platform=` and other flags; `golang`, `docker.io/golang` or `docker.io/library/golang` | the root `go.mod`'s `go` line once the Go modules moved ([below](#golang-builder-images)) |
+| `FROM golang:<version>[-variant][@sha256:...]` | the root `Dockerfile*` and `*.Dockerfile` files, any stage, after `--platform=` and other flags; `golang`, `docker.io/golang` or `docker.io/library/golang` | the higher of the root `go.mod`'s `go` and `toolchain` lines, once the Go modules moved ([below](#golang-builder-images)) |
 
 Files are edited in place, so comments and layout stay. Chart versions are left to release-please.
 
 ### golang builder images
 
 `go get` raises a repo's `go` line to the highest of its dependencies' (an org module that moved to
-`go 1.26.3` takes its consumers there). The official golang image sets `GOTOOLCHAIN=local`, so a
-`docker build` whose builder ships an older Go than the `go` line fails with `go.mod requires go >=
-1.26.3 (running go 1.26.1; GOTOOLCHAIN=local)`. So once the Go module changes are applied (only
-when the plan moves one), ccf-bump reads the `go` line from `go.mod` and moves each golang image
-that doesn't build it:
+`go 1.26.3` takes its consumers there). The Go a repo builds with is the higher of its `go` line and
+its `toolchain` line (`go 1.26.1` with `toolchain go1.26.6` builds with 1.26.6; Renovate moves the
+`toolchain` line for standard-library fixes, [renovate.md](renovate.md)); below, "the `go` line"
+means that version. The official golang image sets `GOTOOLCHAIN=local`, so a `docker build` whose
+builder ships an older Go fails with `go.mod requires go >= 1.26.3 (running go 1.26.1;
+GOTOOLCHAIN=local)`. The Go repos' builder stages set `ENV GOTOOLCHAIN=auto`, so there the build
+works anyway, but `go` downloads the newer toolchain on every build (and a Renovate security PR
+that moves only the `toolchain` line relies on that until the image catches up). So once the Go
+module changes are applied (only when the plan moves one), ccf-bump reads `go.mod` and moves each
+golang image that doesn't build its Go, so the builds don't download a toolchain each time:
 
 | Image | `go 1.26.3` | Why |
 | --- | --- | --- |
@@ -205,6 +210,21 @@ needs a newer Go, `go` downloads that toolchain from proxy.golang.org, checks it
 sum.golang.org, and runs it. Only the org's modules are in `GOPRIVATE`, so the toolchain
 (`golang.org/toolchain`) still comes through the proxy. The train runs the ccf-bump binary, so its
 bumps get the same environment.
+
+What `go get` (Go 1.26, `GOTOOLCHAIN=auto`) does to the `toolchain` line when it raises the `go`
+line, checked with `go get github.com/compliance-framework/agent@v0.9.4` (which needs go 1.26.1)
+from `go 1.25.0`:
+
+| `toolchain` line before | after | |
+| --- | --- | --- |
+| none | none | `go get` never adds one, even when it switches to a newer Go (it ran go1.26.10) or the runner's Go is newer than the new `go` line |
+| `go1.26.6` (above the new `go` line) | `go1.26.6`, kept | |
+| `go1.25.3` or `go1.26.1` (at or below the new `go` line) | removed (`go: removed toolchain go1.26.1`) | a `toolchain` line no higher than the `go` line is redundant; `go mod tidy` removes one equal to the `go` line too |
+
+So a raise of the `go` line past a repo's `toolchain` line drops the line, and with it Renovate's
+standard-library security PRs for that repo ([renovate.md](renovate.md)), until it is added again.
+ccf-bump does not add it back: a `toolchain` line equal to the new `go` line would be removed by the
+next `go mod tidy`.
 
 ## Why org modules are fetched directly
 

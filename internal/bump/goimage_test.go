@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/mod/modfile"
 )
 
 func TestGoImageTarget(t *testing.T) {
@@ -272,5 +274,47 @@ func TestFollowGoRegistryError(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildGo(t *testing.T) {
+	for mod, want := range map[string]string{
+		"go 1.26.1":                       "1.26.1",
+		"go 1.26.1\ntoolchain go1.26.6":   "1.26.6",
+		"go 1.26.3\ntoolchain go1.26.1":   "1.26.3", // a lower toolchain line never runs
+		"go 1.26\ntoolchain go1.27rc1":    "1.27rc1",
+		"go 1.26.1\ntoolchain go1.26.6-x": "1.26.6",
+		"go 1.26.1\ntoolchain default":    "1.26.1",
+		"module m":                        "",
+	} {
+		f, err := modfile.Parse("go.mod", []byte(mod+"\n"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := buildGo(f); got != want {
+			t.Errorf("buildGo(%q) = %q, want %q", mod, got, want)
+		}
+	}
+}
+
+// TestFollowGoToolchain: a toolchain line above the go line (as Renovate moves it for stdlib
+// fixes) is what the images must build: golang:1.26.3 meets go 1.26.1 but not toolchain go1.26.6.
+func TestFollowGoToolchain(t *testing.T) {
+	files := map[string]string{
+		"go.mod":     "module example.com/m\n\ngo 1.26.1\n\ntoolchain go1.26.6\n",
+		"Dockerfile": "FROM golang:1.26.3 AS builder\nFROM golang:1.26.6-alpine AS current\n",
+	}
+	dir := goImageFiles(t, files)
+	reg := &fakeRegistry{digests: map[string]string{"golang:1.26.6": digest("b")}}
+	us := Updaters(Config{Owner: "compliance-framework", Registry: reg})
+	mod := Change{Ref: Ref{Updater: goMod{}.Name(), Dep: "mock-api", File: "go.mod"}, To: "v0.1.0"}
+	_, followed, err := FollowGo(context.Background(), dir, us, Plan{Changes: []Change{mod}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, _, _ := describe(Plan{Changes: followed})
+	check(t, "changes", changes, []string{"golang image Dockerfile golang: 1.26.3 -> 1.26.6"})
+	if got, _ := os.ReadFile(filepath.Join(dir, "Dockerfile")); string(got) != "FROM golang:1.26.6 AS builder\nFROM golang:1.26.6-alpine AS current\n" {
+		t.Errorf("Dockerfile:\n%s", got)
 	}
 }
