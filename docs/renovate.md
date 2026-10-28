@@ -12,16 +12,17 @@ public repos.
 | --- | --- |
 | Schedule | `at any time`: normal updates every day, on every visit. Until October 2026 they ran only on the 8th and 22nd (`* * 8,22 * *`), away from the monthly train (which starts on the month's first working weekday), so each update spent at least a week on `main` before the next release. But a repo then opened about one PR per visit on two days a month, and updates piled up "Awaiting Schedule" in its Dependency Dashboard ([ui#354](https://github.com/compliance-framework/ui/issues/354) had ~28, ~20 of them majors). With a daily schedule the remaining guard is the waiting period below: no update before its release is 7 days old, though an update merged the day before a train now ships in it. `ccf-bump`'s internal updates keep their own 8th/22nd schedule ([ccf-bump](ccf-bump.md)). |
 | Vulnerability fixes | Any day (`vulnerabilityAlerts.schedule: at any time`), with no minimum age. `osvVulnerabilityAlerts: true` finds CVEs from osv.dev even without a Dependabot alert. A repo's fixes go into one `[SECURITY]` PR per package manager, `renovate/security-<manager>` (e.g. `renovate/security-gomod`), outside the non-major group; it auto-merges. A fix is never held by a PR limit: Renovate skips `prHourlyLimit` for vulnerability fixes, and `vulnerabilityAlerts` sets `prConcurrentLimit: 0` and `branchConcurrentLimit: 0` (no limit). Without these a fix would take the top-level `prConcurrentLimit: 8` (against the security PRs' own count), and a major fix, which also matches the majors rule, its `prConcurrentLimit: 3`: Renovate applies `vulnerabilityAlerts` over the package rules, and a branch takes the lowest limit of its updates, `0` meaning none. A major fix gets its own, `renovate/major-security-<manager>`, for a human. See [Why security fixes are grouped](#why-security-fixes-are-grouped). Every fix is `fix(deps)` (`vulnerabilityAlerts.semanticCommitType: "fix"`), so it releases: Renovate forces the `vulnerabilityAlerts` settings onto each security update over the package rules, while the depType rules alone still let one through as `chore(deps)`, which release-please hides ([mock-plugin-2#14](https://github.com/compliance-framework/mock-plugin-2/pull/14)). |
-| Waiting period | `minimumReleaseAge: "7 days"` with `internalChecksFilter: "strict"`: no branch or PR before a release is a week old. An update with no release timestamp waits too (Renovate's default `minimumReleaseAgeBehaviour`), except a `docker` `digest` or `pinDigest` update, which goes ahead without one (`timestamp-optional`) and still waits when it has one (see [Why digest updates skip a missing timestamp](#why-digest-updates-skip-a-missing-timestamp)). |
-| Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain and the `golang` image are in it. Majors get their own PRs. |
+| Waiting period | `minimumReleaseAge: "7 days"` with `internalChecksFilter: "strict"`: no branch or PR before a release is a week old. An update with no release timestamp waits too (Renovate's default `minimumReleaseAgeBehaviour`), except a `docker` `minor`, `patch`, `digest` or `pinDigest` update, which goes ahead without one (`timestamp-optional`) and still waits when it has one (see [Why docker updates skip a missing timestamp](#why-docker-updates-skip-a-missing-timestamp)). A docker major keeps waiting for a timestamp. |
+| Grouping | Every `minor`, `patch`, `digest`, `pin` and `pinDigest` update of a repo goes into one PR, `renovate/all-non-major` ("all non-major dependencies"), so a run costs one CI run per repo. The Go toolchain, the `go.mod` `go` directive and the `golang` image are in it, so a Go bump moves the `go` line and the builder image in the same PR. Majors get their own PRs. |
 | Auto-merge | The non-major group (and every non-major vulnerability fix) auto-merges, but Renovate merges it itself (`platformAutomerge: false`, `automergeType: "pr"`, `automergeStrategy: "squash"`): on its next run after the checks pass, Renovate squash-merges the PR through the API as `ccf-release-bot`. These PRs are also labelled `renovate:automerge` (one rule, `addLabels`), and `renovate.yml`'s [merge pass](#the-merge-pass) merges them right after each live run, since Renovate merges only one per repo per run (it squash-merges with the same commit title and message Renovate's merge gets). Majors and OPA updates don't get the label: majors, and OPA in the api, wait for a human. See [Why Renovate merges, not GitHub](#why-renovate-merges-not-github). |
 | Rebasing | `rebaseWhen: "conflicted"`: a branch is rebased only when it conflicts with `main`, not every time it falls behind. See [Why security fixes are grouped](#why-security-fixes-are-grouped). |
 | Limits | `prHourlyLimit: 4`, `prConcurrentLimit: 8` per repo, and on the majors rule `prConcurrentLimit: 3` and `prHourlyLimit: 1`: at most 2 open majors next to the non-major group, and at most one new major per visit. Capped updates wait under "Rate-Limited" in the Dependency Dashboard, where a checkbox creates one past the limits. Vulnerability fixes are never capped. With a live run's shard of at most 15 repos, that bounds the PRs across the org; see [The org-wide throttle](#the-org-wide-throttle). |
 | Commits | Semantic: `fix(deps)` for runtime dependencies (Go `require`, npm `dependencies`, a Dockerfile's final stage, the Go `toolchain` directive), which release-please releases, and `chore(deps)` for everything else (dev, CI, actions). A group takes the highest type of its updates, so a group with any runtime update is `fix(deps)`. Security fixes are always `fix(deps)`, whatever their dependency type (see Vulnerability fixes). |
 | Go | `postUpdateOptions: ["gomodTidy"]`. Indirect modules are left to `go mod tidy` (Renovate's default). |
+| Go directive | The `go.mod` `go` line (depType `golang`, datasource `golang-version`) moves to the latest Go, minor and patch alike (`matchManagers: ["gomod"], matchDepTypes: ["golang"], rangeStrategy: "bump"`). By default Renovate reads it as a minimum that every newer Go already meets and never moves it, so a repo stayed on the Go it started with while its `golang` builder image moved on. The update is `fix(deps)`: `setup-go` builds releases with the `go` line's Go, so a bump ships its standard-library fixes. It joins `renovate/all-non-major` with the `golang` image update, and keeps the 7-day wait: `golang-version` releases carry a date (go 1.27.3: 2026-10-19). Docker tags have none and don't wait, so the image is never behind the `go` line Renovate writes. When an org module raises its `go` line, `ccf-bump` moves its consumers' `go` line and `golang` images instead ([ccf-bump.md](ccf-bump.md#golang-builder-images)). |
 | Indirect Go modules | When Renovate does update one, it is `fix(deps)`, not the `chore(deps)` that `depType: indirect` gets by default: indirect modules are linked into the binary, so the update must release (`matchManagers: ["gomod"], matchDepTypes: ["indirect"], semanticCommitType: "fix"`). A security fix to one is `fix(deps)` through `vulnerabilityAlerts` regardless of this rule. |
 | Actions | Pinned by digest (`helpers:pinGitHubActionDigests`). Images in helm values and docker-compose files are tracked by Renovate's own managers, by tag. |
-| Dockerfile images | Every `FROM` image is pinned by digest (`matchManagers: ["dockerfile"], pinDigests: true`): Renovate opens a `pinDigest` update that adds the digest of the current tag (`nginx:stable-alpine` becomes `nginx:stable-alpine@sha256:...`), then a `digest` update whenever upstream rebuilds that tag. A floating tag such as `nginx:stable-alpine`, `gcr.io/distroless/base-debian12` or `debian:bookworm-slim` never changes its name when upstream ships OS or runtime CVE fixes in a rebuild, so without a digest those fixes reach the image only when it happens to be rebuilt, unreviewed and with no PR to release them. With one, a rebuild is a PR: in the final stage it is `fix(deps)` (the `final` depType rule) and joins `renovate/all-non-major`, which auto-merges and releases; in a build stage it is `chore(deps)` in the same group. A digest update often has no release timestamp to age against: one of a floating tag never has one, since the tag is no version to date, and one of a versioned tag such as `golang:1.26` has none when Docker Hub's tag list, where its timestamp comes from, can't be read (see [Why digest updates skip a missing timestamp](#why-digest-updates-skip-a-missing-timestamp)). So a sibling rule sets `minimumReleaseAgeBehaviour: "timestamp-optional"` on `docker` `digest` and `pinDigest` updates: one without a timestamp goes ahead, and one with a timestamp still waits 7 days. Internal images (`ghcr.io/compliance-framework/**`) stay off (Internal packages). |
+| Dockerfile images | Every `FROM` image is pinned by digest (`matchManagers: ["dockerfile"], pinDigests: true`): Renovate opens a `pinDigest` update that adds the digest of the current tag (`nginx:stable-alpine` becomes `nginx:stable-alpine@sha256:...`), then a `digest` update whenever upstream rebuilds that tag. A floating tag such as `nginx:stable-alpine`, `gcr.io/distroless/base-debian12` or `debian:bookworm-slim` never changes its name when upstream ships OS or runtime CVE fixes in a rebuild, so without a digest those fixes reach the image only when it happens to be rebuilt, unreviewed and with no PR to release them. With one, a rebuild is a PR: in the final stage it is `fix(deps)` (the `final` depType rule) and joins `renovate/all-non-major`, which auto-merges and releases; in a build stage it is `chore(deps)` in the same group. A docker update has no release timestamp to age against: a floating tag is no version to date, and Renovate's docker datasource gives Docker Hub tags (`golang`, `postgres`, `node`) none either (see [Why docker updates skip a missing timestamp](#why-docker-updates-skip-a-missing-timestamp)). So a sibling rule sets `minimumReleaseAgeBehaviour: "timestamp-optional"` on `docker` `minor`, `patch`, `digest` and `pinDigest` updates: one without a timestamp goes ahead, and one with a timestamp still waits 7 days. Internal images (`ghcr.io/compliance-framework/**`) stay off (Internal packages). |
 | OPA | Off in every repo except `api`, so in agent, the policy repos and the plugins it follows the api through `ccf-bump`. In `api` it gets its own PR, `renovate/opa`, which never auto-merges, because a bump forces agent and the policies to follow. An OPA security fix gets its own security PR too, `renovate/security-gomod-opa`, so that in `api` it doesn't hold the other Go fixes (a group auto-merges only if every update in it does). Elsewhere Renovate still opens one, since it forces vulnerability fixes on over `enabled: false` (as for internal packages), and it auto-merges there. |
 | Needs a human | Majors and the api's `renovate/opa` and `renovate/security-gomod-opa` PRs get the `needs-human` label (`addLabels`). See [attention.md](attention.md). |
 | Internal packages | Off: `github.com/compliance-framework/**` (Go modules), `ghcr.io/compliance-framework/**` (images) and `compliance-framework/**` (actions and reusable workflows, such as this repo's). |
@@ -83,28 +84,46 @@ one it merges into; the push to `main` runs CI again on the merged result, and i
 repo's `notify-failure.yml` opens an incident, as for any red `main` (rule (b) in
 [notify](notify.md)).
 
-### Why digest updates skip a missing timestamp
+### Why docker updates skip a missing timestamp
 
 With `minimumReleaseAge` and `internalChecksFilter: "strict"`, Renovate (44.145.1) marks an update
 that has no release timestamp as pending under its default `minimumReleaseAgeBehaviour`
 (`timestamp-required`), and a pending update never gets a branch: it is dropped from its group
-("Branch is not pending, removing pending upgrades"). Docker updates mostly have none. A floating
+("Branch is not pending, removing pending upgrades"). Docker updates have none. A floating
 tag (`stable-alpine`, `base-debian12`, `bookworm-slim`) is no version, so Renovate has nothing to
-date its `digest` updates with; and a versioned tag (`golang:1.26`, `node:22`) gets its timestamps
-from Docker Hub's tag list, which failed in a dry run in October 2026 (`403` on page 11 of
+date its `digest` updates with; and the docker datasource gives a versioned Docker Hub tag
+(`golang:1.26.1`, `postgres:17`, `node:22`) no timestamp either. A dry run in October 2026 first
+blamed Docker Hub's tag list (`403` on page 11 of
 `hub.docker.com/v2/repositories/library/golang/tags`, then the registry's tag list, which has no
-dates). In that run (`--dry-run=lookup` on api and ui), every docker update had `releaseTimestamp:
-null`; the `pinDigest` updates of `golang:1.26` and `node:22` were `pendingChecks: true` ("pinDigest
-update of golang has no releaseTimestamp to age against"), and only those of `nginx:stable-alpine`
-and `gcr.io/distroless/base-debian12` went through, because Renovate skips the age check for a
-`pinDigest` of an unversioned tag. Their later `digest` updates get no such skip, so the rebuilds
-the pinning is for would never have opened a PR.
+dates); either way every docker update had `releaseTimestamp: null`.
 
-So a rule sets `minimumReleaseAgeBehaviour: "timestamp-optional"` for `docker` `digest` and
-`pinDigest` updates only: an update without a timestamp goes ahead (Renovate logs a warning), and one
-that has a timestamp still waits 7 days. That is preferred to `minimumReleaseAge: null`, which
-would drop the wait for those updates even when a timestamp exists. Version updates (`minor`,
-`patch`, `major`) of images keep `timestamp-required`.
+That held two kinds of update for good:
+
+- **Digests.** In a dry run (`--dry-run=lookup` on api and ui) the `pinDigest` updates of
+  `golang:1.26` and `node:22` were `pendingChecks: true` ("pinDigest update of golang has no
+  releaseTimestamp to age against"), and only those of `nginx:stable-alpine` and
+  `gcr.io/distroless/base-debian12` went through, because Renovate skips the age check for a
+  `pinDigest` of an unversioned tag. Their later `digest` updates get no such skip, so the rebuilds
+  the pinning is for would never have opened a PR.
+- **Tags.** agent's `golang:1.26.1` had `1.26.2` to `1.27.3` all pending ("Marking 13 release(s) as
+  pending, as they do not have a releaseTimestamp"), and api's `postgres` 17.x and 18.x too: the
+  Dependency Dashboard listed the update, but `renovate/all-non-major` never got it. In agent the
+  pending `1.27.3` also took the `pinDigest` of the same `FROM` line with it ("Ignoring upgrade
+  collision"), so the image got neither.
+
+So a rule sets `minimumReleaseAgeBehaviour: "timestamp-optional"` for `docker` `minor`, `patch`,
+`digest` and `pinDigest` updates: an update without a timestamp goes ahead (Renovate logs a
+warning), and one that has a timestamp still waits 7 days. That is preferred to
+`minimumReleaseAge: null`, which would drop the wait for those updates even when a timestamp
+exists. Docker majors keep `timestamp-required`, and every other datasource keeps it too. The
+`golang-version` datasource behind the `go` directive has dates, so it needs no exception.
+
+The same lookup on agent with the rule (and the `go` directive rule):
+
+| `renovate/all-non-major` gets | before | after |
+| --- | --- | --- |
+| `golang` `1.26.1` → `1.27.3` (`Dockerfile`, `Dockerfile-ci`, `Dockerfile-custodian`) | no: pending | yes, pinned at `sha256:2920bb124f1a…` |
+| `go.mod` `go 1.26.1` → `1.27.3` (released 2026-10-19) | no update found | yes |
 
 It extends `config:recommended`, which adds the Dependency Dashboard issue (where majors and pending
 updates are listed) and Renovate's standard monorepo groups.

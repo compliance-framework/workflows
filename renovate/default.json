@@ -40,9 +40,9 @@
       "pinDigests": true
     },
     {
-      "description": "A docker digest or pinDigest update often has no release timestamp (a floating tag such as stable-alpine is no version to date, and Docker Hub's tag list is not always reachable), and with internalChecksFilter strict the default minimumReleaseAgeBehaviour (timestamp-required) keeps such an update pending for good, so a rebuild with CVE fixes would never get a PR. timestamp-optional lets it through; one that has a timestamp still waits minimumReleaseAge.",
+      "description": "Docker updates have no release timestamp: a floating tag such as stable-alpine is no version to date, and Renovate's docker datasource gives Docker Hub tags (golang, postgres, node) none either. With internalChecksFilter strict the default minimumReleaseAgeBehaviour (timestamp-required) keeps every such update pending for good, so no docker update could ever pass minimumReleaseAge: a rebuild with CVE fixes (digest, pinDigest) or a new golang or postgres tag (minor, patch) would never get a PR, only a Dependency Dashboard line. timestamp-optional lets them through; one that has a timestamp still waits minimumReleaseAge. Majors keep timestamp-required.",
       "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["digest", "pinDigest"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pinDigest"],
       "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
@@ -52,7 +52,14 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "One PR per repo for every non-major update (Go toolchain and golang image included), merged by Renovate as ccf-release-bot on its next run once the required check passes.",
+      "description": "The go.mod go directive is a minimum, which every newer Go already meets, so by default Renovate never moves it. rangeStrategy bump moves it to the latest Go (minor and patch, in the non-major group with the golang image, so the builder keeps up with the go line) and it is fix(deps): setup-go builds the releases with the go line's Go, so a bump ships its stdlib fixes. When an org module raises its go line, ccf-bump moves its consumers' go line and golang images instead (docs/ccf-bump.md#golang-builder-images).",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"],
+      "rangeStrategy": "bump",
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "One PR per repo for every non-major update (Go toolchain, go directive and golang image included), merged by Renovate as ccf-release-bot on its next run once the required check passes.",
       "matchPackageNames": ["*"],
       "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
       "groupName": "all non-major dependencies",

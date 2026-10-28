@@ -172,6 +172,7 @@ func TestSharedPreset(t *testing.T) {
 			PinDigests                 *bool    `json:"pinDigests"`
 			MatchDatasources           []string `json:"matchDatasources"`
 			MinimumReleaseAgeBehaviour string   `json:"minimumReleaseAgeBehaviour"`
+			RangeStrategy              string   `json:"rangeStrategy"`
 		} `json:"packageRules"`
 	}
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -244,7 +245,7 @@ func TestSharedPreset(t *testing.T) {
 		t.Errorf("vulnerabilityAlerts labels %v, addLabels %v: want none", va.Labels, va.AddLabels)
 	}
 
-	var internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, digestsUndated bool
+	var internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, dockerUndated, goBumped bool
 	var labelRules int
 	nonMajor := []string{"minor", "patch", "digest", "pin", "pinDigest"}
 	opaNames := []string{"github.com/open-policy-agent/opa", "open-policy-agent/opa", "openpolicyagent/opa"}
@@ -288,13 +289,21 @@ func TestSharedPreset(t *testing.T) {
 		case slices.Equal(r.MatchManagers, []string{"dockerfile"}):
 			digestsPinned = r.PinDigests != nil && *r.PinDigests && r.Enabled == nil && r.MatchPackageNames == nil &&
 				r.MatchDepTypes == nil && r.MatchUpdateTypes == nil && r.MatchRepositories == nil
-		// A digest or pinDigest update usually has no release timestamp (a floating tag is no
-		// version, and Docker Hub's tag list can fail), and with internalChecksFilter strict the
-		// default timestamp-required keeps it pending for good. Only those update types: a version
-		// update without a timestamp still waits.
+		// Docker updates have no release timestamp (a floating tag is no version, and the docker
+		// datasource dates no Docker Hub tag: agent's golang 1.27.3 and api's postgres stayed
+		// pending), and with internalChecksFilter strict the default timestamp-required keeps them
+		// pending for good. Docker only, and not majors: they still wait for a timestamp.
 		case r.MinimumReleaseAgeBehaviour != "":
-			digestsUndated = r.MinimumReleaseAgeBehaviour == "timestamp-optional" && slices.Equal(r.MatchDatasources, []string{"docker"}) &&
-				slices.Equal(r.MatchUpdateTypes, []string{"digest", "pinDigest"}) && r.MatchPackageNames == nil && r.MatchRepositories == nil
+			dockerUndated = r.MinimumReleaseAgeBehaviour == "timestamp-optional" && slices.Equal(r.MatchDatasources, []string{"docker"}) &&
+				slices.Equal(r.MatchUpdateTypes, []string{"minor", "patch", "digest", "pinDigest"}) && r.MatchPackageNames == nil &&
+				r.MatchRepositories == nil && r.MatchManagers == nil && r.MatchDepTypes == nil
+		// The go directive is a minimum that newer Go already meets, so Renovate moves it only with
+		// rangeStrategy bump. No update type or limit of its own: it joins the non-major group with
+		// the golang image (majors stay with the majors rule). fix(deps): setup-go builds releases
+		// with the go line's Go.
+		case slices.Equal(r.MatchDepTypes, []string{"golang"}):
+			goBumped = slices.Equal(r.MatchManagers, []string{"gomod"}) && r.RangeStrategy == "bump" && r.SemanticCommitType == "fix" &&
+				r.MatchUpdateTypes == nil && r.GroupName == "" && r.Automerge == nil && r.Enabled == nil
 		case off && slices.Contains(r.MatchPackageNames, "github.com/compliance-framework/**") && slices.Contains(r.MatchPackageNames, "ghcr.io/compliance-framework/**"):
 			internalOff = len(r.MatchRepositories) == 0
 		case r.GroupName != "" && slices.Contains(r.MatchPackageNames, "*"):
@@ -311,9 +320,9 @@ func TestSharedPreset(t *testing.T) {
 	if labelRules != 1 {
 		t.Errorf("%d rules add %s, want 1", labelRules, AutomergeLabel)
 	}
-	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped || !digestsPinned || !digestsUndated {
-		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v, Dockerfile digests pinned %v, undated docker digest updates not held %v",
-			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, digestsUndated)
+	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped || !digestsPinned || !dockerUndated || !goBumped {
+		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v, Dockerfile digests pinned %v, undated docker non-major updates not held %v, go directive bumped %v",
+			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, dockerUndated, goBumped)
 	}
 }
 
