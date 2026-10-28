@@ -1,0 +1,6 @@
+lisa-selfreview:
+pass 1: approve
+- [question] docs/renovate.md / renovate/default.json: docker majors (node 22 -> 26, postgres 17 -> 18) keep timestamp-required, so like the tag updates before this PR they stay pending for good and never get their needs-human PR. Scoped out per the request (minor/patch); listed as an open question for reviewers.
+
+lisa-selfreview:
+pass 1 (amended): [nit] CORE-DOC-001 renovate/default.json + docs/renovate.md: "ccf-bump moves its consumers' go line ... instead" misstates it: go get raises the go line, ccf-bump moves the images, in addition to Renovate -> fix
