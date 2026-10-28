@@ -30,7 +30,7 @@
   "postUpdateOptions": ["gomodTidy"],
   "packageRules": [
     {
-      "description": "Runtime changes ship in a release, so they are fix(deps): the final image stage and the Go toolchain, on top of :semanticPrefixFixDepsChoreOthers (require/dependencies).",
+      "description": "Runtime changes ship in a release, so they are fix(deps): the final image stage and the go.mod toolchain line, on top of :semanticPrefixFixDepsChoreOthers (require/dependencies). The toolchain line is where Go standard-library security fixes arrive: Renovate matches OSV stdlib vulnerabilities only for depType toolchain, never for the go directive, which stays the minimum language version and is not bumped.",
       "matchDepTypes": ["final", "toolchain"],
       "semanticCommitType": "fix"
     },
@@ -52,14 +52,7 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "The go.mod go directive is a minimum, which every newer Go already meets, so by default Renovate never moves it. rangeStrategy bump moves it to the latest Go (minor and patch, in the non-major group with the golang image, so the builder keeps up with the go line) and it is fix(deps): setup-go builds the releases with the go line's Go, so a bump ships its stdlib fixes. When an org module raises its go line, ccf-bump keeps its consumers in step: its go get raises their go line and it moves their golang images with it (docs/ccf-bump.md#golang-builder-images).",
-      "matchManagers": ["gomod"],
-      "matchDepTypes": ["golang"],
-      "rangeStrategy": "bump",
-      "semanticCommitType": "fix"
-    },
-    {
-      "description": "One PR per repo for every non-major update (Go toolchain, go directive and golang image included), merged by Renovate as ccf-release-bot on its next run once the required check passes.",
+      "description": "One PR per repo for every non-major update (the go.mod toolchain line and the golang image included), merged by Renovate as ccf-release-bot on its next run once the required check passes.",
       "matchPackageNames": ["*"],
       "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
       "groupName": "all non-major dependencies",

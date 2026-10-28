@@ -245,12 +245,17 @@ func TestSharedPreset(t *testing.T) {
 		t.Errorf("vulnerabilityAlerts labels %v, addLabels %v: want none", va.Labels, va.AddLabels)
 	}
 
-	var internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, dockerUndated, goBumped bool
+	var internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, dockerUndated, toolchainFix bool
 	var labelRules int
 	nonMajor := []string{"minor", "patch", "digest", "pin", "pinDigest"}
 	opaNames := []string{"github.com/open-policy-agent/opa", "open-policy-agent/opa", "openpolicyagent/opa"}
 	for _, r := range p.PackageRules {
 		off := r.Enabled != nil && !*r.Enabled
+		// The go directive is the minimum language version, which consumers inherit: Renovate
+		// leaves it alone (it reads it as a range every newer Go meets) and so must the preset.
+		if r.RangeStrategy != "" || slices.Contains(r.MatchDepTypes, "golang") {
+			t.Errorf("a rule matching depTypes %v sets rangeStrategy %q: the go directive is not bumped", r.MatchDepTypes, r.RangeStrategy)
+		}
 		// Only the majors rule sets PR limits: through calcLimit's lowest-limit-wins, a limit on
 		// another rule would cap the non-major group (the renovate:automerge rule matches every
 		// non-major update) or a security fix.
@@ -297,13 +302,13 @@ func TestSharedPreset(t *testing.T) {
 			dockerUndated = r.MinimumReleaseAgeBehaviour == "timestamp-optional" && slices.Equal(r.MatchDatasources, []string{"docker"}) &&
 				slices.Equal(r.MatchUpdateTypes, []string{"minor", "patch", "digest", "pinDigest"}) && r.MatchPackageNames == nil &&
 				r.MatchRepositories == nil && r.MatchManagers == nil && r.MatchDepTypes == nil
-		// The go directive is a minimum that newer Go already meets, so Renovate moves it only with
-		// rangeStrategy bump. No update type or limit of its own: it joins the non-major group with
-		// the golang image (majors stay with the majors rule). fix(deps): setup-go builds releases
-		// with the go line's Go.
-		case slices.Equal(r.MatchDepTypes, []string{"golang"}):
-			goBumped = slices.Equal(r.MatchManagers, []string{"gomod"}) && r.RangeStrategy == "bump" && r.SemanticCommitType == "fix" &&
-				r.MatchUpdateTypes == nil && r.GroupName == "" && r.Automerge == nil && r.Enabled == nil
+		// Go standard-library fixes arrive through the go.mod toolchain line: Renovate matches OSV's
+		// "stdlib" vulnerabilities only for depType toolchain (vulnerabilities.js), so a toolchain
+		// update must release (fix). It sets nothing else: it joins the non-major group, and its
+		// security fixes get vulnerabilityAlerts' PR.
+		case slices.Contains(r.MatchDepTypes, "toolchain"):
+			toolchainFix = slices.Equal(r.MatchDepTypes, []string{"final", "toolchain"}) && r.SemanticCommitType == "fix" &&
+				r.MatchUpdateTypes == nil && r.MatchManagers == nil && r.MatchPackageNames == nil && r.GroupName == "" && r.Enabled == nil
 		case off && slices.Contains(r.MatchPackageNames, "github.com/compliance-framework/**") && slices.Contains(r.MatchPackageNames, "ghcr.io/compliance-framework/**"):
 			internalOff = len(r.MatchRepositories) == 0
 		case r.GroupName != "" && slices.Contains(r.MatchPackageNames, "*"):
@@ -320,9 +325,9 @@ func TestSharedPreset(t *testing.T) {
 	if labelRules != 1 {
 		t.Errorf("%d rules add %s, want 1", labelRules, AutomergeLabel)
 	}
-	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped || !digestsPinned || !dockerUndated || !goBumped {
-		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v, Dockerfile digests pinned %v, undated docker non-major updates not held %v, go directive bumped %v",
-			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, dockerUndated, goBumped)
+	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped || !digestsPinned || !dockerUndated || !toolchainFix {
+		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v, Dockerfile digests pinned %v, undated docker non-major updates not held %v, toolchain line fix(deps) %v",
+			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, dockerUndated, toolchainFix)
 	}
 }
 
