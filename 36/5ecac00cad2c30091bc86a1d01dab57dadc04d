@@ -1,0 +1,2 @@
+lisa-addressed:
+- CI: data race in fakeOSV (hang mode, concurrent handlers) fixed with a mutex + requests() accessor; go test -race -count=10 green locally.
