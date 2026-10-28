@@ -1,0 +1,4 @@
+lisa-design:
+- Kept our own "Verify the golangci-lint config" step (now a plain `golangci-lint config verify`) instead of re-enabling golangci-lint-action's verify. Since v2.15.0 both are offline (the action just runs `golangci-lint config verify`, which uses the embedded jsonsch.NextSchema), but the action verifies BEFORE the lint and its failure skips the lint, and it has no ::error annotation; our step runs after the lint so one run reports both lint issues and config errors.
+- Removed SCHEMA_URL, its Renovate regex custom manager and TestSchemaURLRenovate: golangci-lint >= v2.15.0 has no --schema flag, so there is no second version to keep in step with the action's with.version.
+- TestGolangciVerifySetup now asserts the verify step passes no --schema, and the fake golangci-lint rejects --schema like the real v2.15.0, so a reintroduced flag fails the tests.
