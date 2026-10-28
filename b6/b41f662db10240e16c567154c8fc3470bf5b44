@@ -1,0 +1,3 @@
+lisa-addressed:
+- CORE-TEST-001 targets() DepGo skip: covered by TestGolangImagesFollowGoLine in sync mode (fails without the skip)
+- docs: registry failure retry wording
