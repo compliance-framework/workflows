@@ -71,7 +71,8 @@ defaults declared before the first `FROM` (`${VAR}`, `${VAR:-default}` and the o
 `FROM` (`publish-image.yml` builds without `--target`); its base image, followed through
 `FROM <stage>` (the ui's `FROM production`), is tagged `final`, every other one `build`.
 
-Each image is pulled for `linux/amd64`, saved to an archive, scanned, and removed; an image used
+Each image is pulled for `linux/amd64`, saved to an archive, scanned, and removed unless it was
+already there (a local run keeps its images); an image used
 by several repos is scanned once per run. osv-scanner runs with its offline databases
 (`--offline-vulnerabilities --download-offline-databases`) in `~/.cache/osv-scanner`, which the job
 caches (a new cache key a day, restored from the newest); each run refreshes them, downloading only

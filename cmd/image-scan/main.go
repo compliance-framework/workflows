@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -85,6 +86,12 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 
 	if *overrides == "" {
 		return errors.New("--overrides is required")
+	}
+	if *cacheDir != "" {
+		// Docker mounts it: an absolute path.
+		if *cacheDir, err = filepath.Abs(*cacheDir); err != nil {
+			return err
+		}
 	}
 	if d == nil {
 		if getenv("GH_TOKEN") == "" {

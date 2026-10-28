@@ -25,6 +25,7 @@ var update = flag.Bool("update", false, "rewrite the testdata/*.golden.json file
 // its osv-scanner report (testdata/osv-scanner/<file>) and its environment.
 type fakeDocker struct {
 	images map[string]fakeImage
+	local  []string // images present before a pull
 	calls  []string
 }
 
@@ -45,6 +46,11 @@ func (f *fakeDocker) Run(_ context.Context, name string, args ...string) ([]byte
 		return nil, nil
 	case args[0] == "save":
 		return nil, os.WriteFile(args[2], []byte(last), 0o644)
+	case args[0] == "image" && args[1] == "inspect" && args[3] == "{{.Id}}":
+		if slices.Contains(f.local, last) {
+			return []byte("sha256:local\n"), nil
+		}
+		return nil, &ExitError{Code: 1, Stderr: "No such image: " + last}
 	case args[0] == "image" && args[1] == "inspect":
 		img, ok := f.images[last]
 		if !ok {
@@ -205,8 +211,17 @@ func TestScanCommands(t *testing.T) {
 	if _, err := s.Scan(context.Background(), "nginx:stable-alpine"); err != nil {
 		t.Fatal(err)
 	}
-	if docker.calls[0] != "docker pull --quiet --platform linux/amd64 nginx:stable-alpine" || docker.calls[len(docker.calls)-1] != "docker image rm nginx:stable-alpine" {
+	if docker.calls[1] != "docker pull --quiet --platform linux/amd64 nginx:stable-alpine" || docker.calls[len(docker.calls)-1] != "docker image rm nginx:stable-alpine" {
 		t.Errorf("pull mode: calls %q, want a pull first and the image removed last", docker.calls)
+	}
+	// An image that was already there is pulled (updated) but kept.
+	docker = &fakeDocker{images: spikeImages, local: []string{"nginx:stable-alpine"}}
+	s = newScanner(t, docker)
+	if _, err := s.Scan(context.Background(), "nginx:stable-alpine"); err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(docker.calls, func(c string) bool { return strings.HasPrefix(c, "docker image rm") }) {
+		t.Errorf("a local image was removed: %q", docker.calls)
 	}
 }
 

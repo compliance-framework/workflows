@@ -76,8 +76,8 @@ type Scanner struct {
 	// (--offline-vulnerabilities) and refreshes them first (--download-offline-databases, which
 	// downloads only the ecosystems the image has, and only what changed); "" queries the API.
 	CacheDir string
-	// Pull pulls each image for Platform before the scan and removes it after. Off for an image
-	// built locally (image-scan check).
+	// Pull pulls each image for Platform before the scan, and removes it after unless it was
+	// already there. Off for an image built locally (image-scan check).
 	Pull bool
 }
 
@@ -88,10 +88,16 @@ func (s *Scanner) Scan(ctx context.Context, ref string) (*Scan, error) {
 		return nil, err
 	}
 	if s.Pull {
+		// An image that was already here (a local run) stays; one the scan pulled is removed, so a
+		// run over many images doesn't fill the runner's disk.
+		_, err := s.Run.Run(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", ref)
+		had := err == nil
 		if _, err := s.Run.Run(ctx, "docker", "pull", "--quiet", "--platform", Platform, ref); err != nil {
 			return nil, fmt.Errorf("pull %s: %w", ref, err)
 		}
-		defer func() { _, _ = s.Run.Run(context.WithoutCancel(ctx), "docker", "image", "rm", ref) }()
+		if !had {
+			defer func() { _, _ = s.Run.Run(context.WithoutCancel(ctx), "docker", "image", "rm", ref) }()
+		}
 	}
 	dir, err := os.MkdirTemp(s.TempDir, "image-scan-")
 	if err != nil {
