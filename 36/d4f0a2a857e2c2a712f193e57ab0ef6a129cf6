@@ -1,0 +1,2 @@
+lisa-addressed:
+- GO-NIL-001 goImage.Apply: the variant is read only when goTag matches (fp c17145ed3de2)
