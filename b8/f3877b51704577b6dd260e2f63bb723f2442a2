@@ -1,0 +1,8 @@
+lisa-addressed:
+pass 1 fixes:
+- CORE-SEC-003: ParseRef now enforces Docker's reference grammar (name, tag, sha256 digest); Scanner.Scan rejects a bad ref before any docker call (TestScanRejectsBadRefs, TestParseRef).
+- CORE-TEST-001: TestGitHubFiles covers Dir, File, 404 => missing, other errors, and the cached default branch.
+- duplicate-eol-rule: Plan keys rule 2 by matchDepNames+matchCurrentVersion (test "rule 2 once for an image in two stages").
+- rule1-matches-other-tags: rule 1 gets matchCurrentVersion /^(tags)$/ of the scanned tags (goldens, docs).
+- stale-version-claim: ScannerImage comment says same tool, not same version.
+- CORE-SIZE-001: not a code fix; size-exception label + reason in the PR body.
