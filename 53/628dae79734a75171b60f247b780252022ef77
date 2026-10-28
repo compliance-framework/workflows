@@ -1,0 +1,3 @@
+lisa-addressed:
+pass 2 fixes:
+- relabels-held-pr: Publisher adds renovate:automerge only when it opens the PR (test "a person took the label off").
