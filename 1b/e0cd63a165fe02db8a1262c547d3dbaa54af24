@@ -6,3 +6,9 @@ lisa-design:
 - Repos whose scan had errors are skipped for publishing (a partial plan must not close/rewrite the PR).
 - automerge.Merger.BranchPrefix became BranchPrefixes; renovate-config merge passes renovate/ and image-scan/ (literal, to keep imagescan out of renovate-config's imports).
 - image-scan token: contents + pull-requests write on live, read on dry; label added via bump.GitHub.AddLabel (creates renovate:automerge if missing).
+
+lisa-selfreview:
+pass 1 (strict), verdict request_changes:
+- [blocker] CORE-SIZE-001 ~1380 counted lines (>1000); the spec fixes PR 3 as one PR: size-exception label + reason in the body.
+- [must-fix] X:correctness/apt-block-fails-hadolint the apt block (apt-get install --only-upgrade, no version pins) fails hadolint DL3008, which ci-action.yml runs on the action repos (agent-action), so its PR could never merge.
+- [question] X:intent/patch-pr-ci-failures-not-notified image-scan/ branches are not in notify.AutomationBranchPrefixes or attention.BotBranchPrefixes, so a red os-patches PR is not posted to #ccf-ci-failures nor listed in the digest. Not added: the owner ruled out Slack messages for this feature. Listed as an open question.
