@@ -200,21 +200,22 @@ func (p *Publisher) Publish(ctx context.Context, repo string, patches []FilePatc
 		}
 		fmt.Fprintf(p.Out, "%s: pushed %s at %s\n", repo, PatchBranch, short(commit))
 	}
-	if pr == nil {
-		if pr, err = p.GH.CreatePR(ctx, repo, base, PatchBranch, title, body); err != nil {
-			return fmt.Errorf("open the PR: %w", err)
+	if pr != nil {
+		if pr.Title != title || !same {
+			if err := p.GH.UpdatePR(ctx, repo, pr.Number, title, body); err != nil {
+				return fmt.Errorf("#%d: update: %w", pr.Number, err)
+			}
+			fmt.Fprintf(p.Out, "%s#%d: updated %q\n", repo, pr.Number, title)
 		}
-		fmt.Fprintf(p.Out, "%s#%d: opened %q\n", repo, pr.Number, title)
-	} else if pr.Title != title || !same {
-		if err := p.GH.UpdatePR(ctx, repo, pr.Number, title, body); err != nil {
-			return fmt.Errorf("#%d: update: %w", pr.Number, err)
-		}
-		fmt.Fprintf(p.Out, "%s#%d: updated %q\n", repo, pr.Number, title)
+		return nil
 	}
-	if !pr.HasLabel(automergeLabel.Name) {
-		if err := p.GH.AddLabel(ctx, repo, pr.Number, automergeLabel); err != nil {
-			return fmt.Errorf("#%d: label: %w", pr.Number, err)
-		}
+	if pr, err = p.GH.CreatePR(ctx, repo, base, PatchBranch, title, body); err != nil {
+		return fmt.Errorf("open the PR: %w", err)
+	}
+	fmt.Fprintf(p.Out, "%s#%d: opened %q\n", repo, pr.Number, title)
+	// Only on a new PR: a person who took the label off an open one keeps it off.
+	if err := p.GH.AddLabel(ctx, repo, pr.Number, automergeLabel); err != nil {
+		return fmt.Errorf("#%d: label: %w", pr.Number, err)
 	}
 	return nil
 }

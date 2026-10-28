@@ -242,7 +242,8 @@ Each repo gets one branch, **`image-scan/os-patches`**, for all its Dockerfiles.
    through the API, authored and committed as `ccf-release-bot[bot]` (the job's "Commit as the
    release bot" step, as in `ccf-bump-sync.yml`), and force-pushes it; when the branch already is
    that change on the current head, it pushes nothing, so CI doesn't run again;
-3. opens or updates the PR, labelled `renovate:automerge`: **`fix(deps): patch OS packages in
+3. opens or updates the PR, labelled `renovate:automerge` when it opens it (a person who takes the
+   label off keeps it off): **`fix(deps): patch OS packages in
    <image> (<CVE ids>)`**, so the fix releases, or **`chore(deps): remove the OS package patches of
    <image>`** when it only removes blocks. The body lists each Dockerfile, base image, package,
    installed and fixed version, severity and CVEs;

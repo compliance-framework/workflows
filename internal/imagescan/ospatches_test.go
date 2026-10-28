@@ -286,6 +286,17 @@ func TestPublish(t *testing.T) {
 			},
 		},
 		{
+			name: "a person took the label off: the update keeps it off",
+			gh: &fakeGH{branches: map[string]string{"main": "h2", PatchBranch: "p1"}, commits: map[string][]string{"h2": {"t0"}, "p1": {tree, "h1"}},
+				pr: botPR(title), authors: []string{bot}},
+			patches: []FilePatch{patch},
+			want: []string{
+				"commit " + tree + " on h2 by " + bot + ": " + title,
+				"set image-scan/os-patches=new create=false",
+				`update #4 "` + title + `"`,
+			},
+		},
+		{
 			name:    "someone pushed to it: left alone",
 			gh:      &fakeGH{branches: map[string]string{"main": "h1", PatchBranch: "p1"}, pr: botPR(title), authors: []string{bot, "octocat"}},
 			patches: []FilePatch{patch},
