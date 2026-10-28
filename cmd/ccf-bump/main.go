@@ -30,7 +30,6 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/compliance-framework/workflows/internal/bump"
-	"github.com/compliance-framework/workflows/internal/imagescan"
 	"github.com/compliance-framework/workflows/internal/manifest"
 )
 
@@ -59,14 +58,13 @@ type GitHub interface {
 
 // env is everything run depends on, so tests can fake it.
 type env struct {
-	gh     GitHub
-	getenv func(string) string
-	stdout io.Writer
-	now    func() time.Time
-	sleep  func(time.Duration)
-	remote func(owner, repo string) string // clone/push URL
-	// digest returns the digest an image reference points at (bump.Config.Digest).
-	digest func(ctx context.Context, ref string) (string, error)
+	gh       GitHub
+	getenv   func(string) string
+	stdout   io.Writer
+	now      func() time.Time
+	sleep    func(time.Duration)
+	remote   func(owner, repo string) string // clone/push URL
+	registry bump.Registry                   // the golang images' registry (bump.Config.Registry)
 }
 
 func main() {
@@ -78,8 +76,8 @@ func main() {
 	e := env{
 		gh:     &bump.GitHub{BaseURL: base, Token: getenv("GH_TOKEN"), Owner: "compliance-framework"},
 		getenv: getenv, stdout: os.Stdout, now: time.Now, sleep: time.Sleep,
-		remote: func(owner, repo string) string { return "https://github.com/" + owner + "/" + repo + ".git" },
-		digest: imagescan.Crane{}.Digest,
+		remote:   func(owner, repo string) string { return "https://github.com/" + owner + "/" + repo + ".git" },
+		registry: bump.Crane{},
 	}
 	if err := run(context.Background(), os.Args[1:], e); err != nil {
 		fmt.Fprintln(os.Stderr, "::error::ccf-bump: "+err.Error())

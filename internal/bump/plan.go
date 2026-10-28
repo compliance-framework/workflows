@@ -74,7 +74,8 @@ func (r Ref) Pinned() string {
 	return r.Current
 }
 
-// Change moves a Ref to To, a canonical version ("v1.2.3") or, for DepWorkflows, a ref.
+// Change moves a Ref to To, a canonical version ("v1.2.3"), for DepWorkflows a ref, or for DepGo
+// the golang image pin to write (1.26.3-alpine@sha256:...).
 type Change struct {
 	Ref
 	To string
@@ -239,14 +240,14 @@ func (c Change) Major() bool {
 		}
 		return c.pinnedVersion() == "" || tag == "" || semver.Major(c.pinnedVersion()) != semver.Major(tag)
 	}
-	from := Canonical(c.Current)
-	if m := goTag.FindStringSubmatch(c.Current); c.Dep == DepGo && m != nil {
-		from = Canonical(m[1]) // the image's version, without its variant (1.26.1-alpine)
+	from, to := Canonical(c.Current), c.To
+	if c.Dep == DepGo { // golang image pins: the versions of their tags, without variant or digest
+		from, to = Canonical(goPinVersion(c.Current)), Canonical(goPinVersion(c.To))
 	}
-	if !semver.IsValid(from) || !semver.IsValid(c.To) {
+	if !semver.IsValid(from) || !semver.IsValid(to) {
 		return true
 	}
-	return semver.Major(from) != semver.Major(c.To)
+	return semver.Major(from) != semver.Major(to)
 }
 
 // Why a bump PR is not auto-merged (Change.HoldReason), in its body and ccf-bump's output.

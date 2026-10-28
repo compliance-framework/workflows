@@ -67,7 +67,7 @@ func (b *bumper) summary() {
 
 // config derives the updaters' settings for repo from its kind and dependencies.
 func (b *bumper) config(r manifest.Repo) bump.Config {
-	c := bump.Config{Owner: b.o.owner, Run: runner(b.o.owner), Digest: b.e.digest}
+	c := bump.Config{Owner: b.o.owner, Run: runner(b.o.owner), Registry: b.e.registry}
 	service := ""
 	for _, d := range r.DependsOn {
 		i := slices.IndexFunc(b.m.Repos, func(x manifest.Repo) bool { return x.Name == d })
@@ -359,7 +359,13 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	}
 	// go get may have raised the go line: the golang builder images follow it.
 	plan, followed, err := bump.FollowGo(ctx, dir, us, plan)
-	if err != nil {
+	var regErr *bump.RegistryError
+	switch {
+	case errors.As(err, &regErr) && b.o.dryRun:
+		// The train dry-runs every hour: a registry blip must not fail its plan. Nothing was
+		// written, and the live run checks again (and fails on it).
+		b.warn("%s: dry run: golang images not planned: %v", name, err)
+	case err != nil:
 		return false, err
 	}
 	if len(followed) > 0 {
@@ -571,9 +577,13 @@ func targetsOf(plan bump.Plan) []string {
 	return out
 }
 
-// shown is the version a change moves to: a shared-workflow pin's release tag, else To.
+// shown is the version a change moves to: a shared-workflow pin's release tag, a golang image's
+// tag without its digest, else To.
 func shown(c bump.Change) string {
 	if _, tag := bump.SplitWorkflowsPin(c.To); c.Dep == bump.DepWorkflows && tag != "" {
+		return tag
+	}
+	if tag, _, _ := strings.Cut(c.To, "@"); c.Dep == bump.DepGo {
 		return tag
 	}
 	return c.To

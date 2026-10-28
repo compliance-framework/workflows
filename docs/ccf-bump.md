@@ -82,26 +82,32 @@ Files are edited in place, so comments and layout stay. Chart versions are left 
 
 `go get` raises a repo's `go` line to the highest of its dependencies' (an org module that moved to
 `go 1.26.3` takes its consumers there). The official golang image sets `GOTOOLCHAIN=local`, so a
-`docker build` whose builder is older than the `go` line fails with `go.mod requires go >= 1.26.3
-(running go 1.26.1; GOTOOLCHAIN=local)`. So once the Go module changes are applied (only when the
-plan moves one), ccf-bump reads the `go` line from `go.mod` and moves each golang image below it:
+`docker build` whose builder ships an older Go than the `go` line fails with `go.mod requires go >=
+1.26.3 (running go 1.26.1; GOTOOLCHAIN=local)`. So once the Go module changes are applied (only
+when the plan moves one), ccf-bump reads the `go` line from `go.mod` and moves each golang image
+that doesn't build it:
 
 | Image | `go 1.26.3` | Why |
 | --- | --- | --- |
 | `golang:1.26.1`, `golang:1.26.1-alpine3.22` | `golang:1.26.3`, `golang:1.26.3-alpine3.22` | a full version moves to the `go` line; the variant stays |
-| `golang:1.25-bookworm` | `golang:1.26-bookworm` | a floating tag keeps its precision |
-| `golang:1.26`, `golang:1`, `golang:1.26.5`, `golang:1.27.0` | unchanged | they already build `go 1.26.3` (ccf-bump never downgrades) |
+| `golang:1.25-bookworm` | `golang:1.26-bookworm` | a floating tag keeps its precision, if `golang:1.26-bookworm` ships 1.26.3 or later (else `golang:1.26.3-bookworm`) |
+| `golang:1.26`, `golang:1` | unchanged, if the tag's image ships 1.26.3 or later (else `golang:1.26.3`) | a floating tag follows each new patch |
+| `golang:1.26@sha256:<a 1.26.1 build>` | `golang:1.26@sha256:<the tag's current build>`, or `golang:1.26.3@sha256:...` when even that ships an older Go | the digest pins one build of a floating tag: Renovate pins every `FROM` ([renovate.md](renovate.md)) |
+| `golang:1.26.5`, `golang:1.27.0` | unchanged | they build `go 1.26.3` (ccf-bump never downgrades) |
 | `golang:alpine`, `golang:latest`, `golang:${GO_VERSION}` | unchanged | not a version, or a placeholder |
 
-An image pinned by digest (`golang:1.26.1@sha256:...`, as Renovate pins them,
-[renovate.md](renovate.md)) gets the new tag's digest, read anonymously from the registry: the
-multi-platform index digest Renovate pins. The old digest is the old tag's, and dropping it would
-leave the image unpinned until Renovate's next `pinDigest` PR. If the registry can't be read, the
-repo's bump fails (the next sync run, or the train's `/retry`, tries again); the Dockerfile is
-never left with a wrong digest. The moves
-are listed in the PR as `golang` rows, and are auto-merged like any minor or patch (a
-release-candidate `go` line needs a human). Dockerfiles below the root and `FROM` lines whose
-version comes from an `ARG` are left alone.
+The Go an image ships is its config's `GOLANG_VERSION` (of the `linux/amd64` image of a
+multi-platform tag), read anonymously from the registry. ccf-bump also checks there that every tag
+it writes exists, so a variant upstream no longer publishes for the new release (an old
+`-alpine3.NN`) fails the repo's bump instead of opening a PR. An image pinned by digest gets the new
+tag's digest, the multi-platform index digest Renovate pins: the old digest is the old build's,
+and dropping it would leave the image unpinned until Renovate's next `pinDigest` PR. Every read is
+done before any file is written. If the registry can't be read, the repo's bump fails (the next sync
+run, or the train's `/retry`, tries again), and the Dockerfiles are never left with a wrong or
+missing digest; a dry run (`--dry-run`, which the train runs every hour) only warns and plans the
+rest. The moves are listed in the PR as `golang` rows (the new pin in full), and are auto-merged
+like any minor or patch (a release-candidate `go` line needs a human). Dockerfiles below the root and
+`FROM` lines whose version comes from an `ARG` are left alone.
 
 ### What counts as a pin
 

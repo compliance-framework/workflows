@@ -348,10 +348,11 @@ func TestMajor(t *testing.T) {
 		from, to string
 		major    bool
 	}{
-		{"1.26.1", "v1.26.3", false},
-		{"1.26.1-alpine3.22", "v1.27.0", false},
-		{"1.25-bookworm", "v1.26", false},
-		{"1.26.3", "v1.27rc1", true}, // a release candidate is a human's call
+		{"1.26.1", "1.26.3", false},
+		{"1.26.1-alpine3.22@" + digest("a"), "1.27.0-alpine3.22@" + digest("b"), false},
+		{"1.25-bookworm", "1.26-bookworm", false},
+		{"1.26@" + digest("a"), "1.26@" + digest("b"), false}, // a newer build of the same tag
+		{"1.26.3", "1.27rc1", true},                           // a release candidate is a human's call
 	} {
 		c := Change{Ref: Ref{Updater: goImage{}.Name(), Dep: DepGo, Current: tc.from}, To: tc.to}
 		if got := c.Major(); got != tc.major {
