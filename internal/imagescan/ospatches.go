@@ -2,10 +2,13 @@ package imagescan
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -88,6 +91,8 @@ func osPatches(dockerfiles map[string][]byte, targets []Target, fixed map[string
 type PatchGitHub interface {
 	DefaultBranch(ctx context.Context, repo string) (string, error)
 	BranchHead(ctx context.Context, repo, branch string) (string, error)
+	BranchAuthors(ctx context.Context, repo, base, head string) ([]string, error)
+	File(ctx context.Context, repo, ref, path string) ([]byte, error)
 	CommitTree(ctx context.Context, repo, sha string) (string, []string, error)
 	CreateTree(ctx context.Context, repo, base string, files map[string][]byte) (string, error)
 	CreateCommit(ctx context.Context, repo, message, tree, parent string, author bump.Identity) (string, error)
@@ -115,7 +120,10 @@ type Publisher struct {
 
 // Publish rebuilds PatchBranch from the default branch's head with patches applied and opens or
 // updates its PR, labelled renovate:automerge; with no patches it closes the PR and deletes the
-// branch. A PR with a commit by anyone but Author is left alone (Renovate's modified-branch rule).
+// branch. A branch with a commit by anyone but Author, or a PR someone else opened, is left alone,
+// PR or not (Renovate's modified-branch rule). So is a repo whose patched Dockerfiles changed on
+// the default branch since the scan read them: the patches would be committed over that change,
+// and the next run scans the new content.
 func (p *Publisher) Publish(ctx context.Context, repo string, patches []FilePatch) error {
 	pr, err := p.GH.OpenPR(ctx, repo, PatchBranch)
 	if err != nil {
@@ -131,10 +139,28 @@ func (p *Publisher) Publish(ctx context.Context, repo string, patches []FilePatc
 			return nil
 		}
 	}
-	if len(patches) == 0 {
-		if pr == nil {
+	if len(patches) == 0 && pr == nil {
+		return nil
+	}
+	base, err := p.GH.DefaultBranch(ctx, repo)
+	if err != nil {
+		return err
+	}
+	cur, err := p.GH.BranchHead(ctx, repo, PatchBranch)
+	if err != nil {
+		return err
+	}
+	if cur != "" {
+		authors, err := p.GH.BranchAuthors(ctx, repo, base, cur)
+		if err != nil {
+			return fmt.Errorf("list the commits of %s: %w", PatchBranch, err)
+		}
+		if i := slices.IndexFunc(authors, func(a string) bool { return !strings.EqualFold(a, p.Author) }); i >= 0 {
+			fmt.Fprintf(p.Out, "%s: %s has a commit by %s, not %s; left alone\n", repo, PatchBranch, cmp.Or(authors[i], "an unknown author"), p.Author)
 			return nil
 		}
+	}
+	if len(patches) == 0 {
 		if p.DryRun {
 			fmt.Fprintf(p.Out, "%s#%d: dry run: would close it (nothing to patch) and delete %s\n", repo, pr.Number, PatchBranch)
 			return nil
@@ -154,16 +180,26 @@ func (p *Publisher) Publish(ctx context.Context, repo string, patches []FilePatc
 		}
 		return nil
 	}
-	base, err := p.GH.DefaultBranch(ctx, repo)
-	if err != nil {
-		return err
-	}
 	head, err := p.GH.BranchHead(ctx, repo, base)
 	if err != nil {
 		return fmt.Errorf("head of %s: %w", base, err)
 	}
 	if head == "" {
 		return fmt.Errorf("no branch %s", base)
+	}
+	// The patches replace whole files: read them at the commit they go on, by its SHA.
+	for _, fp := range patches {
+		now, err := p.GH.File(ctx, repo, head, fp.Dockerfile)
+		if se := (*bump.StatusError)(nil); errors.As(err, &se) && se.Code == http.StatusNotFound {
+			now, err = nil, nil
+		}
+		if err != nil {
+			return fmt.Errorf("read %s at %s: %w", fp.Dockerfile, short(head), err)
+		}
+		if !bytes.Equal(now, fp.Old) {
+			fmt.Fprintf(p.Out, "%s: %s changed on %s since the scan (now %s); left for the next run to scan again\n", repo, fp.Dockerfile, base, short(head))
+			return nil
+		}
 	}
 	baseTree, _, err := p.GH.CommitTree(ctx, repo, head)
 	if err != nil {
@@ -176,10 +212,6 @@ func (p *Publisher) Publish(ctx context.Context, repo string, patches []FilePatc
 	tree, err := p.GH.CreateTree(ctx, repo, baseTree, files)
 	if err != nil {
 		return fmt.Errorf("tree: %w", err)
-	}
-	cur, err := p.GH.BranchHead(ctx, repo, PatchBranch)
-	if err != nil {
-		return err
 	}
 	// The branch already is this change on the default branch's head: no push, no new CI run.
 	same := false

@@ -90,6 +90,36 @@ func TestGitData(t *testing.T) {
 	}
 }
 
+func TestBranchAuthors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/ui/compare/main...p1":
+			fmt.Fprint(w, `{"total_commits":2,"commits":[{"author":{"login":"ccf-release-bot[bot]"}},{"author":null}]}`)
+		case "/repos/o/ui/compare/main...p2":
+			fmt.Fprint(w, `{"total_commits":0,"commits":[]}`)
+		case "/repos/o/ui/compare/main...p3":
+			fmt.Fprint(w, `{"total_commits":101,"commits":[{"author":{"login":"a"}}]}`)
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	g := &GitHub{BaseURL: srv.URL, Owner: "o"}
+	ctx := context.Background()
+	if a, err := g.BranchAuthors(ctx, "ui", "main", "p1"); err != nil || !slices.Equal(a, []string{"ccf-release-bot[bot]", ""}) {
+		t.Errorf("BranchAuthors = %q, %v; want the bot, then an unlinked author", a, err)
+	}
+	if a, err := g.BranchAuthors(ctx, "ui", "main", "p2"); err != nil || len(a) != 0 {
+		t.Errorf("BranchAuthors of a merged branch = %q, %v; want none", a, err)
+	}
+	if _, err := g.BranchAuthors(ctx, "ui", "main", "p3"); err == nil {
+		t.Error("more than a page of commits: want an error")
+	}
+	if _, err := g.BranchAuthors(ctx, "ui", "main", "nope"); err == nil {
+		t.Error("compare failed: want an error")
+	}
+}
+
 // cut3 splits "METHOD path body".
 func cut3(s string) (string, string, string) {
 	var m, p string

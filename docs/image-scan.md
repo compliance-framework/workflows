@@ -236,18 +236,22 @@ alone.
 Each repo gets one branch, **`image-scan/os-patches`**, for all its Dockerfiles. It is not under
 `renovate/`: Renovate deletes the `renovate/*` branches it doesn't know. On a live run, image-scan:
 
-1. leaves the PR alone if it wasn't opened by the bot or has a commit by anyone else (Renovate's
-   modified-branch rule; a person takes it over by pushing to it);
-2. rebuilds the branch from the default branch's head with the patched Dockerfiles, one commit
+1. leaves the repo alone if the PR wasn't opened by the bot, or if the branch has a commit that
+   isn't on the default branch by anyone else, open PR or not (Renovate's modified-branch rule; a
+   person takes it over by pushing to it, and closing the PR doesn't hand it back);
+2. leaves the repo alone, until the next run scans it again, if a patched Dockerfile at the default
+   branch's head (read by the commit's SHA) is no longer the content the scan read: the patch
+   replaces the whole file, so committing it would revert a change merged during the run;
+3. rebuilds the branch from the default branch's head with the patched Dockerfiles, one commit
    through the API, authored and committed as `ccf-release-bot[bot]` (the job's "Commit as the
    release bot" step, as in `ccf-bump-sync.yml`), and force-pushes it; when the branch already is
    that change on the current head, it pushes nothing, so CI doesn't run again;
-3. opens or updates the PR, labelled `renovate:automerge` when it opens it (a person who takes the
+4. opens or updates the PR, labelled `renovate:automerge` when it opens it (a person who takes the
    label off keeps it off): **`fix(deps): patch OS packages in
    <image> (<CVE ids>)`**, so the fix releases, or **`chore(deps): remove the OS package patches of
    <image>`** when it only removes blocks. The body lists each Dockerfile, base image, package,
    installed and fixed version, severity and CVEs;
-4. closes the PR and deletes the branch when nothing is left to patch.
+5. closes the PR and deletes the branch when nothing is left to patch.
 
 The [merge pass](renovate.md#the-merge-pass) merges `image-scan/*` PRs like `renovate/*` ones:
 labelled `renovate:automerge`, opened by the bot, every commit by the bot, not `needs-human`, once

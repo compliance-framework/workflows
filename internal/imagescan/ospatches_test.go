@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -179,13 +180,28 @@ type fakeGH struct {
 	branches map[string]string   // branch -> head commit
 	commits  map[string][]string // commit -> tree, parents...
 	pr       *bump.PR
-	authors  []string
+	authors  []string          // the PR's commits
+	branch   []string          // PatchBranch's commits that aren't on main
+	files    map[string]string // "sha:path" -> content; anything else is a 404
 	writes   []string
 }
 
 func (f *fakeGH) DefaultBranch(context.Context, string) (string, error) { return "main", nil }
 func (f *fakeGH) BranchHead(_ context.Context, _, b string) (string, error) {
 	return f.branches[b], nil
+}
+func (f *fakeGH) BranchAuthors(_ context.Context, _, base, head string) ([]string, error) {
+	if base != "main" || head != f.branches[PatchBranch] {
+		return nil, fmt.Errorf("compare %s...%s", base, head)
+	}
+	return f.branch, nil
+}
+func (f *fakeGH) File(_ context.Context, _, ref, path string) ([]byte, error) {
+	c, ok := f.files[ref+":"+path]
+	if !ok {
+		return nil, &bump.StatusError{Code: http.StatusNotFound}
+	}
+	return []byte(c), nil
 }
 func (f *fakeGH) CommitTree(_ context.Context, _, sha string) (string, []string, error) {
 	c, ok := f.commits[sha]
@@ -249,6 +265,10 @@ func TestPublish(t *testing.T) {
 	}
 	const title = "fix(deps): patch OS packages in nginx:stable-alpine (CVE-2026-111497)"
 	tree := "t0+Dockerfile=17"
+	// at is the Dockerfile at commit sha, as the scan read it.
+	at := func(sha string, p FilePatch) map[string]string {
+		return map[string]string{sha + ":Dockerfile": string(p.Old)}
+	}
 	for _, tc := range []struct {
 		name    string
 		gh      *fakeGH
@@ -259,7 +279,7 @@ func TestPublish(t *testing.T) {
 	}{
 		{
 			name:    "first run: branch, commit by the bot, PR, label",
-			gh:      &fakeGH{branches: map[string]string{"main": "h1"}, commits: map[string][]string{"h1": {"t0"}}},
+			gh:      &fakeGH{branches: map[string]string{"main": "h1"}, commits: map[string][]string{"h1": {"t0"}}, files: at("h1", patch)},
 			patches: []FilePatch{patch},
 			want: []string{
 				"commit " + tree + " on h1 by " + bot + ": " + title,
@@ -271,13 +291,13 @@ func TestPublish(t *testing.T) {
 		{
 			name: "unchanged, on the current head: no push, no update",
 			gh: &fakeGH{branches: map[string]string{"main": "h1", PatchBranch: "p1"}, commits: map[string][]string{"h1": {"t0"}, "p1": {tree, "h1"}},
-				pr: botPR(title, "renovate:automerge"), authors: []string{bot}},
+				pr: botPR(title, "renovate:automerge"), authors: []string{bot}, branch: []string{bot}, files: at("h1", patch)},
 			patches: []FilePatch{patch},
 		},
 		{
 			name: "main moved: rebuilt on the new head (force) and the PR updated",
 			gh: &fakeGH{branches: map[string]string{"main": "h2", PatchBranch: "p1"}, commits: map[string][]string{"h2": {"t0"}, "p1": {tree, "h1"}},
-				pr: botPR(title, "renovate:automerge"), authors: []string{bot}},
+				pr: botPR(title, "renovate:automerge"), authors: []string{bot}, branch: []string{bot}, files: at("h2", patch)},
 			patches: []FilePatch{patch},
 			want: []string{
 				"commit " + tree + " on h2 by " + bot + ": " + title,
@@ -288,7 +308,7 @@ func TestPublish(t *testing.T) {
 		{
 			name: "a person took the label off: the update keeps it off",
 			gh: &fakeGH{branches: map[string]string{"main": "h2", PatchBranch: "p1"}, commits: map[string][]string{"h2": {"t0"}, "p1": {tree, "h1"}},
-				pr: botPR(title), authors: []string{bot}},
+				pr: botPR(title), authors: []string{bot}, branch: []string{bot}, files: at("h2", patch)},
 			patches: []FilePatch{patch},
 			want: []string{
 				"commit " + tree + " on h2 by " + bot + ": " + title,
@@ -303,6 +323,49 @@ func TestPublish(t *testing.T) {
 			log:     "left alone",
 		},
 		{
+			name:    "no PR, but someone pushed to the branch: left alone",
+			gh:      &fakeGH{branches: map[string]string{"main": "h1", PatchBranch: "p1"}, commits: map[string][]string{"h1": {"t0"}}, branch: []string{bot, "octocat"}, files: at("h1", patch)},
+			patches: []FilePatch{patch},
+			log:     "image-scan/os-patches has a commit by octocat, not ccf-release-bot[bot]; left alone",
+		},
+		{
+			name:    "no PR, a commit GitHub can't link to an account on the branch: left alone",
+			gh:      &fakeGH{branches: map[string]string{"main": "h1", PatchBranch: "p1"}, commits: map[string][]string{"h1": {"t0"}}, branch: []string{""}, files: at("h1", patch)},
+			patches: []FilePatch{patch},
+			log:     "a commit by an unknown author",
+		},
+		{
+			name: "nothing to patch, the PR's branch has someone else's commit: not closed",
+			gh:   &fakeGH{branches: map[string]string{"main": "h1", PatchBranch: "p1"}, pr: botPR(title), authors: []string{bot}, branch: []string{"octocat"}},
+			log:  "left alone",
+		},
+		{
+			name: "no PR, only the bot's commits on the branch: rebuilt and a PR opened",
+			gh: &fakeGH{branches: map[string]string{"main": "h2", PatchBranch: "p1"}, commits: map[string][]string{"h2": {"t0"}, "p1": {tree, "h1"}},
+				branch: []string{bot}, files: at("h2", patch)},
+			patches: []FilePatch{patch},
+			want: []string{
+				"commit " + tree + " on h2 by " + bot + ": " + title,
+				"set image-scan/os-patches=new create=false",
+				`open main<-image-scan/os-patches "` + title + `"`,
+				"label #9 renovate:automerge",
+			},
+		},
+		{
+			name: "the Dockerfile changed on main since the scan: nothing written",
+			gh: &fakeGH{branches: map[string]string{"main": "h2", PatchBranch: "p1"}, commits: map[string][]string{"h2": {"t0"}, "p1": {tree, "h1"}},
+				pr: botPR(title, "renovate:automerge"), authors: []string{bot}, branch: []string{bot},
+				files: map[string]string{"h1:Dockerfile": string(patch.Old), "h2:Dockerfile": "FROM nginx:mainline\n"}},
+			patches: []FilePatch{patch},
+			log:     "Dockerfile changed on main since the scan (now h2); left for the next run",
+		},
+		{
+			name:    "the Dockerfile was deleted on main since the scan: nothing written",
+			gh:      &fakeGH{branches: map[string]string{"main": "h1"}, commits: map[string][]string{"h1": {"t0"}}},
+			patches: []FilePatch{patch},
+			log:     "changed on main since the scan",
+		},
+		{
 			name:    "a PR from the branch opened by someone else: left alone",
 			gh:      &fakeGH{branches: map[string]string{"main": "h1"}, pr: &bump.PR{Number: 4}, authors: []string{bot}},
 			patches: []FilePatch{patch},
@@ -310,7 +373,7 @@ func TestPublish(t *testing.T) {
 		},
 		{
 			name:    "only removing the block: a chore PR",
-			gh:      &fakeGH{branches: map[string]string{"main": "h1"}, commits: map[string][]string{"h1": {"t0"}}},
+			gh:      &fakeGH{branches: map[string]string{"main": "h1"}, commits: map[string][]string{"h1": {"t0"}}, files: at("h1", removal)},
 			patches: []FilePatch{removal},
 			want: []string{
 				"commit t0+Dockerfile=11 on h1 by " + bot + ": chore(deps): remove the OS package patches of nginx:stable-alpine",
@@ -321,7 +384,7 @@ func TestPublish(t *testing.T) {
 		},
 		{
 			name: "nothing to patch any more: the PR is closed and the branch deleted",
-			gh:   &fakeGH{branches: map[string]string{"main": "h1", PatchBranch: "p1"}, pr: botPR(title), authors: []string{bot}},
+			gh:   &fakeGH{branches: map[string]string{"main": "h1", PatchBranch: "p1"}, pr: botPR(title), authors: []string{bot}, branch: []string{bot}},
 			want: []string{"close #4", "delete image-scan/os-patches"},
 		},
 		{

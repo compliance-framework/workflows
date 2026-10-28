@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 )
 
@@ -93,4 +94,30 @@ func (g *GitHub) SetBranch(ctx context.Context, repo, branch, sha string, create
 	}
 	in := map[string]any{"sha": sha, "force": true}
 	return g.do(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", g.Owner, repo, branch), in, nil)
+}
+
+// BranchAuthors returns the author logins of the commits on head that aren't on base (GitHub's
+// compare), "" for a commit GitHub doesn't link to an account. It refuses more than 100 commits.
+func (g *GitHub) BranchAuthors(ctx context.Context, repo, base, head string) ([]string, error) {
+	var cmp struct {
+		TotalCommits int `json:"total_commits"`
+		Commits      []struct {
+			Author *struct {
+				Login string `json:"login"`
+			} `json:"author"`
+		} `json:"commits"`
+	}
+	if err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/compare/%s...%s?per_page=100", g.Owner, repo, url.PathEscape(base), url.PathEscape(head)), nil, &cmp); err != nil {
+		return nil, err
+	}
+	if cmp.TotalCommits > len(cmp.Commits) {
+		return nil, fmt.Errorf("%s has %d commits that aren't on %s, more than one page", head, cmp.TotalCommits, base)
+	}
+	out := make([]string, len(cmp.Commits))
+	for i, c := range cmp.Commits {
+		if c.Author != nil {
+			out[i] = c.Author.Login
+		}
+	}
+	return out, nil
 }

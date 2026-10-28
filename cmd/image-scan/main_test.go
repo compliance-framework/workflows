@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -72,8 +73,12 @@ func (f fakeScanner) Scan(_ context.Context, ref string) (*imagescan.Scan, error
 	return &imagescan.Scan{Ref: ref, Findings: fs, PackageManager: pm}, nil
 }
 
-// fakePatchGH is a repo with no image-scan/os-patches branch or PR; it records the writes.
-type fakePatchGH struct{ calls []string }
+// fakePatchGH is a repo with no image-scan/os-patches branch or PR, whose default branch's head
+// commit "head" holds files; it records the writes.
+type fakePatchGH struct {
+	files fakeFiles
+	calls []string
+}
 
 func (f *fakePatchGH) DefaultBranch(context.Context, string) (string, error) { return "main", nil }
 func (f *fakePatchGH) BranchHead(_ context.Context, _, branch string) (string, error) {
@@ -81,6 +86,16 @@ func (f *fakePatchGH) BranchHead(_ context.Context, _, branch string) (string, e
 		return "head", nil
 	}
 	return "", nil
+}
+func (f *fakePatchGH) BranchAuthors(context.Context, string, string, string) ([]string, error) {
+	return nil, errors.New("no branch")
+}
+func (f *fakePatchGH) File(_ context.Context, repo, ref, path string) ([]byte, error) {
+	c, ok := f.files[repo+"/"+path]
+	if ref != "head" || !ok {
+		return nil, &bump.StatusError{Code: http.StatusNotFound}
+	}
+	return []byte(c), nil
 }
 func (f *fakePatchGH) CommitTree(context.Context, string, string) (string, []string, error) {
 	return "tree0", nil, nil
@@ -217,10 +232,11 @@ func TestScan(t *testing.T) {
 // image-scan/os-patches branch and opens its PR, labelled renovate:automerge.
 func TestScanLive(t *testing.T) {
 	libc := imagescan.Finding{Package: "libc6", Type: imagescan.TypeOS, Installed: "2.36-9+deb12u13", Fixed: []string{"2.36-9+deb12u14"}, IDs: []string{"DEBIAN-CVE-2025-15281"}, Aliases: []string{"CVE-2025-15281"}, Score: 7.5}
-	gh := &fakePatchGH{}
+	files := fakeFiles{"mock-agent-action/Dockerfile": "FROM debian:bookworm-slim\nUSER app\n"}
+	gh := &fakePatchGH{files: files}
 	d := &deps{
 		patches:  gh,
-		files:    fakeFiles{"mock-agent-action/Dockerfile": "FROM debian:bookworm-slim\nUSER app\n"},
+		files:    files,
 		scanner:  fakeScanner{"debian:bookworm-slim": {libc}},
 		registry: fakeRegistry{},
 		eol:      fakeEOL{},
