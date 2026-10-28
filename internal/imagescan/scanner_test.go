@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -137,20 +138,35 @@ func (f *fakeDocker) mount(args []string) string {
 // from testdata/osv/vulns/<id>.json, with an unrecorded ID answered 404 as the real API answers an
 // ID it has no record of (CVE-2026-111943, a curl CVE in OSV only as CURL-CVE-...).
 type fakeOSV struct {
-	fetched []string // the IDs /v1/vulns was asked for, once per request
-	down    bool     // /v1/vulns answers 503
-	hang    bool     // /v1/vulns never answers (until the client gives up)
+	mu      *sync.Mutex // guards fetched and fail: a hung request's handler runs next to the next one's
+	fetched []string    // the IDs /v1/vulns was asked for, once per request
+	down    bool        // /v1/vulns answers 503
+	hang    bool        // /v1/vulns never answers (until the client gives up)
 	// fail answers an ID with failCode (503 by default) its first n times; n < 0 is always.
 	fail       map[string]int
 	failCode   int
 	retryAfter string // the failures' Retry-After header
 }
 
+// requests returns the IDs /v1/vulns was asked for so far.
+func (f *fakeOSV) requests() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.fetched)
+}
+
 func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
 	t.Helper()
+	f.mu = &sync.Mutex{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if id, ok := strings.CutPrefix(r.URL.Path, "/v1/vulns/"); ok && r.Method == http.MethodGet {
+			f.mu.Lock()
 			f.fetched = append(f.fetched, id)
+			n := f.fail[id]
+			if n > 0 {
+				f.fail[id] = n - 1
+			}
+			f.mu.Unlock()
 			if f.hang {
 				select {
 				case <-r.Context().Done():
@@ -158,10 +174,7 @@ func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
 				}
 				return
 			}
-			if n := f.fail[id]; f.down || n != 0 {
-				if n > 0 {
-					f.fail[id] = n - 1
-				}
+			if f.down || n != 0 {
 				code := cmp.Or(f.failCode, http.StatusServiceUnavailable)
 				if f.retryAfter != "" {
 					w.Header().Set("Retry-After", f.retryAfter)

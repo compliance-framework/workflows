@@ -56,8 +56,8 @@ func TestRateFromAliases(t *testing.T) {
 		"BIT-golang-2026-97032",
 		"CVE-2026-111943", "RUSTSEC-2026-0381", "RUSTSEC-2026-0382", "RUSTSEC-2026-0383",
 	}
-	if !slices.Equal(osv.fetched, wantFetched) {
-		t.Errorf("fetched %q, want %q", osv.fetched, wantFetched)
+	if !slices.Equal(osv.requests(), wantFetched) {
+		t.Errorf("fetched %q, want %q", osv.requests(), wantFetched)
 	}
 	golden(t, filepath.Join("testdata", "findings", "agent_latest.golden.json"), scan)
 
@@ -65,8 +65,8 @@ func TestRateFromAliases(t *testing.T) {
 	if _, err := s.Scan(context.Background(), "ghcr.io/compliance-framework/agent:main"); err != nil {
 		t.Fatal(err)
 	}
-	if len(osv.fetched) != len(wantFetched) {
-		t.Errorf("second scan fetched %q again, want the run's cache", osv.fetched[len(wantFetched):])
+	if len(osv.requests()) != len(wantFetched) {
+		t.Errorf("after the second scan fetched %q, want nothing more than the first scan (the run's cache)", osv.requests())
 	}
 }
 
@@ -85,8 +85,8 @@ func TestRateFromAliasesOSVDown(t *testing.T) {
 			t.Errorf("%s: %s from %q, want UNKNOWN", f.IDs[0], f.Severity(), f.ScoreFrom)
 		}
 	}
-	if len(osv.fetched) != 2*maxLookupFailures {
-		t.Errorf("fetched %q, want %d lookups, each retried once, and then none", osv.fetched, maxLookupFailures)
+	if len(osv.requests()) != 2*maxLookupFailures {
+		t.Errorf("fetched %q, want %d lookups, each retried once, and then none", osv.requests(), maxLookupFailures)
 	}
 	if len(scan.Warnings) != 1 || !strings.Contains(scan.Warnings[0], "the severity of 4 finding(s) may be too low") || !strings.Contains(scan.Warnings[0], "503") {
 		t.Errorf("warnings = %q, want one for the 4 findings with aliases, with the error", scan.Warnings)
@@ -136,8 +136,8 @@ func TestRateFromAliasesOutageBound(t *testing.T) {
 					t.Errorf("%s: warnings %q, want one", ref, scan.Warnings)
 				}
 			}
-			if len(osv.fetched) != tc.requests {
-				t.Errorf("%d images made %d requests (%q), want %d", len(refs), len(osv.fetched), osv.fetched, tc.requests)
+			if len(osv.requests()) != tc.requests {
+				t.Errorf("%d images made %d requests (%q), want %d", len(refs), len(osv.requests()), osv.requests(), tc.requests)
 			}
 			// maxTrippedImages*maxLookupFailures attempts of 50ms, with room for a slow runner.
 			if d := time.Since(start); d > 3*time.Second {
@@ -201,8 +201,8 @@ func TestRateFromAliasesTiers(t *testing.T) {
 			if fs[0].Score != tc.score || fs[0].ScoreFrom != tc.from || fs[0].Severity() != tc.severity {
 				t.Errorf("score %v from %q (%s), want %v from %q (%s)", fs[0].Score, fs[0].ScoreFrom, fs[0].Severity(), tc.score, tc.from, tc.severity)
 			}
-			if !slices.Equal(fake.fetched, tc.fetched) {
-				t.Errorf("fetched %q, want %q", fake.fetched, tc.fetched)
+			if !slices.Equal(fake.requests(), tc.fetched) {
+				t.Errorf("fetched %q, want %q", fake.requests(), tc.fetched)
 			}
 		})
 	}
