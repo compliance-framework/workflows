@@ -1,0 +1,2 @@
+lisa-design:
+- The golang image test fixtures are written by the tests (TempDir), not kept in testdata: Renovate scans this repo's testdata Dockerfiles and would bump/pin them, breaking the expected output.
