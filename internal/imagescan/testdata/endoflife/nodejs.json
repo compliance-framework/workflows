@@ -1,0 +1,215 @@
+{
+  "result": {
+    "name": "nodejs",
+    "releases": [
+      {
+        "name": "26",
+        "isEol": false,
+        "eolFrom": "2029-04-30",
+        "latest": {
+          "name": "26.12.1"
+        }
+      },
+      {
+        "name": "25",
+        "isEol": true,
+        "eolFrom": "2026-06-01",
+        "latest": {
+          "name": "25.9.0"
+        }
+      },
+      {
+        "name": "24",
+        "isEol": false,
+        "eolFrom": "2028-04-30",
+        "latest": {
+          "name": "24.22.1"
+        }
+      },
+      {
+        "name": "23",
+        "isEol": true,
+        "eolFrom": "2025-06-01",
+        "latest": {
+          "name": "23.11.1"
+        }
+      },
+      {
+        "name": "22",
+        "isEol": false,
+        "eolFrom": "2027-04-30",
+        "latest": {
+          "name": "22.23.4"
+        }
+      },
+      {
+        "name": "21",
+        "isEol": true,
+        "eolFrom": "2024-06-01",
+        "latest": {
+          "name": "21.7.3"
+        }
+      },
+      {
+        "name": "20",
+        "isEol": true,
+        "eolFrom": "2026-04-30",
+        "latest": {
+          "name": "20.20.2"
+        }
+      },
+      {
+        "name": "19",
+        "isEol": true,
+        "eolFrom": "2023-06-01",
+        "latest": {
+          "name": "19.9.0"
+        }
+      },
+      {
+        "name": "18",
+        "isEol": true,
+        "eolFrom": "2025-04-30",
+        "latest": {
+          "name": "18.20.8"
+        }
+      },
+      {
+        "name": "17",
+        "isEol": true,
+        "eolFrom": "2022-06-01",
+        "latest": {
+          "name": "17.9.1"
+        }
+      },
+      {
+        "name": "16",
+        "isEol": true,
+        "eolFrom": "2023-09-11",
+        "latest": {
+          "name": "16.20.2"
+        }
+      },
+      {
+        "name": "15",
+        "isEol": true,
+        "eolFrom": "2021-06-01",
+        "latest": {
+          "name": "15.14.0"
+        }
+      },
+      {
+        "name": "14",
+        "isEol": true,
+        "eolFrom": "2023-04-30",
+        "latest": {
+          "name": "14.21.3"
+        }
+      },
+      {
+        "name": "13",
+        "isEol": true,
+        "eolFrom": "2020-06-01",
+        "latest": {
+          "name": "13.14.0"
+        }
+      },
+      {
+        "name": "12",
+        "isEol": true,
+        "eolFrom": "2022-04-30",
+        "latest": {
+          "name": "12.22.12"
+        }
+      },
+      {
+        "name": "11",
+        "isEol": true,
+        "eolFrom": "2019-06-30",
+        "latest": {
+          "name": "11.15.0"
+        }
+      },
+      {
+        "name": "10",
+        "isEol": true,
+        "eolFrom": "2021-04-30",
+        "latest": {
+          "name": "10.24.1"
+        }
+      },
+      {
+        "name": "9",
+        "isEol": true,
+        "eolFrom": "2018-06-30",
+        "latest": {
+          "name": "9.11.2"
+        }
+      },
+      {
+        "name": "8",
+        "isEol": true,
+        "eolFrom": "2019-12-31",
+        "latest": {
+          "name": "8.17.0"
+        }
+      },
+      {
+        "name": "7",
+        "isEol": true,
+        "eolFrom": "2017-06-30",
+        "latest": {
+          "name": "7.10.1"
+        }
+      },
+      {
+        "name": "6",
+        "isEol": true,
+        "eolFrom": "2019-04-30",
+        "latest": {
+          "name": "6.17.1"
+        }
+      },
+      {
+        "name": "5",
+        "isEol": true,
+        "eolFrom": "2016-06-30",
+        "latest": {
+          "name": "5.12.0"
+        }
+      },
+      {
+        "name": "4",
+        "isEol": true,
+        "eolFrom": "2018-04-30",
+        "latest": {
+          "name": "4.9.1"
+        }
+      },
+      {
+        "name": "3",
+        "isEol": true,
+        "eolFrom": null,
+        "latest": {
+          "name": "3.3.1"
+        }
+      },
+      {
+        "name": "2",
+        "isEol": true,
+        "eolFrom": null,
+        "latest": {
+          "name": "2.5.0"
+        }
+      },
+      {
+        "name": "1",
+        "isEol": true,
+        "eolFrom": null,
+        "latest": {
+          "name": "1.8.4"
+        }
+      }
+    ]
+  }
+}

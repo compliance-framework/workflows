@@ -12,6 +12,15 @@
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "golangci/golangci-lint",
       "packageNameTemplate": "golangci/golangci-lint"
+    },
+    {
+      "description": "The osv-scanner image that image-scan runs (internal/imagescan's ScannerImage, see docs/image-scan.md) is a Go string constant, which no manager reads, so this tracks it as the Docker image it is, tag and digest.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^internal/imagescan/scanner\\.go$/"],
+      "matchStrings": [
+        "const ScannerImage = \"(?<depName>[^:\"]+):(?<currentValue>[^@\"]+)@(?<currentDigest>sha256:[0-9a-f]{64})\""
+      ],
+      "datasourceTemplate": "docker"
     }
   ]
 }

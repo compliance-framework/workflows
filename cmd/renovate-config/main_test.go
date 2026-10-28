@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -69,6 +71,45 @@ func TestRunConfig(t *testing.T) {
 	}
 	if cfg.Onboarding == nil || *cfg.Onboarding {
 		t.Errorf("onboarding = %v, want false", cfg.Onboarding)
+	}
+}
+
+func TestRunConfigOverrides(t *testing.T) {
+	dir := t.TempDir()
+	base := []string{"config", "--manifest", "../../internal/manifest/testdata/mock.yaml", "--repos", "mock-ui", "--preset", "../../renovate/default.json"}
+	rules := func(t *testing.T, args ...string) []map[string]any {
+		t.Helper()
+		var out bytes.Buffer
+		if err := run(append(slices.Clone(base), args...), &out, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		var cfg struct {
+			PackageRules []map[string]any `json:"packageRules"`
+		}
+		if err := json.Unmarshal(out.Bytes(), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		return cfg.PackageRules
+	}
+	preset := rules(t)
+	// A missing file (no image-scan artifact) adds nothing.
+	if got := rules(t, "--overrides", filepath.Join(dir, "missing.json")); len(got) != len(preset) {
+		t.Errorf("missing overrides: %d rules, want the preset's %d", len(got), len(preset))
+	}
+	file := filepath.Join(dir, "overrides.json")
+	write := func(s string) {
+		if err := os.WriteFile(file, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`[{"matchRepositories": ["compliance-framework/mock-ui"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"], "matchUpdateTypes": ["digest"], "automerge": true}]`)
+	got := rules(t, "--overrides", file)
+	if len(got) != len(preset)+1 || got[len(got)-1]["matchDepNames"] == nil {
+		t.Errorf("overrides: %d rules, want the preset's %d then the override last", len(got), len(preset))
+	}
+	write(`[{"matchRepositories": ["compliance-framework/mock-api"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`)
+	if err := run(append(slices.Clone(base), "--overrides", file), io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "not in this run") {
+		t.Errorf("override for a repo outside the run: err = %v", err)
 	}
 }
 

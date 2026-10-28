@@ -26,8 +26,9 @@ The plan for this work lives in `local-dev/docs/release-automation/`.
 | `internal/notify` | The CI incident rules (which runs, incident key, transitions), the incident and needs-human cards, and a plain-text Slack client on `internal/slackkit` ([docs/notify.md](docs/notify.md)). |
 | `internal/ciworkflows` | Tests that run the CI workflows' shell steps locally against fixtures. |
 | `internal/reposettings` | The desired repo settings and rulesets, the current-vs-desired diff, and the GitHub client [`repo-settings.yml`](#repo-settings) uses. |
+| `internal/imagescan` | The image scan: the Dockerfile parser, osv-scanner and the runtime check, and the Renovate rules that fix what a newer base image fixes ([docs/image-scan.md](docs/image-scan.md)). |
 | `internal/release` | The release rules: the release-please PR checks, the next release-candidate tag, the preview tags, the release tags and the chart a helm release tag is for. |
-| `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`; `cmd/release` runs the `internal/release` rules for the release workflows; `cmd/repo-settings` syncs repo settings. |
+| `cmd/` | Go tools. `cmd/manifest` validates a manifest and prints its stages; `cmd/notify` is the logic behind `notify-failure.yml`; `cmd/release` runs the `internal/release` rules for the release workflows; `cmd/repo-settings` syncs repo settings; `cmd/image-scan` scans the container images for `renovate.yml`. |
 | `.github/workflows/` | This repo's own CI (`ci.yml`) and release (`self-release.yml`), and the reusable workflows (`ci-common.yml`, `notify-failure.yml`, the `ci-<kind>.yml` kind CI workflows and the [release workflows](#release-workflows)). |
 | `release-please/defaults.json` | The release-please settings every repo's `release-please-config.json` copies. |
 | `.golangci.yml`, `.regal/config.yaml` | Shared lint base configs, used by the CI workflows when the calling repo has none. |
@@ -886,6 +887,10 @@ non-majors grouped, Dockerfile base images pinned by digest so upstream rebuilds
 and security fixes grouped per package manager, merged as `ccf-release-bot` once
 the required check passes: by Renovate, and by a merge pass right after each live run, since
 Renovate merges only one PR per repo per run).
+Before Renovate, an `image-scan` job scans the shard's container images (osv-scanner plus a check of
+the Node runtime against OSV) and adds Renovate rules that open the fixes: a newer image of the same
+tag as a grouped, auto-merged security PR, an end-of-life Node, Debian or Alpine release moved to the
+lowest supported one that fixes it, for a human ([docs/image-scan.md](docs/image-scan.md)).
 Scheduled runs are dry runs until the repo variable `RENOVATE_LIVE` is `true`. See
 [docs/renovate.md](docs/renovate.md).
 
