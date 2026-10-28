@@ -1,5 +1,5 @@
 // Package automerge merges a bot's green PRs through the API as the token's identity: `ccf-bump
-// merge` (ccf-bump/* branches) and `renovate-config merge` (renovate/* branches). GitHub's native
+// merge` (ccf-bump/* branches) and `renovate-config merge` (renovate/* and image-scan/* branches). GitHub's native
 // auto-merge never applies the ccf-review bypass of ccf-release-bot, so a bot PR with a green
 // required check would otherwise wait for a person (docs/ccf-bump.md, docs/renovate.md).
 package automerge
@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,19 +33,19 @@ type CommitAuthors interface {
 	PRCommitAuthors(ctx context.Context, repo string, number int) ([]string, error)
 }
 
-// Merger is one merge pass: it merges the open PRs labelled Label, from a BranchPrefix* branch of
+// Merger is one merge pass: it merges the open PRs labelled Label, from a branch of
 // the repo itself (not a fork), opened by Author and not labelled needs-human, once the newest
 // run of Required on the head succeeded and GitHub reports the PR mergeable.
 type Merger struct {
-	GH           GitHub
-	Tool         string // names the tool in ::error:: lines, e.g. "ccf-bump"
-	Owner        string // the repos' owner
-	Label        string // e.g. bump.AutomergeLabel
-	BranchPrefix string // e.g. "ccf-bump/"
-	Author       string // the bot's login (the token's identity)
-	Required     string // the check that must pass on the head, e.g. "ci / required"
-	Wait         time.Duration
-	DryRun       bool
+	GH             GitHub
+	Tool           string   // names the tool in ::error:: lines, e.g. "ccf-bump"
+	Owner          string   // the repos' owner
+	Label          string   // e.g. bump.AutomergeLabel
+	BranchPrefixes []string // a PR's branch starts with one of these, e.g. "ccf-bump/"
+	Author         string   // the bot's login (the token's identity)
+	Required       string   // the check that must pass on the head, e.g. "ci / required"
+	Wait           time.Duration
+	DryRun         bool
 	// Commits, when set, also requires every commit of the PR to be authored by Author, so a PR
 	// someone else pushed to is left for a person (Renovate's own "modified branch" rule).
 	Commits CommitAuthors
@@ -119,9 +120,9 @@ func (m *Merger) candidates(ctx context.Context, repo string) ([]*candidate, err
 		c := &candidate{repo: repo, pr: p}
 		switch {
 		case !p.HasLabel(m.Label):
-		case !strings.HasPrefix(p.Head.Ref, m.BranchPrefix) || p.Head.Repo == nil ||
+		case !slices.ContainsFunc(m.BranchPrefixes, func(b string) bool { return strings.HasPrefix(p.Head.Ref, b) }) || p.Head.Repo == nil ||
 			!strings.EqualFold(p.Head.Repo.FullName, m.Owner+"/"+repo) || !strings.EqualFold(p.User.Login, m.Author):
-			fmt.Fprintf(m.Out, "%s: labelled %s, but not a %s* branch of the repo opened by %s; left alone\n", c, m.Label, m.BranchPrefix, m.Author)
+			fmt.Fprintf(m.Out, "%s: labelled %s, but not a %s* branch of the repo opened by %s; left alone\n", c, m.Label, strings.Join(m.BranchPrefixes, "* or "), m.Author)
 		case p.HasLabel(bump.NeedsHumanLabel):
 			fmt.Fprintf(m.Out, "%s: labelled %s; left for a person\n", c, bump.NeedsHumanLabel)
 		default:

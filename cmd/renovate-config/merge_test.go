@@ -110,11 +110,14 @@ func TestMergeCandidates(t *testing.T) {
 			renovatePR(8, "renovate/security-gomod-y", bot),                    // an unlinked author pushed to it
 			unlabelled,
 			renovatePR(10, "renovate/security-gomod-z", bot), // no commits listed
+			renovatePR(11, "image-scan/os-patches", bot),     // image-scan's OS package patches
+			renovatePR(12, "image-scan/os-patches", bot),     // a person pushed to it
+			renovatePR(13, "imagescan/os-patches", bot),      // not image-scan/
 		}},
 		checks:  map[string][][]bump.CheckRun{},
-		authors: map[int][]string{1: {bot}, 2: {bot, bot}, 7: {bot, "someone"}, 8: {""}},
+		authors: map[int][]string{1: {bot}, 2: {bot, bot}, 7: {bot, "someone"}, 8: {""}, 11: {bot}, 12: {bot, "someone"}, 13: {bot}},
 	}
-	for n := 1; n <= 10; n++ {
+	for n := 1; n <= 13; n++ {
 		gh.checks[fmt.Sprintf("sha%d", n)] = green()
 	}
 	out, _, err := runMerge(t, gh, "--repos", "mock-plugin-1", "--dry-run", "off")
@@ -124,6 +127,7 @@ func TestMergeCandidates(t *testing.T) {
 	want := []string{
 		`mock-plugin-1#1 sha1 "fix(deps): update security fixes 1 (#1)"`,
 		`mock-plugin-1#2 sha2 "fix(deps): update security fixes 2 (#2)"`,
+		`mock-plugin-1#11 sha11 "fix(deps): update security fixes 11 (#11)"`,
 	}
 	if !slices.Equal(gh.merges, want) {
 		t.Errorf("merges %q, want %q\n%s", gh.merges, want, out)
@@ -132,9 +136,11 @@ func TestMergeCandidates(t *testing.T) {
 		t.Errorf("client owner %q, want compliance-framework", gh.owner)
 	}
 	for _, s := range []string{
-		"mock-plugin-1#3: labelled renovate:automerge, but not a renovate/* branch of the repo opened by ccf-release-bot[bot]; left alone",
-		"mock-plugin-1#4: labelled renovate:automerge, but not a renovate/* branch",
-		"mock-plugin-1#5: labelled renovate:automerge, but not a renovate/* branch",
+		"mock-plugin-1#3: labelled renovate:automerge, but not a renovate/* or image-scan/* branch of the repo opened by ccf-release-bot[bot]; left alone",
+		"mock-plugin-1#4: labelled renovate:automerge, but not a renovate/* or image-scan/* branch",
+		"mock-plugin-1#5: labelled renovate:automerge, but not a renovate/* or image-scan/* branch",
+		"mock-plugin-1#12: not every commit is authored by ccf-release-bot[bot]; left for a person",
+		"mock-plugin-1#13: labelled renovate:automerge, but not a renovate/* or image-scan/* branch",
 		"mock-plugin-1#6: labelled needs-human; left for a person",
 		"mock-plugin-1#7: not every commit is authored by ccf-release-bot[bot]; left for a person",
 		"mock-plugin-1#8: not every commit is authored by ccf-release-bot[bot]; left for a person",

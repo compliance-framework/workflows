@@ -243,10 +243,11 @@ Runs hourly at minute 17 and on `workflow_dispatch`, as three jobs:
    that have Dockerfiles (kinds `go-service`, `ui` and `action`). The job outputs both lists and the
    slot.
 2. **`image-scan`**, when the shard has image repos: scans their container images and writes the
-   Renovate package rules that fix what a newer base image fixes, with a read-only
-   `ccf-release-bot` token scoped to those repos, on dry runs too ([image-scan.md](image-scan.md)).
-   It uploads the rules as the `image-scan-overrides` artifact and writes its report to the step
-   summary.
+   Renovate package rules that fix what a newer base image fixes, with a `ccf-release-bot` token
+   scoped to those repos, on dry runs too ([image-scan.md](image-scan.md)). It uploads the rules as
+   the `image-scan-overrides` artifact and writes its report to the step summary. A live run also
+   opens or updates each repo's `image-scan/os-patches` PR for OS package fixes the base image
+   doesn't ship yet (Contents and Pull requests write; a dry run's token reads only).
 3. **`renovate`**, once `select` succeeded, whether `image-scan` succeeded, failed or was skipped:
    1. It downloads the `image-scan-overrides` artifact when there is one.
    2. `go run ./cmd/renovate-config config` writes the Renovate global config: the preset's settings
@@ -311,7 +312,8 @@ PR's checks are read and what is pending), and merges each open PR that is all o
 
 - labelled `renovate:automerge`: the preset adds it to what it auto-merges, the non-major group and
   non-major security fixes, and never to majors or OPA updates;
-- from a `renovate/*` branch of the repo itself (not a fork), opened by `--author` (the workflow
+- from a `renovate/*` branch of the repo itself (not a fork), or an `image-scan/*` one (image-scan's
+  [OS package patches](image-scan.md#os-package-patches)), opened by `--author` (the workflow
   passes the token's app, `ccf-release-bot[bot]`);
 - with every commit authored by `--author`: Renovate commits through the API as the app, so a commit
   by anyone else means a person pushed to the branch, and the PR is left for them (Renovate's own

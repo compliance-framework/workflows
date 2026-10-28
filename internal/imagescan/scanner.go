@@ -64,6 +64,9 @@ type Scan struct {
 	Ref      string
 	OS       string // as osv-scanner names it, e.g. "Alpine Linux v3.24"; "" if unknown
 	Findings []Finding
+	// PackageManager is APK or APT when the image has a shell and that package manager, which
+	// the OS package patches need; "" otherwise (distroless, scratch).
+	PackageManager string
 }
 
 // Scanner scans images with osv-scanner, run from its image with Docker, plus the runtime check.
@@ -142,7 +145,23 @@ func (s *Scanner) Scan(ctx context.Context, ref string) (*Scan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Scan{Ref: ref, OS: osName, Findings: append(findings, rt...)}, nil
+	return &Scan{Ref: ref, OS: osName, Findings: append(findings, rt...), PackageManager: s.packageManager(ctx, ref)}, nil
+}
+
+// packageManager finds apk or apt-get in ref with its shell (with no network). No shell (distroless)
+// or neither of them is "".
+func (s *Scanner) packageManager(ctx context.Context, ref string) string {
+	out, err := s.Run.Run(ctx, "docker", "run", "--rm", "--network", "none", "--entrypoint", "/bin/sh", ref, "-c", "command -v apk || command -v apt-get")
+	if err != nil {
+		return ""
+	}
+	switch filepath.Base(strings.TrimSpace(string(out))) {
+	case APK:
+		return APK
+	case APT:
+		return APT
+	}
+	return ""
 }
 
 // runtimes finds the runtimes of Runtimes in ref, by their version variable or else by running

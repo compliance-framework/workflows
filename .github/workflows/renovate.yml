@@ -89,8 +89,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   # Scans the shard's container images and plans Renovate rules for what a newer base image fixes
-  # (docs/image-scan.md). Read-only: its only outputs are the overrides artifact and the step
-  # summary. Dry runs scan too; only the Renovate config they get is a dry run's.
+  # (docs/image-scan.md), uploaded as the overrides artifact, with a report in the step summary. A
+  # live run also opens or updates each repo's image-scan/os-patches PR for OS package fixes the
+  # base image doesn't ship yet; a dry run only logs it. Dry runs scan too; only the Renovate config
+  # they get is a dry run's.
   image-scan:
     name: image-scan
     needs: [select]
@@ -107,8 +109,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      # Read-only, for the image repos alone: they are a subset of select's, so the list is never
-      # empty here (the job is skipped otherwise), and an empty list would reach every repo.
+      # For the image repos alone: they are a subset of select's, so the list is never empty here
+      # (the job is skipped otherwise), and an empty list would reach every repo.
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: token
         with:
@@ -116,7 +118,20 @@ jobs:
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
           owner: compliance-framework
           repositories: ${{ needs.select.outputs.image-repos }}
-          permission-contents: read # caller workflows (their images input) and Dockerfiles
+          # A dry run writes nothing, so its token can't either.
+          permission-contents: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # caller workflows and Dockerfiles; the os-patches branch
+          permission-pull-requests: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # the os-patches PR and its label
+      # The os-patches commits are authored by the bot, so the merge pass's every-commit rule holds.
+      - name: Commit as the release bot
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          SLUG: ${{ steps.token.outputs.app-slug }}
+        run: |
+          id="$(gh api "/users/${SLUG}%5Bbot%5D" --jq .id)"
+          {
+            echo "GIT_AUTHOR_NAME=${SLUG}[bot]"
+            echo "GIT_AUTHOR_EMAIL=${id}+${SLUG}[bot]@users.noreply.github.com"
+          } >> "$GITHUB_ENV"
       - name: Choose the database cache key
         id: cache-key
         run: echo "key=osv-scanner-db-$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
@@ -130,10 +145,12 @@ jobs:
       - name: Scan the images
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          SLUG: ${{ steps.token.outputs.app-slug }}
           IMAGE_REPOS: ${{ needs.select.outputs.image-repos }}
         run: |
           mkdir -p ~/.cache/osv-scanner "$RUNNER_TEMP/image-scan"
           go run ./cmd/image-scan scan --manifest "$MANIFEST" --repos "$IMAGE_REPOS" --dry-run "$DRY_RUN" \
+            --author "${SLUG}[bot]" \
             --cache-dir ~/.cache/osv-scanner \
             --overrides "$RUNNER_TEMP/image-scan/overrides.json" \
             --summary "$GITHUB_STEP_SUMMARY"

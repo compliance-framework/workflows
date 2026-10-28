@@ -890,7 +890,8 @@ Renovate merges only one PR per repo per run).
 Before Renovate, an `image-scan` job scans the shard's container images (osv-scanner plus a check of
 the Node runtime against OSV) and adds Renovate rules that open the fixes: a newer image of the same
 tag as a grouped, auto-merged security PR, an end-of-life Node, Debian or Alpine release moved to the
-lowest supported one that fixes it, for a human ([docs/image-scan.md](docs/image-scan.md)).
+lowest supported one that fixes it, for a human, and OS package fixes the base image lacks patched
+in the Dockerfile on an `image-scan/os-patches` PR ([docs/image-scan.md](docs/image-scan.md)).
 Scheduled runs are dry runs until the repo variable `RENOVATE_LIVE` is `true`. See
 [docs/renovate.md](docs/renovate.md).
 

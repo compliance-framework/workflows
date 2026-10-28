@@ -33,6 +33,7 @@ type fakeImage struct {
 	report string   // testdata/osv-scanner file; "" for an image with no packages (exit 128)
 	env    []string // Config.Env
 	node   string   // what `node --version` prints; "" when there is no node binary
+	pm     string   // APK or APT; "" for an image without a shell or package manager
 }
 
 func (f *fakeDocker) Run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -57,6 +58,11 @@ func (f *fakeDocker) Run(_ context.Context, name string, args ...string) ([]byte
 			return nil, &ExitError{Code: 1, Stderr: "No such image: " + last}
 		}
 		return json.Marshal(img.env)
+	case args[0] == "run" && slices.Contains(args, "/bin/sh"):
+		if pm := f.images[args[len(args)-3]].pm; pm != "" {
+			return []byte("/sbin/" + pm + "\n"), nil
+		}
+		return nil, &ExitError{Code: 127, Stderr: `exec: "/bin/sh": stat /bin/sh: no such file or directory`}
 	case args[0] == "run" && slices.Contains(args, "--entrypoint"):
 		ref := args[len(args)-2]
 		if v := f.images[ref].node; v != "" {
@@ -120,8 +126,8 @@ func osvServer(t *testing.T) *httptest.Server {
 
 // spikeImages are the spike's two images (docs/image-scan.md#the-scanner), as recorded.
 var spikeImages = map[string]fakeImage{
-	"node:20":             {report: "node_20.json", env: []string{"PATH=/usr/local/bin:/usr/bin", "NODE_VERSION=20.20.2", "YARN_VERSION=1.22.22"}},
-	"nginx:stable-alpine": {report: "nginx_stable-alpine.json", env: []string{"PATH=/usr/sbin:/usr/bin", "NGINX_VERSION=1.30.0"}},
+	"node:20":             {report: "node_20.json", env: []string{"PATH=/usr/local/bin:/usr/bin", "NODE_VERSION=20.20.2", "YARN_VERSION=1.22.22"}, pm: APT},
+	"nginx:stable-alpine": {report: "nginx_stable-alpine.json", env: []string{"PATH=/usr/sbin:/usr/bin", "NGINX_VERSION=1.30.0"}, pm: APK},
 }
 
 func newScanner(t *testing.T, docker *fakeDocker) *Scanner {
@@ -201,6 +207,7 @@ func TestScanCommands(t *testing.T) {
 		"docker run --rm --user " + uid + " --volume <tmp>:/work:ro --volume /cache-dir:/cache --env OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY=/cache " + ScannerImage + " scan image --archive --format json --offline-vulnerabilities --download-offline-databases /work/image.tar",
 		"docker image inspect --format {{json .Config.Env}} app:local",
 		"docker run --rm --network none --entrypoint node app:local --version",
+		"docker run --rm --network none --entrypoint /bin/sh app:local -c command -v apk || command -v apt-get",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

@@ -5,8 +5,10 @@ base image) are fixed by PRs from the same pipeline as Renovate's own vulnerabil
 `renovate.yml`'s `image-scan` job scans the images of the run's shard, and turns what a newer base
 image fixes into Renovate package rules that the same run's Renovate applies. The fixes are then
 ordinary Renovate PRs, opened by `ccf-release-bot` and merged by the same [merge
-pass](renovate.md#the-merge-pass). Only fixable HIGH and CRITICAL findings are acted on. The job
-log and the step summary are the only report: there is no issue, SARIF upload, or Slack message.
+pass](renovate.md#the-merge-pass). OS package fixes that the distribution has but the base image
+doesn't ship yet get an [OS package patch](#os-package-patches) PR of image-scan's own, merged by
+the same pass. Only fixable HIGH and CRITICAL findings are acted on. The job log and the step
+summary are the only report: there is no issue, SARIF upload, or Slack message.
 
 The logic is `cmd/image-scan`, with the rules in `internal/imagescan`.
 
@@ -162,7 +164,8 @@ repo, image name and release, written as a JSON list of Renovate `packageRules`:
    hasn't been rebuilt with it yet (the candidate still has the finding, the tag wasn't rebuilt
    since the pinned digest, or the tag isn't pinned by digest, so it already is the newest image),
    or the finding is in a build stage (not shipped), or in an internal `ghcr.io/compliance-framework`
-   image (ccf-bump moves those).
+   image (ccf-bump moves those). The OS package findings of a final image get an [OS package
+   patch](#os-package-patches).
 
 A finding is "still there" in a candidate when the candidate has a finding of the same package
 (the advisory's package, or the installed one) with a shared ID or alias, fixable or not: the
@@ -197,20 +200,82 @@ strictly and the config step fails on anything else:
 
 A missing or empty file adds no rules.
 
+## OS package patches
+
+When upstream hasn't rebuilt the base image but the distribution has the fix (in October 2026,
+`brotli-libs` 1.2.1-r0 in `nginx:stable-alpine`), image-scan patches the Dockerfile itself. For each
+Dockerfile whose final image's base has actionable `os` findings that rule 1 doesn't fix, it writes
+a managed block right after the `FROM` of the stage the final image starts from (followed back
+through `FROM <stage>`; after a `FROM`'s continuation lines):
+
+```dockerfile
+FROM nginx:stable-alpine AS production
+# image-scan:os-patches begin
+# Managed by compliance-framework/workflows image-scan (docs/image-scan.md#os-package-patches); removed once the base image ships the fixes.
+RUN apk upgrade --no-cache brotli-libs curl libcurl
+# image-scan:os-patches end
+```
+
+- **Alpine** (`apk`): `RUN apk upgrade --no-cache <packages>`.
+- **Debian and Ubuntu** (`apt-get`): `RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade <packages> && rm -rf /var/lib/apt/lists/*`,
+  after `# hadolint ignore=DL3008`: the upgrade takes the distribution's current fixed version and
+  pins none, which hadolint (run on the action repos' Dockerfiles by `ci-action.yml`) would fail.
+- **Distroless and scratch**, with no shell or package manager, are skipped with a note. The scan
+  finds the package manager by running `command -v apk || command -v apt-get` with the image's
+  `/bin/sh` (no network).
+
+The packages are the installed ones with the findings (`brotli-libs`, `libbrotli1`), each checked
+against the Alpine/Debian package name grammar before it goes into the `RUN` line. Right after
+`FROM`, the block runs as the base image's user, root in the images it patches; a `USER`
+instruction of the stage applies only after it. The block is regenerated each run from the base
+image's current findings, and **removed** once the base image has none left (it ships the fixes);
+while rule 1 is moving the image to a newer one that fixes them, the Dockerfile is left as it is,
+block included, until that update merges. A Dockerfile whose base image couldn't be scanned is left
+alone.
+
+Each repo gets one branch, **`image-scan/os-patches`**, for all its Dockerfiles. It is not under
+`renovate/`: Renovate deletes the `renovate/*` branches it doesn't know. On a live run, image-scan:
+
+1. leaves the repo alone if the PR wasn't opened by the bot, or if the branch has a commit that
+   isn't on the default branch by anyone else, open PR or not (Renovate's modified-branch rule; a
+   person takes it over by pushing to it, and closing the PR doesn't hand it back);
+2. leaves the repo alone, until the next run scans it again, if a patched Dockerfile at the default
+   branch's head (read by the commit's SHA) is no longer the content the scan read: the patch
+   replaces the whole file, so committing it would revert a change merged during the run;
+3. rebuilds the branch from the default branch's head with the patched Dockerfiles, one commit
+   through the API, authored and committed as `ccf-release-bot[bot]` (the job's "Commit as the
+   release bot" step, as in `ccf-bump-sync.yml`), and force-pushes it; when the branch already is
+   that change on the current head, it pushes nothing, so CI doesn't run again;
+4. opens or updates the PR, labelled `renovate:automerge` when it opens it (a person who takes the
+   label off keeps it off): **`fix(deps): patch OS packages in
+   <image> (<CVE ids>)`**, so the fix releases, or **`chore(deps): remove the OS package patches of
+   <image>`** when it only removes blocks. The body lists each Dockerfile, base image, package,
+   installed and fixed version, severity and CVEs;
+5. closes the PR and deletes the branch when nothing is left to patch.
+
+The [merge pass](renovate.md#the-merge-pass) merges `image-scan/*` PRs like `renovate/*` ones:
+labelled `renovate:automerge`, opened by the bot, every commit by the bot, not `needs-human`, once
+`ci / required` passes. A dry run writes nothing: it logs the branch, the PR title and the lines it
+would add or remove. A repo whose scan was incomplete is skipped.
+
 ## The job
 
 `image-scan` runs in `renovate.yml` between `select` and `renovate` ([renovate.md](renovate.md#the-workflow-renovateyml)):
 
 1. `select` lists the shard's image repos with `go run ./cmd/image-scan list` (the selected repos of
    kind `go-service`, `ui` or `action`). With none, `image-scan` is skipped.
-2. It mints a `ccf-release-bot` token scoped with `repositories:` to exactly those repos, with only
-   **Contents: read** (the caller workflows and the Dockerfiles), on dry and live runs alike: it
-   writes nothing anywhere. The list is never empty here, and an empty list would reach every repo.
+2. It mints a `ccf-release-bot` token scoped with `repositories:` to exactly those repos, with
+   **Contents** (the caller workflows and the Dockerfiles; the `image-scan/os-patches` branch) and
+   **Pull requests** (its PR and label): write on a live run, read on a dry run, which writes
+   nothing. The list is never empty here, and an empty list would reach every repo. The next step
+   sets the bot's commit identity.
 3. `go run ./cmd/image-scan scan` scans, plans, writes the overrides, logs every finding to the job
    log (one line each), and writes the step summary: per repo, a table of the images scanned
    (findings, HIGH/CRITICAL, actionable), a table of their HIGH and CRITICAL findings (fixable or
-   not; the first 150), the number of rules, and the notes. It exits non-zero, after writing both,
-   when an image or Dockerfile could not be scanned; the rules for the rest still apply.
+   not; the first 150), the number of rules, and the notes. On a live run it then keeps each repo's
+   [OS package patch](#os-package-patches) PR in line. It exits non-zero, after all that, when an
+   image or Dockerfile could not be scanned or a PR could not be updated; the rules for the rest
+   still apply.
 4. The overrides are uploaded, also after a failed scan.
 
 `renovate` runs once `select` succeeded, whether `image-scan` succeeded, failed or was skipped
