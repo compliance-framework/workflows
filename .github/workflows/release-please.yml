@@ -56,6 +56,11 @@ jobs:
           permission-contents: write # release branches, tags and releases
           permission-pull-requests: write # release PRs
           permission-issues: write # release PR labels
+          # The release tag goes on the release PR's merge commit. When a commit that edits
+          # .github/workflows lands after it, that commit's workflow files differ from the
+          # branch head, and GitHub refuses the tag without this ("Resource not accessible
+          # by integration" on create-a-release).
+          permission-workflows: write
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

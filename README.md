@@ -311,7 +311,10 @@ Runs `googleapis/release-please-action`, which opens or updates the release PR
 GitHub release. It runs as ccf-release-bot, so the PR and the release trigger the caller's
 other workflows (GitHub doesn't start workflows for `GITHUB_TOKEN` events). The token comes
 from `actions/create-github-app-token` with `owner: compliance-framework` and
-`repositories: <the caller repo>`, and only `contents`, `pull-requests` and `issues` write.
+`repositories: <the caller repo>`, and only `contents`, `pull-requests`, `issues` and
+`workflows` write. `workflows` is for tagging the release PR's merge commit once a later commit
+has changed `.github/workflows`: GitHub refuses a tag on a commit whose workflow files differ
+from the branch head without it.
 The bot is installed on every org repo, so the job refuses to mint a token when the repo name
 is empty or `github.repository` isn't `compliance-framework/<that name>`: a token minted with
 an owner and no repositories would reach the whole org.
