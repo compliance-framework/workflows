@@ -1,0 +1,4 @@
+lisa-addressed:
+- review PRRT_kwDOKQL6as6xU0T6 (must-fix, severity.go RateFromAliases): failed lookup in the deciding tier -> warning unless CRITICAL; no fall-through from a BIT tier with errors; tests: one-of-two BIT fails, all BIT fail, failure next to CRITICAL.
+- review PRRT_kwDOKQL6as6xU0UM (breaker): retry once on 429/5xx (Retry-After capped 10s, default 2s; OSV.retryWait for tests); breaker reset per image in RateFromAliases; TestRateFromAliasesOSVDown proves the next image is rated after an outage.
+- review PRRT_kwDOKQL6as6xU0UC (plan stdlib): exclusion replaced by splitGoStdlib in rule 1 (stdlib only out of the remaining() gate; fixed when the candidate clears them) and out of rule 2's trigger. Supersedes the design note "Planner excludes Go stdlib from rules 1-3". Tests: rule1-gobinary, rule1-mixed, no-rule when not rebuilt.
