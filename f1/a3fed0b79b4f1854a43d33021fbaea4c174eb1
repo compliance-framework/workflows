@@ -1,0 +1,3 @@
+lisa-addressed:
+pass 1 fixes:
+- CORE-DOC-001: docs/image-scan.md explains the notify-failure.yml consequence of a red image job.
