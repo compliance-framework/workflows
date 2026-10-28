@@ -201,7 +201,7 @@ Go comes from the caller's `go.mod`.
 | Input | Default | What |
 | --- | --- | --- |
 | `directory` | `policies` | The policies directory (the bundle root). |
-| `opa-version` | `1.14.1` | OPA version. |
+| `opa-version` | `1.21.3` | OPA version. |
 | `regal-version` | `0.43.0` | Regal version. |
 
 A caller is the example above with the kind's workflow in `uses:`, for example:
@@ -429,7 +429,7 @@ A plugin or policy repo that wants PR previews only sets `on-main: false`.
 | `kind` | `image` | `image`, `go-plugin` or `policies`; anything else fails. |
 | `protocol-version` | `2` | `go-plugin`: the agent plugin protocol the plugin implements. |
 | `directory` | `policies` | `policies`: the bundle root. |
-| `opa-version` | `1.14.1` | `policies`: OPA version, without the leading `v`. |
+| `opa-version` | `1.21.3` | `policies`: OPA version, without the leading `v`. |
 
 ```yaml
 # .github/workflows/preview.yml in a consuming repo
@@ -561,7 +561,7 @@ single and followed by the one "Tag the rest" step.
 | `images` | `[{}]` | As for `preview.yml`: one entry per image (agent has three). |
 | `tag-prefix` | `v` | Prefix of the release tags. |
 | `protocol-version` | `2` | `release-go-plugin.yml`: the agent plugin protocol the plugin implements. |
-| `directory`, `opa-version` | `policies`, `1.14.1` | `release-policies.yml`: the bundle root and OPA version. |
+| `directory`, `opa-version` | `policies`, `1.21.3` | `release-policies.yml`: the bundle root and OPA version. |
 | `charts-dir`, `registry` | `charts`, `oci://ghcr.io/compliance-framework/helm-charts` | `release-helm.yml`: the directory holding one directory per chart, and where charts are pushed. |
 
 `release-go-plugin.yml` and `release-go-lib.yml` need `contents: write` (goreleaser attaches

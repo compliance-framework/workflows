@@ -33,7 +33,7 @@ on:
       opa-version:
         description: "policies: OPA version, without the leading v"
         type: string
-        default: "1.14.1"
+        default: "1.21.3"
 
 permissions: {}
 
