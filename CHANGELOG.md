@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.8.0](https://github.com/compliance-framework/workflows/compare/v1.7.0...v1.8.0) (2026-10-28)
+
+
+### Features
+
+* **manifest:** add the live demo repos, remove factory ([#151](https://github.com/compliance-framework/workflows/issues/151)) ([2e9939f](https://github.com/compliance-framework/workflows/commit/2e9939fb8da334e03e04775c5b5cdb1bcb360180))
+* **renovate:** run normal updates daily and cap open majors ([#147](https://github.com/compliance-framework/workflows/issues/147)) ([6b106b5](https://github.com/compliance-framework/workflows/commit/6b106b5b8fb2f70e3554e8cb14c43837e9b4f23d))
+
+
+### Bug Fixes
+
+* **ci:** let Renovate see every pinned tool version in the workflows ([#149](https://github.com/compliance-framework/workflows/issues/149)) ([9c83ce4](https://github.com/compliance-framework/workflows/commit/9c83ce49e568be66e9c544b8a9146ba8197d1c5c))
+* **deps:** bump policies OPA default to 1.21.3 ([#158](https://github.com/compliance-framework/workflows/issues/158)) ([8b885b2](https://github.com/compliance-framework/workflows/commit/8b885b209433ebce0faa5228f9d1073ece4f8a60))
+* **deps:** pin dependencies ([#146](https://github.com/compliance-framework/workflows/issues/146)) ([c836349](https://github.com/compliance-framework/workflows/commit/c836349f17d6c6a312dfcfb99593f58615bdec8c))
+* **manifest:** remove the live demo repos ([#159](https://github.com/compliance-framework/workflows/issues/159)) ([7bec0ec](https://github.com/compliance-framework/workflows/commit/7bec0ecabe1653901d8faa47765728d57ef9ce01))
+
 ## [1.7.0](https://github.com/compliance-framework/workflows/compare/v1.6.0...v1.7.0) (2026-10-14)
 
 
