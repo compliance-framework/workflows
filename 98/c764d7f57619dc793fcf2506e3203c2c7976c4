@@ -5,3 +5,9 @@ lisa-design:
 - Lookup failures never fail the scan: Scan.Warnings -> check: ::warning:: + summary callout; scan: repo note "**warning**: <ref>: ...", deduped per repo.
 - Planner excludes Go stdlib (Ecosystem Go, Source stdlib) from rules 1-3 and notes them once per image: without it rule 1 bumps golang/Go-tool base images to their next patch for what is a Go rebuild (proven by mutating the test), and an un-rebuilt upstream would block OS-fix fast-tracks. Go *module* findings stay in the plan (unchanged behaviour). Stdlib still counts in reports and fails `check`.
 - Test fake OSV answers unrecorded /v1/vulns IDs with 404 (as the real API does), so the existing spike goldens are unchanged.
+
+lisa-selfreview:
+- pass 1 [must-fix] CORE-TEST-001 internal/imagescan/severity.go: Tier fallback and max-within-tier are untested
+- pass 1 [nit] needless-exported-type internal/imagescan/runtime.go: HTTPError is exported but only used inside the package
+- pass 1 [nit] fake-404-body internal/imagescan/scanner_test.go: Fake 404 body differs from the real API's
+- pass 1 [nit] unclear-footnote internal/imagescan/summary.go: Check summary footnote reads awkwardly
