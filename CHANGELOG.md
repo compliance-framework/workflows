@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.1](https://github.com/compliance-framework/workflows/compare/v1.8.0...v1.8.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **go:** raise go to 1.26.3 so the train can bump repos that need it ([#161](https://github.com/compliance-framework/workflows/issues/161)) ([bd7fa1a](https://github.com/compliance-framework/workflows/commit/bd7fa1a6f3eebd37f5ffec6bff827c26de07166f))
+* **release-please:** let the release token tag commits behind a workflow change ([#163](https://github.com/compliance-framework/workflows/issues/163)) ([416d3cd](https://github.com/compliance-framework/workflows/commit/416d3cd577de7c04f93f65be3f0cbb7dd8ded36f))
+
 ## [1.8.0](https://github.com/compliance-framework/workflows/compare/v1.7.0...v1.8.0) (2026-10-28)
 
 
