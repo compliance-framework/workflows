@@ -1,2 +1,7 @@
 lisa-design:
 - The golang image test fixtures are written by the tests (TempDir), not kept in testdata: Renovate scans this repo's testdata Dockerfiles and would bump/pin them, breaking the expected output.
+
+lisa-selfreview:
+pass 1: request_changes
+- [must-fix] GO-NIL-001 internal/bump/goimage.go goImage.Apply: goTag.FindStringSubmatch(tag)[2] indexed without checking the match (fp c17145ed3de2) -> fix
+- [should-fix] CORE-DUP-001 internal/bump/goimage.go digestRE duplicates imagescan.refDigest (fp 2fd4d904573d) -> dismiss: the sha256 digest grammar is fixed by the OCI spec, nothing to drift; importing imagescan's unexported var is not possible
