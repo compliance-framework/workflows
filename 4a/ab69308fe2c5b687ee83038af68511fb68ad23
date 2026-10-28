@@ -1,0 +1,4 @@
+lisa-addressed:
+pass 1 fixes:
+- apt-block-fails-hadolint: the apt block carries `# hadolint ignore=DL3008` right before its RUN (goldens, cmd test, docs).
+- CORE-SIZE-001: size-exception label + reason in the PR body.
