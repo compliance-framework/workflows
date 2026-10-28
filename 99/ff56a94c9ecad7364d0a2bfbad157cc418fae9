@@ -1,2 +1,5 @@
 lisa-design:
 - Toolchain-line guard (review should-fix, user decision): a pull_request-only step 'toolchain line' in the go job (in required's needs) of ci-go-service/lib/plugin; compares origin/<base>:go.mod (fetched depth 1) with the PR's; base without toolchain passes; version compare via sort -V (rc toolchains approximate).
+
+lisa-addressed:
+- PRRT_kwDOKQL6as6xUzb8: CI guard + docs row mentions guard and ccf-bump KeepToolchain.
