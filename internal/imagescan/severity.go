@@ -26,10 +26,10 @@ import (
 // later image unrated.
 const maxLookupFailures = 3
 
-// maxTrippedImages bounds the whole run: after the breaker trips on this many images in a row
-// (no lookup answered in between), alias lookups are off for the rest of the run, so an outage
-// costs at most maxTrippedImages*maxLookupFailures lookups however many images the run scans.
-const maxTrippedImages = 2
+// maxRunFailures bounds the whole run: after this many failed lookups in a row across images (only
+// an answered lookup, a 404 included, resets the count), alias lookups are off for the rest of the
+// run, so an outage costs at most maxRunFailures lookups however many images the run scans.
+const maxRunFailures = 6
 
 // vulnLookupTimeout bounds one alias lookup (each attempt), well under the client's 30s.
 const vulnLookupTimeout = 10 * time.Second
@@ -47,14 +47,16 @@ type vulnCache struct {
 	vulns    map[string]*Vuln // nil: OSV has no such record
 	failures int              // lookups that failed in a row, for the image being rated
 	lastErr  error
-	tripped  int  // images in a row whose breaker tripped
-	off      bool // alias lookups are off for the rest of the run (maxTrippedImages)
+	// runFailures are the lookups that failed in a row across the run; at maxRunFailures, alias
+	// lookups are off for the rest of the run.
+	runFailures int
 }
 
 // Vuln returns advisory id from api.osv.dev (GET /v1/vulns/<id>), once per run: the result is
 // cached. It is nil, with no error, when OSV has no record of that ID. An answer of 429 or 5xx is
 // retried once, after its Retry-After or defaultRetryWait. After maxLookupFailures failed lookups
-// in a row it fails at once, without asking, until RateFromAliases starts on the next image.
+// in a row it fails at once, without asking, until RateFromAliases starts on the next image; after
+// maxRunFailures in a row, for the rest of the run.
 func (o *OSV) Vuln(ctx context.Context, id string) (*Vuln, error) {
 	c := &o.cache
 	c.mu.Lock()
@@ -62,8 +64,8 @@ func (o *OSV) Vuln(ctx context.Context, id string) (*Vuln, error) {
 	if v, ok := c.vulns[id]; ok {
 		return v, nil
 	}
-	if c.off {
-		return nil, fmt.Errorf("OSV advisory %s not fetched: alias lookups are off for the rest of the run, after %d images in a row whose lookups failed, the last with: %w", id, maxTrippedImages, c.lastErr)
+	if c.runFailures >= maxRunFailures {
+		return nil, fmt.Errorf("OSV advisory %s not fetched: alias lookups are off for the rest of the run after %d failed in a row, the last with: %w", id, c.runFailures, c.lastErr)
 	}
 	if c.failures >= maxLookupFailures {
 		return nil, fmt.Errorf("OSV advisory %s not fetched: %d lookups failed in a row, the last with: %w", id, c.failures, c.lastErr)
@@ -71,10 +73,11 @@ func (o *OSV) Vuln(ctx context.Context, id string) (*Vuln, error) {
 	v, err := o.fetchVuln(ctx, id)
 	if err != nil {
 		c.failures++
+		c.runFailures++
 		c.lastErr = err
 		return nil, fmt.Errorf("OSV advisory %s: %w", id, err)
 	}
-	c.failures, c.tripped = 0, 0
+	c.failures, c.runFailures = 0, 0
 	if c.vulns == nil {
 		c.vulns = map[string]*Vuln{}
 	}
@@ -123,21 +126,13 @@ func (o *OSV) fetchVuln(ctx context.Context, id string) (*Vuln, error) {
 // doesn't fall through to the next tier, and is counted in the warning returned, unless it is
 // already CRITICAL, which no other alias can raise.
 //
-// The breaker (maxLookupFailures) is per image, and the run is bounded too: after it trips on
-// maxTrippedImages images in a row, no image asks again.
+// The breaker (maxLookupFailures) is per image, and the run is bounded too: after
+// maxRunFailures failed lookups in a row, whatever the images, no image asks again.
 func (o *OSV) RateFromAliases(ctx context.Context, fs []Finding) []string {
 	c := &o.cache
 	c.mu.Lock()
 	c.failures = 0 // the breaker is per image
 	c.mu.Unlock()
-	defer func() {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if c.failures >= maxLookupFailures && !c.off {
-			c.tripped++
-			c.off = c.tripped >= maxTrippedImages
-		}
-	}()
 	failed := 0
 	var firstErr error
 	for i := range fs {

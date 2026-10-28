@@ -138,7 +138,7 @@ func (f *fakeDocker) mount(args []string) string {
 // from testdata/osv/vulns/<id>.json, with an unrecorded ID answered 404 as the real API answers an
 // ID it has no record of (CVE-2026-111943, a curl CVE in OSV only as CURL-CVE-...).
 type fakeOSV struct {
-	mu      *sync.Mutex // guards fetched and fail: a hung request's handler runs next to the next one's
+	mu      *sync.Mutex // guards fetched, fail and down: a hung request's handler runs next to the next one's
 	fetched []string    // the IDs /v1/vulns was asked for, once per request
 	down    bool        // /v1/vulns answers 503
 	hang    bool        // /v1/vulns never answers (until the client gives up)
@@ -146,6 +146,13 @@ type fakeOSV struct {
 	fail       map[string]int
 	failCode   int
 	retryAfter string // the failures' Retry-After header
+}
+
+// setDown turns the outage on or off between requests.
+func (f *fakeOSV) setDown(down bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.down = down
 }
 
 // requests returns the IDs /v1/vulns was asked for so far.
@@ -166,6 +173,7 @@ func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
 			if n > 0 {
 				f.fail[id] = n - 1
 			}
+			down := f.down
 			f.mu.Unlock()
 			if f.hang {
 				select {
@@ -174,7 +182,7 @@ func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
 				}
 				return
 			}
-			if f.down || n != 0 {
+			if down || n != 0 {
 				code := cmp.Or(f.failCode, http.StatusServiceUnavailable)
 				if f.retryAfter != "" {
 					w.Header().Set("Retry-After", f.retryAfter)

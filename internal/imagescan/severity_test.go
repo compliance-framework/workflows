@@ -92,7 +92,7 @@ func TestRateFromAliasesOSVDown(t *testing.T) {
 		t.Errorf("warnings = %q, want one for the 4 findings with aliases, with the error", scan.Warnings)
 	}
 
-	osv.down = false
+	osv.setDown(false)
 	scan, err = s.Scan(context.Background(), "ghcr.io/compliance-framework/agent:main")
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestRateFromAliasesOSVDown(t *testing.T) {
 }
 
 // TestRateFromAliasesOutageBound: an outage that lasts the whole run costs at most
-// maxTrippedImages images' worth of lookups, however many images the run scans, whether OSV
+// maxRunFailures lookups, however many images the run scans, whether OSV
 // answers 503 (retried once) or not at all (each attempt cut at the lookup timeout); every image
 // still warns.
 func TestRateFromAliasesOutageBound(t *testing.T) {
@@ -119,8 +119,8 @@ func TestRateFromAliasesOutageBound(t *testing.T) {
 		osv      fakeOSV
 		requests int
 	}{
-		{"503", fakeOSV{down: true}, maxTrippedImages * maxLookupFailures * 2},
-		{"no answer", fakeOSV{hang: true}, maxTrippedImages * maxLookupFailures},
+		{"503", fakeOSV{down: true}, maxRunFailures * 2},
+		{"no answer", fakeOSV{hang: true}, maxRunFailures},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			osv := &tc.osv
@@ -139,11 +139,44 @@ func TestRateFromAliasesOutageBound(t *testing.T) {
 			if len(osv.requests()) != tc.requests {
 				t.Errorf("%d images made %d requests (%q), want %d", len(refs), len(osv.requests()), osv.requests(), tc.requests)
 			}
-			// maxTrippedImages*maxLookupFailures attempts of 50ms, with room for a slow runner.
+			// maxRunFailures attempts of 50ms, with room for a slow runner.
 			if d := time.Since(start); d > 3*time.Second {
 				t.Errorf("the run took %v, want it bounded", d)
 			}
 		})
+	}
+}
+
+// TestRateFromAliasesOutageBoundSmallImages: images with one aliased finding each never reach the
+// per-image breaker; the run-wide count still turns lookups off after maxRunFailures, and an
+// answered lookup (a 404 included) resets it.
+func TestRateFromAliasesOutageBoundSmallImages(t *testing.T) {
+	fake := &fakeOSV{down: true}
+	osv := &OSV{BaseURL: fake.serve(t).URL, retryWait: time.Millisecond}
+	image := func(i int) []string {
+		return osv.RateFromAliases(context.Background(), []Finding{{IDs: []string{fmt.Sprintf("GO-%d", i)}, Aliases: []string{fmt.Sprintf("BIT-golang-2026-%05d", i)}}})
+	}
+	for i := range 4 {
+		if w := image(i); len(w) != 1 {
+			t.Errorf("image %d: warnings %q, want one", i, w)
+		}
+	}
+	// A 404 answers: the count starts again.
+	fake.setDown(false)
+	image(100)
+	fake.setDown(true)
+	before := len(fake.requests())
+	for i := range 20 {
+		if w := image(200 + i); len(w) != 1 {
+			t.Errorf("image %d: warnings %q, want one", 200+i, w)
+		}
+	}
+	// 4 failed lookups (8 requests), the 404, then maxRunFailures more, each retried once.
+	if got := len(fake.requests()) - before; got != 2*maxRunFailures {
+		t.Errorf("20 images during the outage made %d requests, want %d (%d lookups, each retried once)", got, 2*maxRunFailures, maxRunFailures)
+	}
+	if before != 4*2+1 {
+		t.Errorf("%d requests before the 404 reset, want 9", before)
 	}
 }
 
