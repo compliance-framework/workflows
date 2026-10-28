@@ -1,4 +1,4 @@
-# repos.yaml's core repos (but the live demo repos) plus plugin and policy repos in three batches, none active: the tools'
+# repos.yaml's core repos plus plugin and policy repos in three batches, none active: the tools'
 # tests check that their selection is the core repos' (today's) until a batch is switched on.
 active_batches: []
 include_patterns: ["plugin-*"]

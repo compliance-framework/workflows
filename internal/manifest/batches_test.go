@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// batchesFixture has repos.yaml's core repos (all but the live demo repos, release: false repos like workflows)
+// batchesFixture has repos.yaml's core repos (release: false repos like workflows included)
 // plus plugin and policy repos in batches 1 to 3.
 const batchesFixture = "testdata/batches.yaml"
 
@@ -180,15 +180,15 @@ func TestReposYAMLBatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Every batch is active: the core repos (the fixture's and the live demo's) plus batch 1's 30 repos, batch 2's
-	// 27 and batch 3's 10, in manifest order. The inactive-batch paths are covered on testdata/batches.yaml.
-	active := append(slices.Clone(coreRepos), "ccf-live-demo-sandbox", "ccf-live-demo-app")
+	// Every batch is active: the core repos plus batch 1's 30 repos, batch 2's 27 and batch 3's 10, in
+	// manifest order. The inactive-batch paths are covered on testdata/batches.yaml.
+	active := slices.Clone(coreRepos)
 	for _, r := range m.Repos {
 		if r.Batch != 0 {
 			active = append(active, r.Name)
 		}
 	}
-	if got := names(m.ActiveRepos()); !reflect.DeepEqual(m.ActiveBatches, []int{1, 2, 3}) || len(got) != 76 || !reflect.DeepEqual(got, active) {
+	if got := names(m.ActiveRepos()); !reflect.DeepEqual(m.ActiveBatches, []int{1, 2, 3}) || len(got) != 74 || !reflect.DeepEqual(got, active) {
 		t.Fatalf("active_batches %v: ActiveRepos() = %v, want the core repos and every batch %v", m.ActiveBatches, got, active)
 	}
 	if len(m.Exclude) != 20 || !reflect.DeepEqual(m.IncludePatterns, []string{"plugin-*"}) {
