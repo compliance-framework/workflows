@@ -1,3 +1,9 @@
 lisa-addressed:
 pass 2 fixes:
 - relabels-held-pr: Publisher adds renovate:automerge only when it opens the PR (test "a person took the label off").
+
+lisa-selfreview:
+pass 3 (strict), verdict approve. Deferred (not fixed):
+- [question] X:intent/closed-pr-reopened (pass 2): a closed patch PR is reopened as a new PR on the next run.
+- [question] X:intent/patch-pr-ci-failures-not-notified (pass 1): image-scan/ not added to notify/attention bot branch prefixes.
+- [nit] X:tests/identity-step-check TestRenovateJobs compares the identity step with ccf-bump-sync.yml's loosely (first line + the email line).
