@@ -10,3 +10,6 @@ lisa-design:
 - golang-version releases carry dates (go 1.27.3: 2026-10-19 in the lookup), so the go directive keeps the 7-day wait and gets no timestamp exception. Docker tags have none, so the image moves without waiting and is never behind the go line Renovate writes.
 - The go directive rule (gomod, depType golang, rangeStrategy bump) sets no update types, group or limits: minor/patch fall into the all-non-major group rule with the golang image; a major (Go 2) would hit the majors rule. It is semanticCommitType fix: setup-go builds releases with the go line's Go, so the bump must release.
 - Evidence comes from read-only --dry-run=lookup runs on agent with Renovate 44.145.1; the config command inlines the local renovate/default.json (no remote github> preset), so the branch's file is what was tested.
+
+lisa-design:
+- toolchain go1.26.10 = newest stable 1.26 patch on go.dev, strictly above the go line (1.26.3), which stays as the minimum language version; it survives go mod tidy.
