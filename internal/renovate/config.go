@@ -8,6 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -29,7 +32,7 @@ type Options struct {
 	// DryRun is "full", "lookup", "extract" or DryRunOff.
 	DryRun string
 	// Overrides are package rules appended after the preset's (ParseOverrides).
-	Overrides []any
+	Overrides []PackageRule
 }
 
 // runnerKeys are the settings GlobalConfig owns. The preset must not set them: they decide which
@@ -134,7 +137,10 @@ func GlobalConfig(preset []byte, opts Options) ([]byte, error) {
 			return nil, errors.New("preset: packageRules is not a list")
 		}
 		// Later rules win in Renovate, so the overrides take precedence over the preset's.
-		cfg["packageRules"] = append(rules, opts.Overrides...)
+		for _, r := range opts.Overrides {
+			rules = append(rules, r)
+		}
+		cfg["packageRules"] = rules
 	}
 
 	repos := make([]string, len(opts.Repos))
@@ -166,70 +172,180 @@ func GlobalConfig(preset []byte, opts Options) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// overrideKeys are the keys an override rule may set: the ones image-scan's rules use
-// (internal/imagescan, docs/image-scan.md#remediation).
-var overrideKeys = []string{
-	"matchRepositories", "matchManagers", "matchDepNames", "matchCurrentVersion",
-	"allowedVersions", "minimumReleaseAge", "prHourlyLimit", "prConcurrentLimit",
-	"branchConcurrentLimit", "semanticCommitType", "groupName", "groupSlug", "automerge",
-	"addLabels", "prPriority", "prBodyNotes",
+// PackageRule is a Renovate package rule image-scan adds for one repo (internal/imagescan plans
+// it, docs/image-scan.md#remediation). Its JSON keys are the only keys an override may set: the
+// planner builds this type and ParseOverrides decodes into it, so the two can't drift apart. A
+// field left zero is not written; the pointers write a 0 or false that must reach Renovate.
+type PackageRule struct {
+	MatchRepositories   []string `json:"matchRepositories"`
+	MatchManagers       []string `json:"matchManagers"`
+	MatchDepNames       []string `json:"matchDepNames"`
+	MatchCurrentVersion string   `json:"matchCurrentVersion,omitempty"`
+	MatchUpdateTypes    []string `json:"matchUpdateTypes,omitempty"`
+	MatchNewValue       string   `json:"matchNewValue,omitempty"`
+	AllowedVersions     string   `json:"allowedVersions,omitempty"`
+	SeparateMinorPatch  *bool    `json:"separateMinorPatch,omitempty"`
+	// MinimumReleaseAge is only ever null, Renovate's "no waiting period" (NoReleaseAge).
+	MinimumReleaseAge     json.RawMessage `json:"minimumReleaseAge,omitempty"`
+	PRHourlyLimit         *int            `json:"prHourlyLimit,omitempty"`
+	PRConcurrentLimit     *int            `json:"prConcurrentLimit,omitempty"`
+	BranchConcurrentLimit *int            `json:"branchConcurrentLimit,omitempty"`
+	SemanticCommitType    string          `json:"semanticCommitType,omitempty"`
+	GroupName             string          `json:"groupName,omitempty"`
+	GroupSlug             string          `json:"groupSlug,omitempty"`
+	Automerge             *bool           `json:"automerge,omitempty"`
+	AddLabels             []string        `json:"addLabels,omitempty"`
+	PRPriority            *int            `json:"prPriority,omitempty"`
+	PRBodyNotes           []string        `json:"prBodyNotes,omitempty"`
 }
 
+// NoReleaseAge is PackageRule.MinimumReleaseAge's one value: null.
+var NoReleaseAge = json.RawMessage("null")
+
+// overrideUpdateTypes are the update types an override may fast-track: the ones image-scan
+// verifies (a rebuild of the same tag, the newest patch of an X.Y.Z tag).
+var overrideUpdateTypes = []string{"digest", "patch"}
+
+// overrideKeys are PackageRule's JSON keys, by field index.
+var overrideKeys = func() map[string]int {
+	keys := map[string]int{}
+	t := reflect.TypeFor[PackageRule]()
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		keys[name] = i
+	}
+	return keys
+}()
+
+// ImageName is Docker's grammar of an image's repository name, without tag or digest
+// (distribution/reference): a name read from a repo's file can't start with "-" and be read as a
+// docker flag, and an override's matchDepNames can't be a glob or a regex.
+var ImageName = regexp.MustCompile(`^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*(?:\.[A-Za-z0-9-]+)*(?::[0-9]+)?(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$`)
+
 // ParseOverrides reads the package rules image-scan writes (a JSON list) for a run on owner's
-// repos. The file is generated, so it is checked strictly: every rule must set only overrideKeys,
-// name exactly one repository in matchRepositories that is one of repos, match only the
-// dockerfile manager, and name at least one dependency. Empty data is no overrides.
-func ParseOverrides(data []byte, owner string, repos []string) ([]any, error) {
+// repos. The file is generated, so it is checked strictly, keys and values: every rule may set
+// only PackageRule's keys, each with a value of its type that isn't empty or null (except
+// minimumReleaseAge, which must be null); it must name exactly one repository in
+// matchRepositories that is one of repos, match only the dockerfile manager, and name at least
+// one image by its plain name (no tag, digest, glob or regex). Limits and prPriority are not
+// negative, the version matchers are regexes anchored at the start ("/^.../"), matchUpdateTypes
+// only lists digest or patch, and a rule that auto-merges must list its update types (so it never
+// reaches a major or a minor). Empty data is no overrides.
+func ParseOverrides(data []byte, owner string, repos []string) ([]PackageRule, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil, nil
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	var rules []map[string]any
-	if err := dec.Decode(&rules); err != nil {
+	var raws []json.RawMessage
+	if err := dec.Decode(&raws); err != nil {
 		return nil, fmt.Errorf("overrides: %w", err)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("overrides: trailing data after the JSON list")
 	}
-	out := make([]any, 0, len(rules))
-	for i, r := range rules {
-		if r == nil {
-			return nil, fmt.Errorf("overrides: rule %d: want a JSON object", i)
-		}
-		for k := range r {
-			if !slices.Contains(overrideKeys, k) {
-				return nil, fmt.Errorf("overrides: rule %d: key %q is not allowed (want only %s)", i, k, strings.Join(overrideKeys, ", "))
-			}
-		}
-		repo, err := single(r, "matchRepositories")
+	out := make([]PackageRule, 0, len(raws))
+	for i, raw := range raws {
+		r, err := parseOverride(raw, owner, repos)
 		if err != nil {
 			return nil, fmt.Errorf("overrides: rule %d: %w", i, err)
-		}
-		name, ok := strings.CutPrefix(repo, owner+"/")
-		if !ok || !slices.Contains(repos, name) {
-			return nil, fmt.Errorf("overrides: rule %d: repository %q is not in this run (%s/%s)", i, repo, owner, strings.Join(repos, ","))
-		}
-		if m, err := single(r, "matchManagers"); err != nil || m != "dockerfile" {
-			return nil, fmt.Errorf("overrides: rule %d: matchManagers must be [\"dockerfile\"]", i)
-		}
-		if deps, ok := r["matchDepNames"].([]any); !ok || len(deps) == 0 {
-			return nil, fmt.Errorf("overrides: rule %d: matchDepNames must list the images", i)
 		}
 		out = append(out, r)
 	}
 	return out, nil
 }
 
-// single returns the one string in rule[key], a list.
-func single(rule map[string]any, key string) (string, error) {
-	list, ok := rule[key].([]any)
-	if !ok || len(list) != 1 {
+func parseOverride(raw json.RawMessage, owner string, repos []string) (PackageRule, error) {
+	var r PackageRule
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return r, errors.New("want a JSON object")
+	}
+	v := reflect.ValueOf(&r).Elem()
+	for _, k := range slices.Sorted(maps.Keys(fields)) {
+		i, ok := overrideKeys[k]
+		if !ok {
+			return r, fmt.Errorf("key %q is not allowed (want only %s)", k, strings.Join(slices.Sorted(maps.Keys(overrideKeys)), ", "))
+		}
+		f := v.Field(i)
+		if err := json.Unmarshal(fields[k], f.Addr().Interface()); err != nil {
+			return r, fmt.Errorf("%s: want a %s", k, f.Type())
+		}
+		// Left zero, the key would not be written, and the rule would be wider than the file says.
+		if f.IsZero() || (f.Kind() == reflect.Slice && f.Len() == 0) {
+			return r, fmt.Errorf("%s is empty or null", k)
+		}
+	}
+
+	repo, err := single(r.MatchRepositories, "matchRepositories")
+	if err != nil {
+		return r, err
+	}
+	name, ok := strings.CutPrefix(repo, owner+"/")
+	if !ok || !slices.Contains(repos, name) {
+		return r, fmt.Errorf("repository %q is not in this run (%s/%s)", repo, owner, strings.Join(repos, ","))
+	}
+	if m, err := single(r.MatchManagers, "matchManagers"); err != nil || m != "dockerfile" {
+		return r, errors.New(`matchManagers must be ["dockerfile"]`)
+	}
+	if len(r.MatchDepNames) == 0 {
+		return r, errors.New("matchDepNames must list the images")
+	}
+	for _, d := range r.MatchDepNames {
+		if !IsImageName(d) {
+			return r, fmt.Errorf("matchDepNames: %q is not an image name (no tag, digest, glob or regex)", d)
+		}
+	}
+	for k, n := range map[string]*int{"prHourlyLimit": r.PRHourlyLimit, "prConcurrentLimit": r.PRConcurrentLimit, "branchConcurrentLimit": r.BranchConcurrentLimit, "prPriority": r.PRPriority} {
+		if n != nil && *n < 0 {
+			return r, fmt.Errorf("%s is negative", k)
+		}
+	}
+	if r.MinimumReleaseAge != nil && string(r.MinimumReleaseAge) != "null" {
+		return r, errors.New("minimumReleaseAge must be null")
+	}
+	for k, s := range map[string]string{"matchCurrentVersion": r.MatchCurrentVersion, "matchNewValue": r.MatchNewValue, "allowedVersions": r.AllowedVersions} {
+		if s != "" && !isAnchoredRegex(s) {
+			return r, fmt.Errorf("%s %q: want a regex anchored at the start, /^.../", k, s)
+		}
+	}
+	for _, u := range r.MatchUpdateTypes {
+		if !slices.Contains(overrideUpdateTypes, u) {
+			return r, fmt.Errorf("matchUpdateTypes: %q is not allowed (want only %s)", u, strings.Join(overrideUpdateTypes, ", "))
+		}
+	}
+	// Renovate refuses both in one rule: allowedVersions and separateMinorPatch act before the
+	// update type is known.
+	if len(r.MatchUpdateTypes) > 0 && (r.AllowedVersions != "" || r.SeparateMinorPatch != nil) {
+		return r, errors.New("matchUpdateTypes can't be combined with allowedVersions or separateMinorPatch")
+	}
+	if r.Automerge != nil && *r.Automerge && len(r.MatchUpdateTypes) == 0 {
+		return r, errors.New("a rule that auto-merges must list matchUpdateTypes")
+	}
+	return r, nil
+}
+
+// IsImageName reports whether s is an image's repository name alone (ImageName, no tag).
+func IsImageName(s string) bool {
+	// A colon after the last slash starts a tag; before it, a registry port.
+	if strings.LastIndexByte(s, ':') > strings.LastIndexByte(s, '/') {
+		return false
+	}
+	return ImageName.MatchString(s)
+}
+
+// isAnchoredRegex reports whether s is a Renovate regex matcher, /^.../, that compiles.
+func isAnchoredRegex(s string) bool {
+	if len(s) < 3 || !strings.HasPrefix(s, "/^") || !strings.HasSuffix(s, "/") {
+		return false
+	}
+	_, err := regexp.Compile(s[1 : len(s)-1])
+	return err == nil
+}
+
+// single returns the one entry of list.
+func single(list []string, key string) (string, error) {
+	if len(list) != 1 {
 		return "", fmt.Errorf("%s must list exactly one entry", key)
 	}
-	s, ok := list[0].(string)
-	if !ok {
-		return "", fmt.Errorf("%s must list a string", key)
-	}
-	return s, nil
+	return list[0], nil
 }

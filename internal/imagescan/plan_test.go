@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/compliance-framework/workflows/internal/renovate"
 )
 
 const (
@@ -176,6 +178,38 @@ func TestPlan(t *testing.T) {
 				t.Errorf("%d notes, want %d:\n%s", len(notes), tc.noteCount, strings.Join(notes, "\n"))
 			}
 		})
+	}
+}
+
+// Every rule the plan writes passes renovate-config's check of the overrides file, rule 1 and 2.
+func TestRuleGoldensPassParseOverrides(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("testdata", "rules", "*.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules, err := renovate.ParseOverrides(data, "compliance-framework", []string{"ui"})
+		if err != nil || len(rules) == 0 {
+			t.Errorf("%s: %d rules, %v", f, len(rules), err)
+		}
+		for _, r := range rules {
+			switch {
+			case r.AllowedVersions != "":
+				kinds = append(kinds, "rule 2")
+			case len(r.MatchUpdateTypes) > 0:
+				kinds = append(kinds, "rule 1 "+r.MatchUpdateTypes[0])
+			}
+		}
+	}
+	for _, want := range []string{"rule 1 digest", "rule 1 patch", "rule 2"} {
+		if !slices.Contains(kinds, want) {
+			t.Errorf("no %s rule among the goldens (%v)", want, kinds)
+		}
 	}
 }
 

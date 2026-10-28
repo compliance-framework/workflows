@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/compliance-framework/workflows/internal/renovate"
 )
 
 // Ref is an image reference as a Dockerfile writes it.
@@ -44,10 +46,11 @@ func ParseRef(s string) (Ref, error) {
 	return r, nil
 }
 
-// refName and refTag are Docker's reference grammar (distribution/reference), so a reference
-// read from a repo's file can't start with "-" and be read as a docker flag.
+// refName, refDigest and refTag are Docker's reference grammar (distribution/reference), so a
+// reference read from a repo's file can't start with "-" and be read as a docker flag. The name's
+// is renovate.ImageName, which also checks the image names of the rules the plan writes.
 var (
-	refName   = regexp.MustCompile(`^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*(?:\.[A-Za-z0-9-]+)*(?::[0-9]+)?(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$`)
+	refName   = renovate.ImageName
 	refDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	refTag    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 )

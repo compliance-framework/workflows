@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -400,7 +401,7 @@ func TestThrottle(t *testing.T) {
 
 func TestGlobalConfigOverrides(t *testing.T) {
 	preset := []byte(`{"packageRules": [{"matchUpdateTypes": ["major"], "automerge": false}]}`)
-	overrides, err := ParseOverrides([]byte(`[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"], "minimumReleaseAge": null, "prHourlyLimit": 0}]`), "o", []string{"r"})
+	overrides, err := ParseOverrides([]byte(`[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"], "matchUpdateTypes": ["digest"], "minimumReleaseAge": null, "prHourlyLimit": 0}]`), "o", []string{"r"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,6 +443,7 @@ func TestGlobalConfigOverrides(t *testing.T) {
 
 func TestParseOverrides(t *testing.T) {
 	const ok = `"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]`
+	rule := func(extra string) string { return `[{` + ok + `, ` + extra + `}]` }
 	for _, tc := range []struct {
 		name, data string
 		n          int
@@ -450,21 +452,59 @@ func TestParseOverrides(t *testing.T) {
 		{"empty", "", 0, ""},
 		{"blank", " \n", 0, ""},
 		{"empty list", "[]", 0, ""},
-		{"rule 1", `[{` + ok + `, "minimumReleaseAge": null, "prHourlyLimit": 0, "prConcurrentLimit": 0, "branchConcurrentLimit": 0, "semanticCommitType": "fix", "groupName": "g", "groupSlug": "s", "automerge": true, "addLabels": ["renovate:automerge"], "prPriority": 10, "prBodyNotes": ["n"]}]`, 1, ""},
-		{"rule 2", `[{` + ok + `, "matchCurrentVersion": "/^20(\\.|-|$)/", "allowedVersions": "/^22(\\.|-|$)/", "automerge": false, "addLabels": ["needs-human"]}]`, 1, ""},
+		{"rule 1, digest", rule(`"matchCurrentVersion": "/^(stable-alpine)$/", "matchUpdateTypes": ["digest"], "minimumReleaseAge": null, "prHourlyLimit": 0, "prConcurrentLimit": 0, "branchConcurrentLimit": 0, "semanticCommitType": "fix", "groupName": "g", "groupSlug": "s", "automerge": true, "addLabels": ["renovate:automerge"], "prPriority": 10, "prBodyNotes": ["n"]`), 1, ""},
+		{"rule 1, patch", `[{` + ok + `, "matchCurrentVersion": "/^(1\\.26\\.1)$/", "separateMinorPatch": true}, {` + ok + `, "matchCurrentVersion": "/^(1\\.26\\.1)$/", "matchUpdateTypes": ["patch"], "matchNewValue": "/^(1\\.26\\.2)$/", "automerge": true}]`, 2, ""},
+		{"rule 2", rule(`"matchCurrentVersion": "/^20(\\.|-|$)/", "allowedVersions": "/^22(\\.|-|$)/", "automerge": false, "addLabels": ["needs-human"]`), 1, ""},
+		{"a registry port", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["localhost:5000/team/app"]}]`, 1, ""},
 		{"not JSON", `[{`, 0, "overrides"},
 		{"not a list", `{}`, 0, "overrides"},
 		{"trailing data", `[] []`, 0, "trailing"},
 		{"null rule", `[null]`, 0, "JSON object"},
-		{"unknown key", `[{` + ok + `, "enabled": false}]`, 0, `"enabled" is not allowed`},
-		{"extends", `[{` + ok + `, "extends": ["x"]}]`, 0, `"extends" is not allowed`},
+		{"not an object", `[1]`, 0, "JSON object"},
+		{"unknown key", rule(`"enabled": false`), 0, `"enabled" is not allowed`},
+		{"extends", rule(`"extends": ["x"]`), 0, `"extends" is not allowed`},
+		{"a key in another case", rule(`"AutoMerge": true`), 0, `"AutoMerge" is not allowed`},
 		{"no repository", `[{"matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "matchRepositories must list exactly one"},
 		{"two repositories", `[{"matchRepositories": ["o/r", "o/s"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "exactly one"},
 		{"repository not in the run", `[{"matchRepositories": ["o/s"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "not in this run"},
 		{"other owner", `[{"matchRepositories": ["x/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "not in this run"},
 		{"a pattern", `[{"matchRepositories": ["/.*/"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "not in this run"},
+		{"repository not a string", `[{"matchRepositories": [1], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "matchRepositories: want a []string"},
 		{"other manager", `[{"matchRepositories": ["o/r"], "matchManagers": ["npm"], "matchDepNames": ["nginx"]}]`, 0, "matchManagers"},
-		{"no deps", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": []}]`, 0, "matchDepNames"},
+		{"two managers", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile", "npm"], "matchDepNames": ["nginx"]}]`, 0, "matchManagers"},
+		{"no deps", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": []}]`, 0, "matchDepNames is empty"},
+		{"deps missing", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"]}]`, 0, "matchDepNames must list"},
+		{"deps null", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": null}]`, 0, "matchDepNames is empty or null"},
+		{"dep glob", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["*"]}]`, 0, "not an image name"},
+		{"dep glob in a path", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["library/**"]}]`, 0, "not an image name"},
+		{"dep regex", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["/.*/"]}]`, 0, "not an image name"},
+		{"dep negation", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["!nginx"]}]`, 0, "not an image name"},
+		{"dep with a tag", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx:1"]}]`, 0, "not an image name"},
+		{"dep with a digest", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx@sha256:` + strings.Repeat("1", 64) + `"]}]`, 0, "not an image name"},
+		{"dep not a string", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": [1]}]`, 0, "matchDepNames: want a []string"},
+		{"automerge not a bool", rule(`"automerge": "true"`), 0, "automerge: want a *bool"},
+		{"automerge null", rule(`"automerge": null`), 0, "automerge is empty or null"},
+		{"limit a string", rule(`"prHourlyLimit": "0"`), 0, "prHourlyLimit: want a *int"},
+		{"limit a fraction", rule(`"prConcurrentLimit": 0.5`), 0, "prConcurrentLimit: want a *int"},
+		{"negative limit", rule(`"branchConcurrentLimit": -1`), 0, "branchConcurrentLimit is negative"},
+		{"negative priority", rule(`"prPriority": -1`), 0, "prPriority is negative"},
+		{"release age set", rule(`"minimumReleaseAge": "0 days"`), 0, "minimumReleaseAge must be null"},
+		{"labels not strings", rule(`"addLabels": [true]`), 0, "addLabels: want a []string"},
+		{"body notes a string", rule(`"prBodyNotes": "n"`), 0, "prBodyNotes: want a []string"},
+		{"commit type a list", rule(`"semanticCommitType": ["fix"]`), 0, "semanticCommitType: want a string"},
+		{"group name empty", rule(`"groupName": ""`), 0, "groupName is empty"},
+		{"current version empty", rule(`"matchCurrentVersion": ""`), 0, "matchCurrentVersion is empty"},
+		{"current version a glob", rule(`"matchCurrentVersion": "*"`), 0, "anchored at the start"},
+		{"current version unanchored", rule(`"matchCurrentVersion": "/.*/"`), 0, "anchored at the start"},
+		{"new value a glob", rule(`"matchUpdateTypes": ["patch"], "matchNewValue": "**"`), 0, "anchored at the start"},
+		{"allowed versions a range", rule(`"allowedVersions": "<99"`), 0, "anchored at the start"},
+		{"regex that doesn't compile", rule(`"allowedVersions": "/^(22/"`), 0, "anchored at the start"},
+		{"major update type", rule(`"matchUpdateTypes": ["major"]`), 0, `"major" is not allowed`},
+		{"update types empty", rule(`"matchUpdateTypes": []`), 0, "matchUpdateTypes is empty"},
+		{"update types with allowedVersions", rule(`"matchUpdateTypes": ["patch"], "allowedVersions": "/^22/"`), 0, "can't be combined"},
+		{"update types with separateMinorPatch", rule(`"matchUpdateTypes": ["patch"], "separateMinorPatch": true`), 0, "can't be combined"},
+		{"automerge without update types", rule(`"automerge": true`), 0, "must list matchUpdateTypes"},
+		{"automerge every docker dep", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["*"], "matchUpdateTypes": ["digest"], "automerge": true, "minimumReleaseAge": null}]`, 0, "not an image name"},
 	} {
 		rules, err := ParseOverrides([]byte(tc.data), "o", []string{"r"})
 		if tc.err != "" {
@@ -476,5 +516,29 @@ func TestParseOverrides(t *testing.T) {
 		if err != nil || len(rules) != tc.n {
 			t.Errorf("%s: %d rules, %v; want %d", tc.name, len(rules), err, tc.n)
 		}
+	}
+}
+
+// A parsed rule is written back as it was read: the same keys, null and zero values kept.
+func TestParseOverridesRoundTrip(t *testing.T) {
+	in := `[{"matchRepositories":["o/r"],"matchManagers":["dockerfile"],"matchDepNames":["nginx"],"matchCurrentVersion":"/^(1\\.26\\.1)$/","matchUpdateTypes":["patch"],"matchNewValue":"/^(1\\.26\\.2)$/","minimumReleaseAge":null,"prHourlyLimit":0,"prConcurrentLimit":0,"branchConcurrentLimit":0,"semanticCommitType":"fix","groupName":"g","groupSlug":"s","automerge":true,"addLabels":["l"],"prPriority":10,"prBodyNotes":["n"]},` +
+		`{"matchRepositories":["o/r"],"matchManagers":["dockerfile"],"matchDepNames":["node"],"matchCurrentVersion":"/^20/","allowedVersions":"/^22/","separateMinorPatch":true,"automerge":false}]`
+	rules, err := ParseOverrides([]byte(in), "o", []string{"r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want, got []map[string]any
+	if err := json.Unmarshal([]byte(in), &want); err != nil {
+		t.Fatal(err)
+	}
+	out, err := json.Marshal(rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("round trip:\n got %s\nwant %s", out, in)
 	}
 }

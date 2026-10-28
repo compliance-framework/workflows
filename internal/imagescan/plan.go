@@ -7,10 +7,13 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/compliance-framework/workflows/internal/renovate"
 )
 
-// Rule is a Renovate package rule the plan adds for one repo (renovate.ParseOverrides checks it).
-type Rule map[string]any
+// Rule is a Renovate package rule the plan adds for one repo. renovate.ParseOverrides decodes the
+// same type, so the plan can only write keys the check allows.
+type Rule = renovate.PackageRule
 
 // Group names of the rules: they mirror the preset's vulnerabilityAlerts grouping
 // ("security fixes (<manager>)", "security-<manager>").
@@ -41,7 +44,8 @@ type Target struct {
 //
 //  1. A final-stage base image with actionable findings, whose newer candidate (the tag's
 //     current digest; for an X.Y.Z tag the newest X.Y patch) scans clean of them: a rule that lets
-//     Renovate open that update at once, grouped as a security fix, and auto-merge it.
+//     Renovate open that update, and only that one, at once, grouped as a security fix, and
+//     auto-merge it.
 //  2. A base image of any stage on an end-of-life release (node:20) with actionable findings: a
 //     rule that opens the lowest supported release whose current image scans clean of them, for a
 //     human.
@@ -60,11 +64,15 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 	var notes []string
 	note := func(format string, args ...any) { notes = append(notes, fmt.Sprintf(format, args...)) }
 	type fix struct {
+		dep      string
+		kind     string // the candidate's update type: "digest" or "patch"
 		findings []Finding
 		images   []string
 		tags     []string
+		cands    []string // the candidates
+		newTags  []string // the candidates' tags, for "patch"
 	}
-	security := map[string]*fix{}
+	security := map[string]*fix{} // by dep and kind
 	var majors []Rule
 	majorKeys := map[string]bool{}
 	seen := map[string]bool{}
@@ -89,9 +97,11 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 		}
 		if rule, msg, eol := p.eolRule(ctx, repo, ref, act); eol {
 			// One rule per image and release, however many stages use it.
-			if key := fmt.Sprint(rule["matchDepNames"], rule["matchCurrentVersion"]); rule != nil && !majorKeys[key] {
-				majorKeys[key] = true
-				majors = append(majors, rule)
+			if rule != nil {
+				if key := fmt.Sprint(rule.MatchDepNames, rule.MatchCurrentVersion); !majorKeys[key] {
+					majorKeys[key] = true
+					majors = append(majors, *rule)
+				}
 			}
 			note("%s: %s", where, msg)
 			continue
@@ -102,16 +112,16 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 			note("%s: %d actionable finding(s) in a build stage, which the image doesn't ship; left to Renovate's normal updates", where, len(act))
 			continue
 		}
-		cand, why, err := p.candidate(ctx, ref)
+		cand, kind, why, err := p.candidate(ctx, ref)
 		if err != nil {
 			note("%s: %d actionable finding(s); no candidate: %v", where, len(act), err)
 			continue
 		}
-		if cand == "" {
+		if kind == "" {
 			note("%s: %d actionable finding(s) (%s) and %s; the distribution's fix waits for an upstream rebuild", where, len(act), strings.Join(cves(act), ", "), why)
 			continue
 		}
-		cs, err := p.Scanner.Scan(ctx, cand)
+		cs, err := p.Scanner.Scan(ctx, cand.String())
 		if err != nil {
 			note("%s: scan of the candidate %s failed: %v", where, cand, err)
 			continue
@@ -120,39 +130,56 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 			note("%s: the candidate %s still has %s; the distribution's fix waits for an upstream rebuild", where, cand, strings.Join(cves(left), ", "))
 			continue
 		}
-		f := security[ref.Name]
+		f := security[ref.Name+"\x00"+kind]
 		if f == nil {
-			f = &fix{}
-			security[ref.Name] = f
+			f = &fix{dep: ref.Name, kind: kind}
+			security[ref.Name+"\x00"+kind] = f
 		}
 		f.findings = append(f.findings, act...)
 		f.images = append(f.images, ref.String())
 		f.tags = append(f.tags, ref.Tag)
+		f.cands = append(f.cands, cand.String())
+		if kind == "patch" {
+			f.newTags = append(f.newTags, cand.Tag)
+		}
 		note("%s: %s fixes %s (rule 1)", where, cand, strings.Join(cves(act), ", "))
 	}
 
 	var rules []Rule
-	for _, dep := range slices.Sorted(maps.Keys(security)) {
-		f := security[dep]
-		rules = append(rules, Rule{
-			"matchRepositories": []string{p.Owner + "/" + repo},
-			"matchManagers":     []string{"dockerfile"},
-			"matchDepNames":     []string{dep},
+	for _, key := range slices.Sorted(maps.Keys(security)) {
+		f := security[key]
+		match := Rule{
+			MatchRepositories: []string{p.Owner + "/" + repo},
+			MatchManagers:     []string{"dockerfile"},
+			MatchDepNames:     []string{f.dep},
 			// Only the tags scanned: another image of the same name (a build stage on an
 			// end-of-life release) keeps its own rules.
-			"matchCurrentVersion":   tagsRegex(f.tags),
-			"minimumReleaseAge":     nil,
-			"prHourlyLimit":         0,
-			"prConcurrentLimit":     0,
-			"branchConcurrentLimit": 0,
-			"semanticCommitType":    "fix",
-			"groupName":             SecurityGroupName,
-			"groupSlug":             SecurityGroupSlug,
-			"automerge":             true,
-			"addLabels":             []string{"renovate:automerge"},
-			"prPriority":            10,
-			"prBodyNotes":           []string{bodyNote(fmt.Sprintf("this update of %s fixes", codeList(f.images)), f.findings)},
-		})
+			MatchCurrentVersion: tagsRegex(f.tags),
+		}
+		header := fmt.Sprintf("this update of %s fixes", codeList(f.images))
+		// Only the update scanned is fast-tracked; Renovate's other updates of the image (a
+		// major, a newer minor) keep the preset's rules.
+		rule := match
+		rule.MatchUpdateTypes = []string{f.kind}
+		if f.kind == "patch" {
+			// Without it, Renovate folds the patch into its newest minor (one non-major update).
+			// It must be a rule of its own: Renovate refuses separateMinorPatch next to
+			// matchUpdateTypes.
+			split := match
+			split.SeparateMinorPatch = new(true)
+			rules = append(rules, split)
+			rule.MatchNewValue = tagsRegex(f.newTags)
+			header = fmt.Sprintf("this update of %s to %s fixes", codeList(f.images), codeList(f.cands))
+		}
+		rule.MinimumReleaseAge = renovate.NoReleaseAge
+		rule.PRHourlyLimit, rule.PRConcurrentLimit, rule.BranchConcurrentLimit = new(0), new(0), new(0)
+		rule.SemanticCommitType = "fix"
+		rule.GroupName, rule.GroupSlug = SecurityGroupName, SecurityGroupSlug
+		rule.Automerge = new(true)
+		rule.AddLabels = []string{renovate.AutomergeLabel}
+		rule.PRPriority = new(10)
+		rule.PRBodyNotes = []string{bodyNote(header, f.findings)}
+		rules = append(rules, rule)
 	}
 	return append(rules, majors...), notes
 }
@@ -160,7 +187,7 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 // eolRule applies rule 2 to an image of an eolLines product. eol is false when the image's release
 // isn't known to be end-of-life (msg then says why, if it couldn't be checked); otherwise rule is
 // the rule opening the lowest clean supported release, or nil with msg saying why there is none.
-func (p *Planner) eolRule(ctx context.Context, repo string, ref Ref, act []Finding) (rule Rule, msg string, eol bool) {
+func (p *Planner) eolRule(ctx context.Context, repo string, ref Ref, act []Finding) (rule *Rule, msg string, eol bool) {
 	line, ok := lineOf(ref.Name)
 	if !ok {
 		return nil, "", false
@@ -207,17 +234,17 @@ func (p *Planner) eolRule(ctx context.Context, repo string, ref Ref, act []Findi
 			tried = append(tried, fmt.Sprintf("%s (still has %s)", cand, strings.Join(cves(left), ", ")))
 			continue
 		}
-		rule = Rule{
-			"matchRepositories":   []string{p.Owner + "/" + repo},
-			"matchManagers":       []string{"dockerfile"},
-			"matchDepNames":       []string{ref.Name},
-			"matchCurrentVersion": cycleRegex(current),
-			"allowedVersions":     cycleRegex(c.Name),
-			"prHourlyLimit":       0,
-			"prConcurrentLimit":   0,
-			"automerge":           false,
-			"addLabels":           []string{"needs-human"},
-			"prBodyNotes":         []string{bodyNote(fmt.Sprintf("`%s` is on %s %s, which is end-of-life; this update to %s %s fixes", ref, line.Product, current, line.Product, c.Name), trigger)},
+		rule = &Rule{
+			MatchRepositories:   []string{p.Owner + "/" + repo},
+			MatchManagers:       []string{"dockerfile"},
+			MatchDepNames:       []string{ref.Name},
+			MatchCurrentVersion: cycleRegex(current),
+			AllowedVersions:     cycleRegex(c.Name),
+			PRHourlyLimit:       new(0),
+			PRConcurrentLimit:   new(0),
+			Automerge:           new(false),
+			AddLabels:           []string{"needs-human"},
+			PRBodyNotes:         []string{bodyNote(fmt.Sprintf("`%s` is on %s %s, which is end-of-life; this update to %s %s fixes", ref, line.Product, current, line.Product, c.Name), trigger)},
 		}
 		return rule, fmt.Sprintf("%s %s is end-of-life; %s fixes %s (rule 2)", line.Product, current, cand, strings.Join(cves(trigger), ", ")), true
 	}
@@ -242,34 +269,35 @@ func (p *Planner) cyclesOf(ctx context.Context, product string) ([]Cycle, error)
 	return c, nil
 }
 
-// candidate returns the image Renovate would move ref to without a major: for an X.Y.Z tag the
-// newest X.Y patch with the same suffix, else the tag's current digest when ref pins an older one.
-// "" (with why) when there is none.
-func (p *Planner) candidate(ctx context.Context, ref Ref) (cand, why string, err error) {
+// candidate returns the newer image of ref that rule 1 can fast-track, and its Renovate update
+// type: for an X.Y.Z tag the newest X.Y patch with the same suffix ("patch"), else the tag's
+// current digest when ref pins an older one ("digest"). A zero Ref (with why) when there is none.
+func (p *Planner) candidate(ctx context.Context, ref Ref) (cand Ref, kind, why string, err error) {
 	if ref.Tag == "" {
-		return "", "it has no tag to follow", nil
+		return Ref{}, "", "it has no tag to follow", nil
 	}
 	if v, ok := parseTagVersion(ref.Tag); ok && len(v.parts) >= 3 {
 		tags, err := p.Registry.Tags(ctx, ref.Name)
 		if err != nil {
-			return "", "", fmt.Errorf("list tags of %s: %w", ref.Name, err)
+			return Ref{}, "", "", fmt.Errorf("list tags of %s: %w", ref.Name, err)
 		}
 		if tag, ok := newestPatch(ref.Tag, tags); ok {
-			return ref.WithTag(tag).String(), "", nil
+			return ref.WithTag(tag), "patch", "", nil
 		}
 	}
 	if ref.Digest == "" {
-		return "", "the tag is not pinned by digest, so it already is the newest image of the tag", nil
+		return Ref{}, "", "the tag is not pinned by digest, so it already is the newest image of the tag", nil
 	}
-	tagRef := ref.WithTag(ref.Tag).String()
-	d, err := p.Registry.Digest(ctx, tagRef)
+	tagRef := ref.WithTag(ref.Tag)
+	d, err := p.Registry.Digest(ctx, tagRef.String())
 	if err != nil {
-		return "", "", fmt.Errorf("digest of %s: %w", tagRef, err)
+		return Ref{}, "", "", fmt.Errorf("digest of %s: %w", tagRef, err)
 	}
 	if d == ref.Digest {
-		return "", "the tag has not been rebuilt since the pinned digest", nil
+		return Ref{}, "", "the tag has not been rebuilt since the pinned digest", nil
 	}
-	return tagRef + "@" + d, "", nil
+	tagRef.Digest = d
+	return tagRef, "digest", "", nil
 }
 
 // actionable returns the findings with a fix that are HIGH or CRITICAL.

@@ -84,10 +84,10 @@ The plan (`imagescan.Planner`) makes at most one rule 1 per repo and image name,
 repo, image name and release, written as a JSON list of Renovate `packageRules`:
 
 1. **Rule 1: a newer image of the same tag fixes it.** A final-stage base image with actionable
-   findings, whose candidate scans clean of all of them. The candidate is what Renovate would move
-   to without a major: for an `X.Y.Z` tag, the newest `X.Y` patch with the same suffix; otherwise,
-   when the reference pins a digest, the tag's current digest (`nginx:stable-alpine@sha256:<old>`
-   moves to the tag's rebuild). The rule:
+   findings, whose candidate scans clean of all of them. The candidate is the closest newer image:
+   for an `X.Y.Z` tag, the newest `X.Y` patch with the same suffix (a `patch` update); otherwise,
+   when the reference pins a digest, the tag's current digest (a `digest` update:
+   `nginx:stable-alpine@sha256:<old>` moves to the tag's rebuild). The rule:
 
    ```json
    {
@@ -95,6 +95,7 @@ repo, image name and release, written as a JSON list of Renovate `packageRules`:
      "matchManagers": ["dockerfile"],
      "matchDepNames": ["nginx"],
      "matchCurrentVersion": "/^(stable-alpine)$/",
+     "matchUpdateTypes": ["digest"],
      "minimumReleaseAge": null,
      "prHourlyLimit": 0, "prConcurrentLimit": 0, "branchConcurrentLimit": 0,
      "semanticCommitType": "fix",
@@ -110,6 +111,28 @@ repo, image name and release, written as a JSON list of Renovate `packageRules`:
    body lists the CVEs with the package, versions and severity of each. `matchCurrentVersion`
    limits it to the tags scanned, so another image of the same name in the repo (a `node:20` build
    stage next to a `node:22` final stage) keeps its own rules.
+
+   The rule applies only to the update that was scanned. `matchUpdateTypes` keeps it off
+   Renovate's other updates of the image, which keep the preset's rules: a major still waits for
+   its release age, stays under the preset's caps and gets `needs-human`. For a `patch` candidate
+   (`golang:1.26.1` to `golang:1.26.2`) the rule also has `"matchNewValue": "/^(1\\.26\\.2)$/"`,
+   the scanned tag, so a patch released after the scan isn't fast-tracked. Without more, Renovate
+   would not open that patch at all: `separateMinorPatch` is off by default, so the patch shares
+   the `non-major` bucket with the minors, and Renovate proposes the newest minor (`1.27.x`). So
+   a `patch` candidate gets a second rule, written before the first, that turns
+   `separateMinorPatch` on for the scanned tags; the minor then gets its own PR under the preset's
+   rules. It has to be its own rule: Renovate refuses `matchUpdateTypes` in a rule together with
+   `separateMinorPatch` or `allowedVersions`, which act before the update type is known.
+
+   ```json
+   {
+     "matchRepositories": ["compliance-framework/ui"],
+     "matchManagers": ["dockerfile"],
+     "matchDepNames": ["golang"],
+     "matchCurrentVersion": "/^(1\\.26\\.1)$/",
+     "separateMinorPatch": true
+   }
+   ```
 2. **Rule 2: the image is on an end-of-life release.** A base image of any stage whose tag names an
    end-of-life release of `node`, `debian` or `alpine` (`imagescan.eolLines`; [endoflife.date](https://endoflife.date/)'s
    API, failing soft: when it can't be read the image goes through rules 1 and 3) with actionable
@@ -154,13 +177,23 @@ the preset's `packageRules`, so they win over the preset's (Renovate applies mat
 order, later ones last). The file is generated input, so `renovate.ParseOverrides` checks it
 strictly and the config step fails on anything else:
 
+- only the keys of `renovate.PackageRule`, which the planner builds its rules from:
+  `matchRepositories`, `matchManagers`, `matchDepNames`, `matchCurrentVersion`,
+  `matchUpdateTypes`, `matchNewValue`, `allowedVersions`, `separateMinorPatch`,
+  `minimumReleaseAge`, `prHourlyLimit`, `prConcurrentLimit`, `branchConcurrentLimit`,
+  `semanticCommitType`, `groupName`, `groupSlug`, `automerge`, `addLabels`, `prPriority` and
+  `prBodyNotes`; each with a value of its type that is neither empty nor null, except
+  `minimumReleaseAge`, which must be null;
 - every rule names exactly one `matchRepositories` entry, `compliance-framework/<repo>`, with the
   repo in the run's selection;
-- `matchManagers` is exactly `["dockerfile"]` and `matchDepNames` lists at least one image;
-- only these keys: `matchRepositories`, `matchManagers`, `matchDepNames`, `matchCurrentVersion`,
-  `allowedVersions`, `minimumReleaseAge`, `prHourlyLimit`, `prConcurrentLimit`,
-  `branchConcurrentLimit`, `semanticCommitType`, `groupName`, `groupSlug`, `automerge`,
-  `addLabels`, `prPriority` and `prBodyNotes`.
+- `matchManagers` is exactly `["dockerfile"]`, and `matchDepNames` lists at least one image, each
+  by its plain name (no tag, digest, glob, `!` or `/regex/`), so a rule can't reach every Docker
+  dependency of a repo;
+- the limits and `prPriority` are not negative; `matchCurrentVersion`, `matchNewValue` and
+  `allowedVersions` are regexes anchored at the start (`/^.../`);
+- `matchUpdateTypes` lists only `digest` or `patch`, never next to `allowedVersions` or
+  `separateMinorPatch` (Renovate refuses that), and a rule that auto-merges must list it, so no
+  override can auto-merge a minor or a major.
 
 A missing or empty file adds no rules.
 

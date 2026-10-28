@@ -97,7 +97,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("read preset: %w", err)
 	}
-	var rules []any
+	var rules []renovate.PackageRule
 	if *overrides != "" {
 		raw, err := os.ReadFile(*overrides)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {

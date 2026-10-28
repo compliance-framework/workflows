@@ -102,7 +102,7 @@ func TestRunConfigOverrides(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(`[{"matchRepositories": ["compliance-framework/mock-ui"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"], "automerge": true}]`)
+	write(`[{"matchRepositories": ["compliance-framework/mock-ui"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"], "matchUpdateTypes": ["digest"], "automerge": true}]`)
 	got := rules(t, "--overrides", file)
 	if len(got) != len(preset)+1 || got[len(got)-1]["matchDepNames"] == nil {
 		t.Errorf("overrides: %d rules, want the preset's %d then the override last", len(got), len(preset))

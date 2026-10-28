@@ -1,29 +1,46 @@
 [
   {
-    "addLabels": [
-      "renovate:automerge"
-    ],
-    "automerge": true,
-    "branchConcurrentLimit": 0,
-    "groupName": "security fixes (dockerfile)",
-    "groupSlug": "security-dockerfile",
-    "matchCurrentVersion": "/^(1\\.26\\.1)$/",
-    "matchDepNames": [
-      "golang"
+    "matchRepositories": [
+      "compliance-framework/ui"
     ],
     "matchManagers": [
       "dockerfile"
     ],
+    "matchDepNames": [
+      "golang"
+    ],
+    "matchCurrentVersion": "/^(1\\.26\\.1)$/",
+    "separateMinorPatch": true
+  },
+  {
     "matchRepositories": [
       "compliance-framework/ui"
     ],
-    "minimumReleaseAge": null,
-    "prBodyNotes": [
-      "**image-scan** (compliance-framework/workflows): this update of `golang:1.26.1` fixes:\n\n- CVE-2026-111497: os brotli-libs 1.2.0-r1, fixed in 1.2.1-r0 (CRITICAL)\n- CVE-2026-92392: os curl 8.22.0-r0, fixed in 8.23.0-r0 (HIGH)"
+    "matchManagers": [
+      "dockerfile"
     ],
-    "prConcurrentLimit": 0,
+    "matchDepNames": [
+      "golang"
+    ],
+    "matchCurrentVersion": "/^(1\\.26\\.1)$/",
+    "matchUpdateTypes": [
+      "patch"
+    ],
+    "matchNewValue": "/^(1\\.26\\.2)$/",
+    "minimumReleaseAge": null,
     "prHourlyLimit": 0,
+    "prConcurrentLimit": 0,
+    "branchConcurrentLimit": 0,
+    "semanticCommitType": "fix",
+    "groupName": "security fixes (dockerfile)",
+    "groupSlug": "security-dockerfile",
+    "automerge": true,
+    "addLabels": [
+      "renovate:automerge"
+    ],
     "prPriority": 10,
-    "semanticCommitType": "fix"
+    "prBodyNotes": [
+      "**image-scan** (compliance-framework/workflows): this update of `golang:1.26.1` to `golang:1.26.2` fixes:\n\n- CVE-2026-111497: os brotli-libs 1.2.0-r1, fixed in 1.2.1-r0 (CRITICAL)\n- CVE-2026-92392: os curl 8.22.0-r0, fixed in 8.23.0-r0 (HIGH)"
+    ]
   }
 ]
