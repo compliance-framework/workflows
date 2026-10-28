@@ -46,13 +46,61 @@ func TestGoImageTarget(t *testing.T) {
 	}
 }
 
-// TestFollowGo: once go get has raised the go line (fixture goimage: go 1.26.3), the root
-// Dockerfiles' golang images below it move up, keeping their variants and, re-resolved, their
-// digests; floating tags that already meet it, newer images, tags that are not versions and
-// Dockerfiles outside the root stay. Decide never plans them.
+// goImageFiles is a checkout whose go line go get has just raised to 1.26.3. Its Dockerfiles are
+// written by the tests, not kept in testdata: Renovate reads this repo's testdata Dockerfiles and
+// would move their images.
+func goImageFiles(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// TestFollowGo: once go get has raised the go line to 1.26.3, the root Dockerfiles' golang images
+// below it move up, keeping their variants and, re-resolved, their digests; floating tags that
+// already meet it, newer images, tags that are not versions, placeholders and Dockerfiles outside
+// the root stay. Decide never plans them.
 func TestFollowGo(t *testing.T) {
-	const newDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	dir := copyDir(t, "goimage")
+	oldDigest, newDigest := "sha256:"+strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64)
+	files := map[string]string{
+		"go.mod": "module github.com/compliance-framework/mock-agent\n\ngo 1.26.3\n\nrequire github.com/compliance-framework/mock-api v0.1.0\n",
+		"Dockerfile": `# The builder must be at least the go line (the golang image sets GOTOOLCHAIN=local).
+FROM golang:1.26.1 AS builder
+RUN go build -o /agent .
+
+FROM --platform=$BUILDPLATFORM golang:1.26.1-alpine@` + oldDigest + ` AS tools
+
+FROM gcr.io/distroless/base-debian12 AS final
+COPY --from=builder /agent /agent
+`,
+		"Dockerfile-ci": `ARG GO_VERSION=1.25.0
+from golang:1.26 as floating
+FROM golang:1.25-bookworm AS older-floating
+FROM docker.io/library/golang:1.26.1-alpine3.22@` + oldDigest + ` AS same-image-again
+FROM docker.io/library/golang:1.27.0 AS newer
+FROM golang:1 AS major
+FROM golang:alpine AS no-version
+FROM golang:${GO_VERSION} AS templated
+FROM golangci/golangci-lint:v2.15.0 AS lint
+FROM debian:bookworm-slim
+`,
+		"build/Dockerfile": "# Not in the root: left alone.\nFROM golang:1.20\n",
+	}
+	want := map[string]string{
+		"Dockerfile": strings.NewReplacer("golang:1.26.1 ", "golang:1.26.3 ",
+			"golang:1.26.1-alpine@"+oldDigest, "golang:1.26.3-alpine@"+newDigest).Replace(files["Dockerfile"]),
+		"Dockerfile-ci": strings.NewReplacer("golang:1.25-bookworm", "golang:1.26-bookworm",
+			"golang:1.26.1-alpine3.22@"+oldDigest, "golang:1.26.3-alpine3.22@"+newDigest).Replace(files["Dockerfile-ci"]),
+	}
+	dir := goImageFiles(t, files)
 	var asked []string
 	cfg := Config{Owner: "compliance-framework", Run: (&recorder{}).run, Digest: func(_ context.Context, ref string) (string, error) {
 		asked = append(asked, ref)
@@ -100,7 +148,15 @@ func TestFollowGo(t *testing.T) {
 		t.Errorf("plan changes = %+v, want the go.mod change and the images'", got.Changes)
 	}
 	check(t, "digests asked for", asked, []string{"golang:1.26.3-alpine", "docker.io/library/golang:1.26.3-alpine3.22"})
-	compareGolden(t, dir, "goimage")
+	for name, content := range files {
+		w, ok := want[name]
+		if !ok {
+			w = content
+		}
+		if b, _ := os.ReadFile(filepath.Join(dir, name)); string(b) != w {
+			t.Errorf("%s:\n%s\nwant:\n%s", name, b, w)
+		}
+	}
 
 	// Settle counts them as applied: their files changed and their pins moved.
 	after, err := ScanAll(dir, us)
@@ -132,16 +188,11 @@ func TestFollowGoDigestError(t *testing.T) {
 		"not a digest": func(context.Context, string) (string, error) { return "latest", nil },
 	} {
 		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
 			files := map[string]string{
 				"go.mod":     "module example.com/m\n\ngo 1.26.3\n",
 				"Dockerfile": "FROM golang:1.26.1@sha256:" + strings.Repeat("a", 64) + " AS builder\n",
 			}
-			for f, content := range files {
-				if err := os.WriteFile(filepath.Join(dir, f), []byte(content), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
+			dir := goImageFiles(t, files)
 			us := Updaters(Config{Owner: "compliance-framework", Digest: digest})
 			if _, _, err := FollowGo(context.Background(), dir, us, Plan{Changes: []Change{mod}}); err == nil {
 				t.Fatal("FollowGo succeeded")
