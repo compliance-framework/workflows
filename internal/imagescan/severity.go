@@ -1,6 +1,7 @@
 package imagescan
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -25,6 +26,14 @@ import (
 // later image unrated.
 const maxLookupFailures = 3
 
+// maxTrippedImages bounds the whole run: after the breaker trips on this many images in a row
+// (no lookup answered in between), alias lookups are off for the rest of the run, so an outage
+// costs at most maxTrippedImages*maxLookupFailures lookups however many images the run scans.
+const maxTrippedImages = 2
+
+// vulnLookupTimeout bounds one alias lookup (each attempt), well under the client's 30s.
+const vulnLookupTimeout = 10 * time.Second
+
 // defaultRetryWait is how long a lookup answered 429 or 5xx waits before its one retry, unless the
 // answer's Retry-After says otherwise (up to maxRetryWait).
 const (
@@ -38,6 +47,8 @@ type vulnCache struct {
 	vulns    map[string]*Vuln // nil: OSV has no such record
 	failures int              // lookups that failed in a row, for the image being rated
 	lastErr  error
+	tripped  int  // images in a row whose breaker tripped
+	off      bool // alias lookups are off for the rest of the run (maxTrippedImages)
 }
 
 // Vuln returns advisory id from api.osv.dev (GET /v1/vulns/<id>), once per run: the result is
@@ -51,6 +62,9 @@ func (o *OSV) Vuln(ctx context.Context, id string) (*Vuln, error) {
 	if v, ok := c.vulns[id]; ok {
 		return v, nil
 	}
+	if c.off {
+		return nil, fmt.Errorf("OSV advisory %s not fetched: alias lookups are off for the rest of the run, after %d images in a row whose lookups failed, the last with: %w", id, maxTrippedImages, c.lastErr)
+	}
 	if c.failures >= maxLookupFailures {
 		return nil, fmt.Errorf("OSV advisory %s not fetched: %d lookups failed in a row, the last with: %w", id, c.failures, c.lastErr)
 	}
@@ -60,7 +74,7 @@ func (o *OSV) Vuln(ctx context.Context, id string) (*Vuln, error) {
 		c.lastErr = err
 		return nil, fmt.Errorf("OSV advisory %s: %w", id, err)
 	}
-	c.failures = 0
+	c.failures, c.tripped = 0, 0
 	if c.vulns == nil {
 		c.vulns = map[string]*Vuln{}
 	}
@@ -68,11 +82,15 @@ func (o *OSV) Vuln(ctx context.Context, id string) (*Vuln, error) {
 	return v, nil
 }
 
-// fetchVuln gets advisory id, retrying a 429 or 5xx once; a 404 is no record (nil).
+// fetchVuln gets advisory id, retrying a 429 or 5xx once, each attempt within vulnLookupTimeout;
+// a 404 is no record (nil).
 func (o *OSV) fetchVuln(ctx context.Context, id string) (*Vuln, error) {
+	timeout := cmp.Or(o.lookupTimeout, vulnLookupTimeout)
 	for attempt := 0; ; attempt++ {
 		var v *Vuln
-		err := getJSON(ctx, o.HTTP, strings.TrimRight(o.BaseURL, "/")+"/v1/vulns/"+url.PathEscape(id), &v)
+		actx, cancel := context.WithTimeout(ctx, timeout)
+		err := getJSON(actx, o.HTTP, strings.TrimRight(o.BaseURL, "/")+"/v1/vulns/"+url.PathEscape(id), &v)
+		cancel()
 		he := (*httpError)(nil)
 		if !errors.As(err, &he) {
 			return v, err
@@ -83,10 +101,7 @@ func (o *OSV) fetchVuln(ctx context.Context, id string) (*Vuln, error) {
 		if attempt > 0 || (he.Code != http.StatusTooManyRequests && he.Code < 500) {
 			return nil, err
 		}
-		wait := o.retryWait
-		if wait == 0 {
-			wait = defaultRetryWait
-		}
+		wait := cmp.Or(o.retryWait, defaultRetryWait)
 		if secs, perr := strconv.Atoi(he.RetryAfter); perr == nil && secs >= 0 {
 			wait = min(time.Duration(secs)*time.Second, maxRetryWait)
 		}
@@ -107,10 +122,22 @@ func (o *OSV) fetchVuln(ctx context.Context, id string) (*Vuln, error) {
 // deciding tier had a failed lookup keeps what the rest of that tier gave (UNKNOWN when nothing),
 // doesn't fall through to the next tier, and is counted in the warning returned, unless it is
 // already CRITICAL, which no other alias can raise.
+//
+// The breaker (maxLookupFailures) is per image, and the run is bounded too: after it trips on
+// maxTrippedImages images in a row, no image asks again.
 func (o *OSV) RateFromAliases(ctx context.Context, fs []Finding) []string {
-	o.cache.mu.Lock()
-	o.cache.failures = 0 // the breaker is per image
-	o.cache.mu.Unlock()
+	c := &o.cache
+	c.mu.Lock()
+	c.failures = 0 // the breaker is per image
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.failures >= maxLookupFailures && !c.off {
+			c.tripped++
+			c.off = c.tripped >= maxTrippedImages
+		}
+	}()
 	failed := 0
 	var firstErr error
 	for i := range fs {

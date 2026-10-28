@@ -102,6 +102,51 @@ func TestRateFromAliasesOSVDown(t *testing.T) {
 	}
 }
 
+// TestRateFromAliasesOutageBound: an outage that lasts the whole run costs at most
+// maxTrippedImages images' worth of lookups, however many images the run scans, whether OSV
+// answers 503 (retried once) or not at all (each attempt cut at the lookup timeout); every image
+// still warns.
+func TestRateFromAliasesOutageBound(t *testing.T) {
+	images := map[string]fakeImage{}
+	var refs []string
+	for i := range 6 {
+		ref := fmt.Sprintf("ghcr.io/compliance-framework/agent:t%d", i)
+		images[ref] = goImage["ghcr.io/compliance-framework/agent:latest"]
+		refs = append(refs, ref)
+	}
+	for _, tc := range []struct {
+		name     string
+		osv      fakeOSV
+		requests int
+	}{
+		{"503", fakeOSV{down: true}, maxTrippedImages * maxLookupFailures * 2},
+		{"no answer", fakeOSV{hang: true}, maxTrippedImages * maxLookupFailures},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			osv := &tc.osv
+			s := newScannerOSV(t, &fakeDocker{images: images}, osv)
+			s.OSV.lookupTimeout = 50 * time.Millisecond
+			start := time.Now()
+			for _, ref := range refs {
+				scan, err := s.Scan(context.Background(), ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(scan.Warnings) != 1 {
+					t.Errorf("%s: warnings %q, want one", ref, scan.Warnings)
+				}
+			}
+			if len(osv.fetched) != tc.requests {
+				t.Errorf("%d images made %d requests (%q), want %d", len(refs), len(osv.fetched), osv.fetched, tc.requests)
+			}
+			// maxTrippedImages*maxLookupFailures attempts of 50ms, with room for a slow runner.
+			if d := time.Since(start); d > 3*time.Second {
+				t.Errorf("the run took %v, want it bounded", d)
+			}
+		})
+	}
+}
+
 // TestRateFromAliasesTiers: the highest score among the Bitnami aliases wins; the other aliases
 // are tried only when every Bitnami one was fetched and none has a vector (or a record), and the
 // one with a vector rates it; a failed lookup in the deciding tier is warned about unless the

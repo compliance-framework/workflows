@@ -139,6 +139,7 @@ func (f *fakeDocker) mount(args []string) string {
 type fakeOSV struct {
 	fetched []string // the IDs /v1/vulns was asked for, once per request
 	down    bool     // /v1/vulns answers 503
+	hang    bool     // /v1/vulns never answers (until the client gives up)
 	// fail answers an ID with failCode (503 by default) its first n times; n < 0 is always.
 	fail       map[string]int
 	failCode   int
@@ -150,6 +151,13 @@ func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if id, ok := strings.CutPrefix(r.URL.Path, "/v1/vulns/"); ok && r.Method == http.MethodGet {
 			f.fetched = append(f.fetched, id)
+			if f.hang {
+				select {
+				case <-r.Context().Done():
+				case <-time.After(5 * time.Second):
+				}
+				return
+			}
 			if n := f.fail[id]; f.down || n != 0 {
 				if n > 0 {
 					f.fail[id] = n - 1

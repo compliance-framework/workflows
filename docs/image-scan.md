@@ -77,10 +77,13 @@ none), and the scan does not go on to the next step: a CVE record doesn't replac
 that couldn't be fetched. The scan then carries a warning with the number of findings rated that
 way (unless already CRITICAL, which no alias can raise) and the first error, which `check` writes
 to the log (`::warning::`) and the step summary, and `scan` as a note of the repo. Such a run may
-pass a check it would fail: the warning says so. After three failed lookups in a row the scan of
-that image stops asking, so an unreachable api.osv.dev costs at most three timeouts per image; the
-next image starts asking again, so a short outage in a long scheduled run only affects the images
-scanned during it.
+pass a check it would fail: the warning says so. Each attempt has 10 seconds. After three failed
+lookups in a row the scan of that image stops asking; the next image starts asking again, so a
+short outage in a long scheduled run only affects the images scanned during it. After two images
+in a row stop that way, with no lookup answered in between, lookups are off for the rest of the
+run: an outage that lasts costs at most six lookups (each retried once on a 429 or 5xx), about a
+minute when api.osv.dev doesn't answer at all, however many images the run scans, and every later
+image carries the warning.
 
 `internal/imagescan/testdata` holds the spike's osv-scanner reports of `node:20` and
 `nginx:stable-alpine` and one of agent's published image (`agent.json`, its Go 1.26.1 `stdlib` and

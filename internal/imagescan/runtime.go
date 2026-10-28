@@ -38,8 +38,9 @@ type OSV struct {
 	BaseURL string // OSVAPI
 	HTTP    *http.Client
 	cache   vulnCache // the advisories Vuln fetched
-	// retryWait replaces defaultRetryWait (tests); 0 is the default.
-	retryWait time.Duration
+	// retryWait and lookupTimeout replace defaultRetryWait and vulnLookupTimeout (tests); 0 is
+	// the default.
+	retryWait, lookupTimeout time.Duration
 }
 
 // Query returns the advisories that affect version of package name in ecosystem.
