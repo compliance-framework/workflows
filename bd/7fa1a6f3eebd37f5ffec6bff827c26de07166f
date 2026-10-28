@@ -1,5 +1,0 @@
-lisa-design:
-- permission-workflows: write is unconditional in release-please.yml: the job always may create a release, and the token cannot know in advance whether a later commit touched .github/workflows. The ccf-release-bot installation already holds workflows: write (train/ccf-bump/renovate request it).
-- cut-prerelease.yml is left without workflows: it tags the default branch's head SHA read seconds before creating the release, so the tagged tree matches the head barring a push in that window.
-- release-action.yml's major-tag move uses GITHUB_TOKEN, not ccf-release-bot, so permission-workflows does not apply; out of scope.
-- release-finished.yml only sends repository_dispatch; it creates no refs.
