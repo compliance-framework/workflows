@@ -1,0 +1,3 @@
+lisa-addressed:
+pass 3 fixes:
+- dockerfile-heredoc and blank-continuation-line: instructions() skips here-document bodies (<<EOF, <<-"EOF") and blank lines; test case added.
