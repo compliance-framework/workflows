@@ -195,7 +195,7 @@ Go comes from the caller's `go.mod`.
 | Job | Checks |
 | --- | --- |
 | `golangci-lint` | golangci-lint (version pinned in the workflow) with the repo's config, or this repo's `.golangci.yml` when it has none. Then `golangci-lint config verify` checks that config against the JSON schema built into that version (no download), also when the lint found issues, so one run reports both. An invalid config fails the job. |
-| `go` | `gofmt -l .` (prints the diff), `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test ./...`. |
+| `go` | `gofmt -l .` (prints the diff), `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test ./...`. On a pull request, the `toolchain line` check fails when the base branch's `go.mod` has a `toolchain` line and the PR's has none, or one no higher than its `go` line ([docs/renovate.md](docs/renovate.md), Go toolchain). |
 | `goreleaser` | GoReleaser (version pinned in the workflow): `goreleaser check` (deprecated properties only warn), `goreleaser build --snapshot --clean --single-target`. |
 
 | Input | Default | What |
@@ -237,7 +237,7 @@ The snippets below show only the `uses:` and `with:` keys of that `ci` job.
 | Job | Checks |
 | --- | --- |
 | `golangci-lint` | As in `ci-go-plugin.yml` (same job, with the `lint-new-from-merge-base` and `lint-timeout-minutes` inputs). |
-| `go` | `gofmt -l .`, then the prepare command, `go vet ./...`, `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test -race ./...`, `go build ./...`. |
+| `go` | `gofmt -l .`, then the prepare command, `go vet ./...`, `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test -race ./...`, `go build ./...`. On a pull request, the `toolchain line` check fails when the base branch's `go.mod` has a `toolchain` line and the PR's has none, or one no higher than its `go` line ([docs/renovate.md](docs/renovate.md), Go toolchain). |
 | `make` | The prepare command, then each of `make-targets` (all run even if one fails). With no targets it does nothing and succeeds. |
 
 | Input | Default | What |
@@ -270,7 +270,7 @@ agent publishes three images, so its `ci.yml` must pass the same `images` list a
 | Job | Checks |
 | --- | --- |
 | `golangci-lint` | As in `ci-go-plugin.yml` (same job, with the `lint-new-from-merge-base` and `lint-timeout-minutes` inputs). |
-| `go` | `gofmt -l .`, `go test ./...`. |
+| `go` | `gofmt -l .`, `go test ./...`. On a pull request, the `toolchain line` check fails when the base branch's `go.mod` has a `toolchain` line and the PR's has none, or one no higher than its `go` line ([docs/renovate.md](docs/renovate.md), Go toolchain). |
 | `goreleaser` | `goreleaser check` (deprecated properties only warn). |
 
 Caller: `uses: compliance-framework/workflows/.github/workflows/ci-go-lib.yml@<sha> # vX.Y.Z`.

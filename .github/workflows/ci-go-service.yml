@@ -167,6 +167,33 @@ jobs:
             gofmt -d .
             exit 1
           fi
+      - name: toolchain line
+        # Go standard-library security fixes reach a repo only through its go.mod toolchain line:
+        # Renovate matches them there alone (docs/renovate.md, Go toolchain). go get and go mod
+        # tidy delete a toolchain line at or below the go line, e.g. in Renovate's auto-merged
+        # group PR, so a PR that loses the line, or leaves it no higher than the go line, stops
+        # here instead of quietly dropping the repo's security PRs. A base without the line passes.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --quiet --no-tags --depth=1 origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          if ! git show "origin/$BASE_REF:go.mod" 2>/dev/null | grep -qE '^toolchain[[:space:]]'; then
+            echo "origin/$BASE_REF's go.mod has no toolchain line: nothing to keep"
+            exit 0
+          fi
+          go_line="$(sed -nE 's/^go[[:space:]]+([^[:space:]]+).*/\1/p' go.mod | head -n 1)"
+          toolchain="$(sed -nE 's/^toolchain[[:space:]]+go([^[:space:]]+).*/\1/p' go.mod | head -n 1)"
+          fix="add \`toolchain goX.Y.Z\` above the go line (go $go_line), e.g. the newest Go release"
+          if [ -z "$toolchain" ]; then
+            echo "::error file=go.mod::the toolchain line is gone (origin/$BASE_REF has one), and Go standard-library security fixes reach this repo only through it: $fix"
+            exit 1
+          fi
+          if [ "$toolchain" = "$go_line" ] || [ "$(printf '%s\n%s\n' "$go_line" "$toolchain" | sort -V | tail -n 1)" != "$toolchain" ]; then
+            echo "::error file=go.mod::toolchain go$toolchain is not above the go line (go $go_line), so go mod tidy removes it: $fix"
+            exit 1
+          fi
+          echo "toolchain go$toolchain is above the go line (go $go_line)"
       - name: Prepare
         id: prepare
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}

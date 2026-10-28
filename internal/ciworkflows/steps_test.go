@@ -220,6 +220,8 @@ func TestSharedCopies(t *testing.T) {
 		{goPlugin, "go", "gofmt", goService, "go"},
 		{goPlugin, "go", "gofmt", goLib, "go"},
 		{goPlugin, "go", "go mod tidy", goService, "go"},
+		{goPlugin, "go", "toolchain line", goService, "go"},
+		{goPlugin, "go", "toolchain line", goLib, "go"},
 		{goService, "go", "Prepare", goService, "make"},
 		{goService, "make", "make", helm, "helm"},
 	} {
@@ -566,6 +568,58 @@ func TestSelfRequired(t *testing.T) {
 			r := run(t, t.TempDir(), src, "NEEDS="+tc.needs)
 			if r.failed != tc.failed || !strings.Contains(r.out, tc.want) {
 				t.Fatalf("failed=%v, want %v; output:\n%s", r.failed, tc.failed, r.out)
+			}
+		})
+	}
+}
+
+// TestToolchainLineGuard: the go job fails a pull request whose go.mod lost the toolchain line its
+// base has, or keeps one no higher than the go line (go mod tidy would delete it); a base without
+// one passes. The base is fetched from origin, as on the runner.
+func TestToolchainLineGuard(t *testing.T) {
+	need(t, "git", "sed", "sort")
+	src := script(t, goPlugin, "go", "toolchain line")
+	const mod = "module example.com/m\n\n"
+	for _, tc := range []struct {
+		name, base, pr string
+		failed         bool
+		msg            string
+	}{
+		{"no toolchain line on the base", mod + "go 1.26.1\n", mod + "go 1.26.3\n", false, "has no toolchain line"},
+		{"no go.mod on the base", "", mod + "go 1.26.3\n", false, "has no toolchain line"},
+		{"kept", mod + "go 1.26.1\n\ntoolchain go1.26.2\n", mod + "go 1.26.1\n\ntoolchain go1.26.10\n", false, "toolchain go1.26.10 is above"},
+		{"moved to the next minor", mod + "go 1.26.1\n\ntoolchain go1.26.10\n", mod + "go 1.26.3\n\ntoolchain go1.27.0\n", false, "toolchain go1.27.0 is above"},
+		{"added by the PR", mod + "go 1.26.1\n", mod + "go 1.26.1\n\ntoolchain go1.26.10\n", false, "has no toolchain line"},
+		{"gone", mod + "go 1.26.1\n\ntoolchain go1.26.2\n", mod + "go 1.26.3\n", true, "::error file=go.mod::the toolchain line is gone"},
+		{"equal to the go line", mod + "go 1.26.1\n\ntoolchain go1.26.2\n", mod + "go 1.26.3\n\ntoolchain go1.26.3\n", true, "::error file=go.mod::toolchain go1.26.3 is not above the go line (go 1.26.3)"},
+		{"below the go line", mod + "go 1.26.1\n\ntoolchain go1.26.2\n", mod + "go 1.26.10\n\ntoolchain go1.26.9\n", true, "is not above the go line"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			upstream := filepath.Join(root, "upstream")
+			if err := os.MkdirAll(upstream, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			git(t, upstream, "init", "-q", "-b", "main")
+			if tc.base != "" {
+				if err := os.WriteFile(filepath.Join(upstream, "go.mod"), []byte(tc.base), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			git(t, upstream, "commit", "-q", "--allow-empty", "-m", "base")
+			git(t, upstream, "add", "-A")
+			git(t, upstream, "commit", "-q", "--allow-empty", "-m", "base go.mod")
+			pr := filepath.Join(root, "pr")
+			git(t, root, "clone", "-q", "--depth=1", "file://"+upstream, pr)
+			if err := os.WriteFile(filepath.Join(pr, "go.mod"), []byte(tc.pr), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			r := run(t, pr, src, "BASE_REF=main")
+			if r.failed != tc.failed || !strings.Contains(r.out, tc.msg) {
+				t.Fatalf("failed=%v, want %v and %q:\n%s", r.failed, tc.failed, tc.msg, r.out)
+			}
+			if tc.failed && !strings.Contains(r.out, "add `toolchain goX.Y.Z` above the go line") {
+				t.Errorf("the error doesn't say how to fix it:\n%s", r.out)
 			}
 		})
 	}
