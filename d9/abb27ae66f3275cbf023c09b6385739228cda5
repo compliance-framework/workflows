@@ -1,0 +1,2 @@
+lisa-addressed:
+- review PRRT_kwDOKQL6as6xVFaE (run-wide bound): maxTrippedImages=2 consecutive tripped images -> lookups off for the run (reset by any answered lookup); per-attempt timeout 10s (vulnLookupTimeout, OSV.lookupTimeout for tests); TestRateFromAliasesOutageBound: 6 images, 503 -> 12 requests, no answer -> 6 requests, bounded time, every image warns.
