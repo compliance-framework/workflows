@@ -97,7 +97,8 @@ An image pinned by digest (`golang:1.26.1@sha256:...`, as Renovate pins them,
 [renovate.md](renovate.md)) gets the new tag's digest, read anonymously from the registry: the
 multi-platform index digest Renovate pins. The old digest is the old tag's, and dropping it would
 leave the image unpinned until Renovate's next `pinDigest` PR. If the registry can't be read, the
-repo's bump fails (a run retries it); the Dockerfile is never left with a wrong digest. The moves
+repo's bump fails (the next sync run, or the train's `/retry`, tries again); the Dockerfile is
+never left with a wrong digest. The moves
 are listed in the PR as `golang` rows, and are auto-merged like any minor or patch (a
 release-candidate `go` line needs a human). Dockerfiles below the root and `FROM` lines whose
 version comes from an `ARG` are left alone.

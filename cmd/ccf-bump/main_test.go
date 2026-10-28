@@ -713,7 +713,8 @@ func TestGoFetchesOrgModulesDirectly(t *testing.T) {
 }
 
 // TestGolangImagesFollowGoLine: when go get raises the go line (mock-api needs go 1.26.3), the
-// Dockerfile's golang builder follows, re-pinned by digest, and the PR lists it (auto-merged).
+// Dockerfile's golang builder follows, re-pinned by digest, and the PR lists it (auto-merged). The
+// golang images are no repo: sync mode never looks up a release of "golang".
 func TestGolangImagesFollowGoLine(t *testing.T) {
 	const oldDigest, newDigest = "sha256:" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256:" + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	root, e, gh, out := setup(t)
@@ -724,6 +725,7 @@ func TestGolangImagesFollowGoLine(t *testing.T) {
 		return newDigest, nil
 	}
 	gh.commits = map[string]string{"mock-api@v0.1.0": "0123456789abcdef0123456789abcdef01234567"}
+	gh.failFor = bump.DepGo
 	dir := filepath.Join(root, "clones", "mock-agent")
 	files := map[string]string{
 		"Dockerfile":    "FROM golang:1.26.1@" + oldDigest + " AS builder\nFROM gcr.io/distroless/base-debian12\n",
@@ -734,7 +736,10 @@ func TestGolangImagesFollowGoLine(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := run(context.Background(), goModRepo(t, root), e); err != nil {
+	addGoMod(t, root, "mock-agent")
+	args := []string{"sync", "--repos", "mock-agent", "--manifest", filepath.Join(root, "repos.yaml"), "--pr", "--dry-run",
+		"--clones", filepath.Join(root, "clones")}
+	if err := run(context.Background(), args, e); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	for _, s := range []string{
