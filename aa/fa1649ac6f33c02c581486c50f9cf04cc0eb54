@@ -4,3 +4,9 @@ lisa-design:
 - Version rule: full versions (1.26.1, rc) move to the go line; floating tags (1.26, 1) keep their precision and move only when older; newer and non-version tags stay. Variant suffix kept. Only root Dockerfile*/*.Dockerfile; ARG-substituted FROMs are skipped.
 - Digests: re-resolved via the registry (imagescan.Crane{}.Digest, anonymous, index digest as Renovate pins) instead of dropping them, so the PR never leaves an image unpinned or pinned to the old tag's digest. A registry failure fails the repo's bump rather than writing a wrong or missing digest.
 - Change.Major for DepGo compares the tag's version without its variant (1.25-bookworm is not valid semver), so golang moves auto-merge; an rc go line is held.
+
+lisa-design:
+- The docker timestamp rule covers minor, patch, digest and pinDigest only: docker majors keep timestamp-required (the request scoped tag updates to minor/patch; majors go to a human anyway), and no other datasource is loosened.
+- golang-version releases carry dates (go 1.27.3: 2026-10-19 in the lookup), so the go directive keeps the 7-day wait and gets no timestamp exception. Docker tags have none, so the image moves without waiting and is never behind the go line Renovate writes.
+- The go directive rule (gomod, depType golang, rangeStrategy bump) sets no update types, group or limits: minor/patch fall into the all-non-major group rule with the golang image; a major (Go 2) would hit the majors rule. It is semanticCommitType fix: setup-go builds releases with the go line's Go, so the bump must release.
+- Evidence comes from read-only --dry-run=lookup runs on agent with Renovate 44.145.1; the config command inlines the local renovate/default.json (no remote github> preset), so the branch's file is what was tested.
