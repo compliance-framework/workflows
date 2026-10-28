@@ -44,7 +44,7 @@ func (o *OSV) Vuln(ctx context.Context, id string) (*Vuln, error) {
 	}
 	var v *Vuln
 	err := getJSON(ctx, o.HTTP, strings.TrimRight(o.BaseURL, "/")+"/v1/vulns/"+url.PathEscape(id), &v)
-	if he := (*HTTPError)(nil); errors.As(err, &he) && he.Code == http.StatusNotFound {
+	if he := (*httpError)(nil); errors.As(err, &he) && he.Code == http.StatusNotFound {
 		v, err = nil, nil
 	}
 	if err != nil {

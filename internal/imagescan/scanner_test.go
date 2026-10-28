@@ -117,7 +117,7 @@ func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
 			}
 			data, err := os.ReadFile(filepath.Join("testdata", "osv", "vulns", id+".json"))
 			if err != nil {
-				http.Error(w, `{"code":5,"message":"Bug not found."}`, http.StatusNotFound)
+				http.Error(w, `{"code":5,"message":"Vulnerability not found."}`, http.StatusNotFound)
 				return
 			}
 			_, _ = w.Write(data)

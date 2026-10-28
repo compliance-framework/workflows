@@ -90,6 +90,44 @@ func TestRateFromAliasesOSVDown(t *testing.T) {
 	}
 }
 
+// TestRateFromAliasesTiers: the highest score among the Bitnami aliases wins; the other aliases
+// are tried only when no Bitnami one has a vector (or a record), and the one with a vector rates it;
+// a finding with a score is left alone.
+func TestRateFromAliasesTiers(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		f         Finding
+		score     float64
+		from      string
+		fetched   []string
+		wantSever string
+	}{
+		{"the higher of two Bitnami aliases", Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-golang-2026-32282", "BIT-golang-2026-97032", "CVE-2026-39821"}},
+			7.5, "BIT-golang-2026-97032", []string{"BIT-golang-2026-32282", "BIT-golang-2026-97032"}, "HIGH"},
+		{"a Bitnami alias without a record falls through", Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-golang-2026-00000", "CVE-2026-39821"}},
+			9.6, "CVE-2026-39821", []string{"BIT-golang-2026-00000", "CVE-2026-39821"}, "CRITICAL"},
+		{"the other aliases: the one with a vector", Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-x", "RUSTSEC-2026-0381", "CVE-2026-39821"}},
+			9.6, "CVE-2026-39821", []string{"BIT-x", "RUSTSEC-2026-0381", "CVE-2026-39821"}, "CRITICAL"},
+		{"a finding with a score is not looked up", Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-golang-2026-97032"}, Score: 5},
+			5, "", nil, "MEDIUM"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeOSV{}
+			osv := &OSV{BaseURL: fake.serve(t).URL}
+			fs := []Finding{tc.f}
+			if w := osv.RateFromAliases(context.Background(), fs); w != nil {
+				t.Errorf("warnings %q", w)
+			}
+			if fs[0].Score != tc.score || fs[0].ScoreFrom != tc.from || fs[0].Severity() != tc.wantSever {
+				t.Errorf("score %v from %q (%s), want %v from %q (%s)", fs[0].Score, fs[0].ScoreFrom, fs[0].Severity(), tc.score, tc.from, tc.wantSever)
+			}
+			if !slices.Equal(fake.fetched, tc.fetched) {
+				t.Errorf("fetched %q, want %q", fake.fetched, tc.fetched)
+			}
+		})
+	}
+}
+
 func TestAliasTiers(t *testing.T) {
 	f := Finding{IDs: []string{"GO-1"}, Aliases: []string{"CVE-1", "GO-1", "BIT-golang-1", "GHSA-x", "BIT-golang-1", "BIT-node-1"}}
 	got := aliasTiers(f)

@@ -1,312 +1,34 @@
 {
   "results": [
     {
-      "source": {
-        "path": "/app/concom",
-        "type": "artifact"
-      },
+      "source": {"path": "/app/concom", "type": "artifact"},
       "packages": [
         {
-          "package": {
-            "name": "stdlib",
-            "version": "1.26.1",
-            "ecosystem": "Go"
-          },
+          "package": {"name": "stdlib", "version": "1.26.1", "ecosystem": "Go"},
           "vulnerabilities": [
-            {
-              "id": "GO-2026-4864",
-              "aliases": [
-                "BIT-golang-2026-32282",
-                "CVE-2026-32282"
-              ],
-              "summary": "TOCTOU permits root escape on Linux via Root.Chmod in os in internal/syscall/unix",
-              "affected": [
-                {
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "stdlib"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        },
-                        {
-                          "fixed": "1.25.9"
-                        },
-                        {
-                          "introduced": "1.26.0-0"
-                        },
-                        {
-                          "fixed": "1.26.2"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "id": "GO-2026-5026",
-              "aliases": [
-                "CVE-2026-39821"
-              ],
-              "summary": "Invoking failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna",
-              "affected": [
-                {
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "stdlib"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        },
-                        {
-                          "fixed": "1.25.13"
-                        },
-                        {
-                          "introduced": "1.26.0-0"
-                        },
-                        {
-                          "fixed": "1.26.6"
-                        },
-                        {
-                          "introduced": "1.27.0-0"
-                        },
-                        {
-                          "fixed": "1.27.0-rc.3"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                },
-                {
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "golang.org/x/net"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        },
-                        {
-                          "fixed": "0.55.0"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "id": "GO-2026-6617",
-              "aliases": [
-                "BIT-golang-2026-97032",
-                "CVE-2026-97032"
-              ],
-              "summary": "HTTP/2 server crash due to HPACK encoder race in net/http",
-              "affected": [
-                {
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "stdlib"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        },
-                        {
-                          "fixed": "1.26.9"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                },
-                {
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "stdlib"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "1.27.0-0"
-                        },
-                        {
-                          "fixed": "1.27.2"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                },
-                {
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "golang.org/x/net"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        },
-                        {
-                          "fixed": "0.60.0"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "id": "GO-2026-6809",
-              "aliases": [
-                "CVE-2026-111943",
-                "RUSTSEC-2026-0381",
-                "RUSTSEC-2026-0382",
-                "RUSTSEC-2026-0383"
-              ],
-              "summary": "Distrust compromised intermediate certificates in crypto/x509",
-              "affected": [
-                {
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "stdlib"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        },
-                        {
-                          "fixed": "1.26.10"
-                        },
-                        {
-                          "introduced": "1.27.0-0"
-                        },
-                        {
-                          "fixed": "1.27.3"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                }
-              ]
-            }
+            {"id": "GO-2026-4864", "aliases": ["BIT-golang-2026-32282", "CVE-2026-32282"], "summary": "TOCTOU permits root escape on Linux via Root.Chmod in os in internal/syscall/unix", "affected": [{"package": {"ecosystem": "Go", "name": "stdlib"}, "ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.25.9"}, {"introduced": "1.26.0-0"}, {"fixed": "1.26.2"}], "type": "SEMVER"}]}]},
+            {"id": "GO-2026-5026", "aliases": ["CVE-2026-39821"], "summary": "Invoking failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna", "affected": [{"package": {"ecosystem": "Go", "name": "stdlib"}, "ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.25.13"}, {"introduced": "1.26.0-0"}, {"fixed": "1.26.6"}, {"introduced": "1.27.0-0"}, {"fixed": "1.27.0-rc.3"}], "type": "SEMVER"}]}, {"package": {"ecosystem": "Go", "name": "golang.org/x/net"}, "ranges": [{"events": [{"introduced": "0"}, {"fixed": "0.55.0"}], "type": "SEMVER"}]}]},
+            {"id": "GO-2026-6617", "aliases": ["BIT-golang-2026-97032", "CVE-2026-97032"], "summary": "HTTP/2 server crash due to HPACK encoder race in net/http", "affected": [{"package": {"ecosystem": "Go", "name": "stdlib"}, "ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.26.9"}], "type": "SEMVER"}]}, {"package": {"ecosystem": "Go", "name": "stdlib"}, "ranges": [{"events": [{"introduced": "1.27.0-0"}, {"fixed": "1.27.2"}], "type": "SEMVER"}]}, {"package": {"ecosystem": "Go", "name": "golang.org/x/net"}, "ranges": [{"events": [{"introduced": "0"}, {"fixed": "0.60.0"}], "type": "SEMVER"}]}]},
+            {"id": "GO-2026-6809", "aliases": ["CVE-2026-111943", "RUSTSEC-2026-0381", "RUSTSEC-2026-0382", "RUSTSEC-2026-0383"], "summary": "Distrust compromised intermediate certificates in crypto/x509", "affected": [{"package": {"ecosystem": "Go", "name": "stdlib"}, "ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.26.10"}, {"introduced": "1.27.0-0"}, {"fixed": "1.27.3"}], "type": "SEMVER"}]}]}
           ],
           "groups": [
-            {
-              "ids": [
-                "GO-2026-4864"
-              ],
-              "aliases": [
-                "BIT-golang-2026-32282",
-                "CVE-2026-32282",
-                "GO-2026-4864"
-              ],
-              "max_severity": ""
-            },
-            {
-              "ids": [
-                "GO-2026-5026"
-              ],
-              "aliases": [
-                "CVE-2026-39821",
-                "GO-2026-5026"
-              ],
-              "max_severity": ""
-            },
-            {
-              "ids": [
-                "GO-2026-6617"
-              ],
-              "aliases": [
-                "BIT-golang-2026-97032",
-                "CVE-2026-97032",
-                "GO-2026-6617"
-              ],
-              "max_severity": ""
-            },
-            {
-              "ids": [
-                "GO-2026-6809"
-              ],
-              "aliases": [
-                "CVE-2026-111943",
-                "GO-2026-6809",
-                "RUSTSEC-2026-0381",
-                "RUSTSEC-2026-0382",
-                "RUSTSEC-2026-0383"
-              ],
-              "max_severity": ""
-            }
+            {"ids": ["GO-2026-4864"], "aliases": ["BIT-golang-2026-32282", "CVE-2026-32282", "GO-2026-4864"], "max_severity": ""},
+            {"ids": ["GO-2026-5026"], "aliases": ["CVE-2026-39821", "GO-2026-5026"], "max_severity": ""},
+            {"ids": ["GO-2026-6617"], "aliases": ["BIT-golang-2026-97032", "CVE-2026-97032", "GO-2026-6617"], "max_severity": ""},
+            {"ids": ["GO-2026-6809"], "aliases": ["CVE-2026-111943", "GO-2026-6809", "RUSTSEC-2026-0381", "RUSTSEC-2026-0382", "RUSTSEC-2026-0383"], "max_severity": ""}
           ]
         },
         {
-          "package": {
-            "name": "golang.org/x/crypto",
-            "version": "0.58.0",
-            "ecosystem": "Go"
-          },
+          "package": {"name": "golang.org/x/crypto", "version": "0.58.0", "ecosystem": "Go"},
           "vulnerabilities": [
-            {
-              "id": "GO-2026-5932",
-              "aliases": null,
-              "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues",
-              "affected": [
-                {
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "golang.org/x/crypto"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                }
-              ]
-            }
+            {"id": "GO-2026-5932", "aliases": null, "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues", "affected": [{"package": {"ecosystem": "Go", "name": "golang.org/x/crypto"}, "ranges": [{"events": [{"introduced": "0"}], "type": "SEMVER"}]}]}
           ],
           "groups": [
-            {
-              "ids": [
-                "GO-2026-5932"
-              ],
-              "aliases": [
-                "GO-2026-5932"
-              ],
-              "max_severity": ""
-            }
+            {"ids": ["GO-2026-5932"], "aliases": ["GO-2026-5932"], "max_severity": ""}
           ]
         }
       ]
     }
   ],
-  "image_metadata": {
-    "os": "Distroless"
-  }
+  "image_metadata": {"os": "Distroless"}
 }
