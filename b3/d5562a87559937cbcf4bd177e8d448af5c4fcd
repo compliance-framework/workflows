@@ -1,0 +1,4 @@
+lisa-addressed:
+pass 2 fixes:
+- removes-preexisting-images: Scanner.Scan inspects before pulling and removes only images it pulled (TestScanCommands).
+- relative-cache-dir: cmd/image-scan makes --cache-dir absolute.
