@@ -97,8 +97,11 @@ whose `go.mod` had one when it was cloned. If it is gone, ccf-bump writes it bac
 The restored line is a change like any other: it is in the PR's title and table (`go toolchain`,
 `go1.26.2` → `go1.26.10`), auto-merged as a patch or minor, and the golang builder images below
 follow it. Only when no release is above the new `go` line (it is the newest Go release) does the PR go
-without the line; it then needs a human, saying why: until a `toolchain` line above the `go` line is
-added (after the next Go release), the repo gets no standard-library security PRs. go.dev and the
+without the line; it then needs a human, saying why. It can't merge as it is: without the line the
+repo would get no standard-library security PRs, so the shared Go CI's `toolchain line` check (part
+of `required`, [renovate.md](renovate.md)) fails it while the base branch has one. Once a newer Go
+is released, push `toolchain goX.Y.Z` (above the `go` line) to the PR's branch, or let the next
+ccf-bump run restore it, and merge. go.dev and the
 registry are read with a 30-second timeout each. A repo that never had a `toolchain` line gets none. Failing to read go.dev fails a live
 bump, and only warns in a dry run, like the registry below.
 

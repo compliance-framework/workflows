@@ -150,8 +150,8 @@ func toolchainTarget(goLine, old string, stable []string) string {
 // stdlib security PRs.
 const ToolchainDropped = "go get dropped the go.mod toolchain line, and the new go line is the newest Go release, " +
 	"so there is no toolchain above it to restore: without the line the repo gets no Go standard-library security PRs " +
-	"(docs/ccf-bump.md#the-toolchain-line); merge once you accept that, and add `toolchain goX.Y.Z` above the go line " +
-	"when the next Go release is out"
+	"(docs/ccf-bump.md#the-toolchain-line), and CI's toolchain line check fails this PR until a newer Go is released; " +
+	"then push `toolchain goX.Y.Z` (above the go line) to this branch, or let the next ccf-bump run restore it, and merge"
 
 // KeepToolchain keeps the root go.mod's toolchain line, after ApplyAll applied the plan to the
 // checkout in dir: before (the ScanAll of the checkout as cloned) says whether there was one. If

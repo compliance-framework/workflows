@@ -823,6 +823,7 @@ func TestToolchainLineLost(t *testing.T) {
 		"-toolchain go1.26.2",
 		"hold      " + bump.ToolchainDropped,
 		"- " + bump.ToolchainDropped + ".",
+		"CI's toolchain line check fails this PR until a newer Go is released", // it can't merge as it is
 		"would add label needs-human",
 		"+FROM golang:1.26.3@" + newGolang + " AS builder", // the images follow the go line
 	} {
