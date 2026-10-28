@@ -157,8 +157,12 @@ func WriteCheckSummary(w io.Writer, name string, s *Scan) error {
 	default:
 		b.WriteString("No findings.\n\n")
 	}
+	for _, warning := range s.Warnings {
+		fmt.Fprintf(&b, "> [!WARNING]\n> %s\n\n", warning)
+	}
 	if len(fs) > 0 {
 		b.WriteString("| Package | Type | Installed | Fixed | Severity | Fails | IDs |\n| --- | --- | --- | --- | --- | --- | --- |\n")
+		aliased := false
 		for i, f := range fs {
 			if i == MaxCheckRows {
 				fmt.Fprintf(&b, "\n%d more in the job log.\n", len(fs)-i)
@@ -168,7 +172,15 @@ func WriteCheckSummary(w io.Writer, name string, s *Scan) error {
 			if f.Actionable() {
 				fails = "yes"
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s |\n", f.Package, f.Type, f.Installed, orDash(strings.Join(f.Fixed, ", ")), f.Severity(), fails, strings.Join(f.CVEs(), ", "))
+			sev := f.Severity()
+			if f.ScoreFrom != "" {
+				sev += "*"
+				aliased = true
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s |\n", f.Package, f.Type, f.Installed, orDash(strings.Join(f.Fixed, ", ")), sev, fails, strings.Join(f.CVEs(), ", "))
+		}
+		if aliased {
+			b.WriteString("\n\\* Rated by an alias's CVSS (a Bitnami advisory first): the advisory found has none, as no Go vulnerability database advisory does.\n")
 		}
 	}
 	_, err := io.WriteString(w, b.String())

@@ -73,6 +73,11 @@ func (f fakeScanner) Scan(_ context.Context, ref string) (*imagescan.Scan, error
 	return &imagescan.Scan{Ref: ref, Findings: fs, PackageManager: pm}, nil
 }
 
+// scanFunc is a scanner as a function.
+type scanFunc func(ctx context.Context, ref string) (*imagescan.Scan, error)
+
+func (f scanFunc) Scan(ctx context.Context, ref string) (*imagescan.Scan, error) { return f(ctx, ref) }
+
 // fakePatchGH is a repo with no image-scan/os-patches branch or PR, whose default branch's head
 // commit "head" holds files; it records the writes.
 type fakePatchGH struct {
@@ -228,6 +233,38 @@ func TestScan(t *testing.T) {
 	}
 }
 
+// TestScanWarnings: a scan's warnings (findings left UNKNOWN by a failed alias lookup) are notes
+// of the repo's summary, once per image, and don't fail the run.
+func TestScanWarnings(t *testing.T) {
+	const warning = "the severity of 2 finding(s) is UNKNOWN because their aliases could not be looked up"
+	scans := fakeScanner{"debian:bookworm-slim": nil, "ghcr.io/compliance-framework/mock-api:main": nil}
+	d := &deps{
+		patches: &fakePatchGH{},
+		files:   fakeFiles{"mock-api/Dockerfile": "FROM debian:bookworm-slim AS build\nFROM debian:bookworm-slim\n"},
+		scanner: scanFunc(func(ctx context.Context, ref string) (*imagescan.Scan, error) {
+			s, err := scans.Scan(ctx, ref)
+			if s != nil {
+				s.Warnings = []string{warning}
+			}
+			return s, err
+		}),
+		registry: fakeRegistry{},
+		eol:      fakeEOL{},
+	}
+	dir := t.TempDir()
+	summary := filepath.Join(dir, "summary.md")
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"scan", "--manifest", mock, "--repos", "mock-api", "--overrides", filepath.Join(dir, "o.json"), "--summary", summary}, env(nil), &out, d); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	md, _ := os.ReadFile(summary)
+	for _, ref := range []string{"debian:bookworm-slim", "ghcr.io/compliance-framework/mock-api:main"} {
+		if n := strings.Count(string(md), "- **warning**: "+ref+": "+warning); n != 1 {
+			t.Errorf("%d warnings for %s, want 1:\n%s", n, ref, md)
+		}
+	}
+}
+
 // TestScanLive: a live run commits the patch as GIT_AUTHOR_NAME <GIT_AUTHOR_EMAIL> on a new
 // image-scan/os-patches branch and opens its PR, labelled renovate:automerge.
 func TestScanLive(t *testing.T) {
@@ -321,6 +358,33 @@ func TestCheck(t *testing.T) {
 			}
 		})
 	}
+	t.Run("a Go finding rated by its alias fails; a failed alias lookup warns", func(t *testing.T) {
+		stdlib := imagescan.Finding{Package: "stdlib", Source: "stdlib", Type: imagescan.TypeLang, Ecosystem: "Go", Installed: "1.26.1", Fixed: []string{"1.26.9", "1.27.2"},
+			IDs: []string{"GO-2026-6617"}, Aliases: []string{"BIT-golang-2026-97032", "CVE-2026-97032"}, Score: 7.5, ScoreFrom: "BIT-golang-2026-97032"}
+		warning := "the severity of 3 finding(s) is UNKNOWN because their aliases could not be looked up, so they may be HIGH or CRITICAL and are not counted: 503"
+		summary := filepath.Join(t.TempDir(), "summary.md")
+		d := &deps{scanner: scanFunc(func(context.Context, string) (*imagescan.Scan, error) {
+			return &imagescan.Scan{Findings: []imagescan.Finding{stdlib}, Warnings: []string{warning}}, nil
+		})}
+		var out bytes.Buffer
+		err := run(context.Background(), []string{"check", "--image", "ci-image:local", "--name", "agent", "--summary", summary}, env(nil), &out, d)
+		if err == nil || !strings.Contains(err.Error(), "1 fixable HIGH or CRITICAL") {
+			t.Fatalf("err = %v, want the Go finding to fail the check", err)
+		}
+		md, _ := os.ReadFile(summary)
+		for _, want := range []string{
+			"> [!WARNING]\n> " + warning,
+			"| stdlib | lang | 1.26.1 | 1.26.9, 1.27.2 | HIGH* | yes | CVE-2026-97032 |",
+			"\\* Rated by an alias's CVSS",
+		} {
+			if !strings.Contains(string(md), want) {
+				t.Errorf("summary has no %q:\n%s", want, md)
+			}
+		}
+		if !strings.Contains(out.String(), "::warning::agent: "+warning) {
+			t.Errorf("log has no warning:\n%s", out.String())
+		}
+	})
 	if err := run(context.Background(), []string{"check"}, env(nil), &bytes.Buffer{}, &deps{}); err == nil || !strings.Contains(err.Error(), "--image is required") {
 		t.Errorf("check without --image: err = %v", err)
 	}

@@ -37,18 +37,53 @@ brotli built into `node:20`'s Node binary. So image-scan adds a **runtime check*
   variable its images set, its binary and its OSV package.
 
 Every finding has the image, the stage, the package, its type (`os`, `lang` or `binary` for a
-runtime), the installed and fixed versions, the advisory IDs and their aliases, and a severity.
+runtime), the installed and fixed versions, the advisory IDs and their aliases, and a
+[severity](#severity). A finding is **actionable** when it is HIGH or CRITICAL and has a fixed
+version.
+
+### Severity
+
 The severity is the highest CVSS base score of the advisory's vectors (CVSS v2, v3.0, v3.1 or v4.0,
 computed with the library osv-scanner uses, so both agree): **CRITICAL** from 9.0, **HIGH** from
-7.0, then MEDIUM and LOW; an advisory with no vector takes osv-scanner's own rating of its group,
-and none at all is UNKNOWN. Distribution ratings (Grype's, Debian's urgency) are not used. A
-finding is **actionable** when it is HIGH or CRITICAL and has a fixed version.
+7.0, then MEDIUM and LOW; an advisory with no vector takes osv-scanner's own rating of its group.
+Distribution ratings (Grype's, Debian's urgency) are not used.
+
+A finding still without a score is **rated by its aliases**. The Go vulnerability database
+publishes no CVSS, so every finding from a `GO-` advisory, the Go standard library compiled into
+a binary (`stdlib`) or a Go module, would otherwise be UNKNOWN and never count, however severe. In
+October 2026 agent's published image, built with Go 1.26.1, had 43 such findings, among them
+`GO-2026-6617` (aliases `BIT-golang-2026-97032`, `CVE-2026-97032`), all UNKNOWN. Bitnami's copies of
+the Go advisories (`BIT-golang-...` for the standard library, `BIT-<package>-...` for modules) do
+carry a vector, and osv-scanner lists them among the finding's aliases. So for each UNKNOWN
+finding image-scan fetches its aliases' records from OSV (`GET https://api.osv.dev/v1/vulns/<id>`),
+skipping the finding's own advisories, whose records the report has:
+
+1. the Bitnami ones (`BIT-`) first: the finding takes the highest score among them (`GO-2026-6617`
+   is HIGH, 7.5, from `BIT-golang-2026-97032`);
+2. only when none of them has a vector, every other alias (`CVE-`, `GHSA-`, ...): `GO-2026-5026` has
+   no Bitnami alias, and `CVE-2026-39821` rates it CRITICAL.
+
+The score is rated as above, and the finding records the alias in `score_from`; the check's step
+summary marks such a severity with `*`. An alias OSV has no record of (a 404) is skipped. A finding
+whose aliases have no vector stays UNKNOWN. Each record is fetched once per run (`imagescan.OSV`
+caches it), however many findings and images share it. It happens in the scanner, before anything
+reads a severity, so `image-scan check` and the scheduled scan and plan see the same ratings.
+
+A lookup that fails (network, a 5xx) never fails the scan: the finding stays UNKNOWN, and the scan
+carries a warning with the number of findings left UNKNOWN that way and the first error, which
+`check` writes to the log (`::warning::`) and the step summary, and `scan` as a note of the repo.
+After three failed lookups in a row the run stops asking, so an unreachable api.osv.dev costs at
+most three timeouts. Such a run may pass a check it would fail: the warning says so.
 
 `internal/imagescan/testdata` holds the spike's osv-scanner reports of `node:20` and
-`nginx:stable-alpine` (trimmed to a few packages) and the OSV and endoflife.date responses,
-recorded; `TestSpikeAcceptance` checks that CVE-2026-111497 is flagged as actionable in `node:20`
-(the Node runtime, by the runtime check, and Debian's `libbrotli1`) and in `nginx:stable-alpine`
-(`brotli-libs`, fixed in `1.2.1-r0`). No test reaches the network.
+`nginx:stable-alpine` and one of agent's published image (`agent.json`, its Go 1.26.1 `stdlib` and
+`golang.org/x/crypto`), trimmed to a few packages, and the OSV (`osv/`, with alias records under
+`osv/vulns/`) and endoflife.date responses, recorded; `TestSpikeAcceptance` checks that
+CVE-2026-111497 is flagged as actionable in `node:20` (the Node runtime, by the runtime check, and
+Debian's `libbrotli1`) and in `nginx:stable-alpine` (`brotli-libs`, fixed in `1.2.1-r0`), and
+`TestRateFromAliases` the alias ratings, the order the aliases are fetched in and the run's cache.
+No test reaches the network: the fake OSV answers an alias it has no record of with a 404, as the
+real one does.
 
 ## What is scanned
 
@@ -167,6 +202,23 @@ repo, image name and release, written as a JSON list of Renovate `packageRules`:
    image (ccf-bump moves those). The OS package findings of a final image get an [OS package
    patch](#os-package-patches).
 
+### Go standard library
+
+A Go standard library finding (`stdlib`, ecosystem `Go`) is in a binary that was compiled with an
+old Go, and only compiling it with a newer Go fixes it. In a base image that binary is the
+upstream's (in a `golang` builder image, the toolchain itself); in a published or CI-built image it
+is the repo's own, which only the built image has. So the planner leaves these findings out of all
+three rules and notes them once per image (`N actionable Go standard library finding(s) ... left out
+of the plan`): otherwise rule 1 would move a `golang` (or any Go tool's) base image to its next
+patch for a fix that is really a rebuild, and an upstream image not yet rebuilt with a newer Go
+would hold back its OS package fixes. They are still reported, and still fail `image-scan check`.
+
+A repo's own binaries get a newer Go from the `toolchain` line of its `go.mod` (with the builder
+allowed to switch to it), which Renovate moves for a Go vulnerability like any other dependency
+(the preset's `vulnerabilityAlerts`, with `osvVulnerabilityAlerts`); the check fails until that
+update is merged and the image rebuilt. That is rolled out separately, with a `toolchain` line in
+every Go repo.
+
 A finding is "still there" in a candidate when the candidate has a finding of the same package
 (the advisory's package, or the installed one) with a shared ID or alias, fixable or not: the
 distribution advisory IDs differ between releases (`ALPINE-CVE-...` per Alpine branch), the CVE
@@ -278,7 +330,10 @@ default branch. `ci-image.yml` (`workflow_call`) takes the `images` input of `pu
    `RUN apk add unsafe` is caught. Every finding, fixable or not, goes to the step summary (the
    fixable HIGH and CRITICAL ones first), and the job **fails on any fixable HIGH or CRITICAL
    finding**, on PRs and on pushes to the default branch alike. There is no diff against `:main`:
-   a red run on `main` is the signal that the image has an issue.
+   a red run on `main` is the signal that the image has an issue. That includes the Go standard
+   library and modules compiled into the repo's binaries, [rated by their
+   aliases](#severity): a binary built with an old Go fails until the repo's `go.mod` `toolchain`
+   line moves ([Go standard library](#go-standard-library)).
 
 `ci-go-service.yml` and `ci-ui.yml` call it as job `image`, with a new `images` input (default
 `[{}]`) passed through; agent's `ci.yml` must pass the same `images` list as its release and
@@ -291,8 +346,8 @@ reusable workflow's result), so the three workflows also report their `required`
 that gates ([notify.md](notify.md#the-image-check)): on a pull request (Renovate, ccf-bump,
 release-please, `image-scan/os-patches`) it posts nothing, and on a push to the default branch it
 opens an incident of its own, so a build or test failure on `main` still gets its own card. The
-osv-scanner image comes from `ghcr.io`, and the runtime check queries `api.osv.dev`, so the job
-needs network access but no token.
+osv-scanner image comes from `ghcr.io`, and the runtime check and the alias ratings query
+`api.osv.dev`, so the job needs network access but no token.
 
 ## The job
 

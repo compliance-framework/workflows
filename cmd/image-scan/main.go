@@ -229,6 +229,9 @@ func check(ctx context.Context, args []string, getenv func(string) string, stdou
 	if err != nil {
 		return err
 	}
+	for _, w := range s.Warnings {
+		fmt.Fprintf(stdout, "::warning::%s: %s\n", *name, w)
+	}
 	for _, f := range s.Findings {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\t%s\n", f.Package, f.Type, f.Installed, orDash(strings.Join(f.Fixed, ",")), f.Severity(), strings.Join(append(slices.Clone(f.IDs), f.Aliases...), ","))
 	}

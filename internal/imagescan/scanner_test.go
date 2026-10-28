@@ -97,11 +97,32 @@ func (f *fakeDocker) mount(args []string) string {
 	return ""
 }
 
-// osvServer serves api.osv.dev's /v1/query from testdata/osv/<package>-<version>.json, recorded
-// from the real API; an unrecorded query fails the test.
-func osvServer(t *testing.T) *httptest.Server {
+// fakeOSV is api.osv.dev, from recorded responses: /v1/query from
+// testdata/osv/<package>-<version>.json (an unrecorded query fails the test), and /v1/vulns/<id>
+// from testdata/osv/vulns/<id>.json, with an unrecorded ID answered 404 as the real API answers an
+// ID it has no record of (CVE-2026-111943, a curl CVE in OSV only as CURL-CVE-...).
+type fakeOSV struct {
+	fetched []string // the IDs /v1/vulns was asked for
+	down    bool     // /v1/vulns answers 503
+}
+
+func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id, ok := strings.CutPrefix(r.URL.Path, "/v1/vulns/"); ok && r.Method == http.MethodGet {
+			f.fetched = append(f.fetched, id)
+			if f.down {
+				http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			data, err := os.ReadFile(filepath.Join("testdata", "osv", "vulns", id+".json"))
+			if err != nil {
+				http.Error(w, `{"code":5,"message":"Bug not found."}`, http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write(data)
+			return
+		}
 		var q struct {
 			Package struct{ Name, Ecosystem string } `json:"package"`
 			Version string                           `json:"version"`
@@ -131,7 +152,11 @@ var spikeImages = map[string]fakeImage{
 }
 
 func newScanner(t *testing.T, docker *fakeDocker) *Scanner {
-	return &Scanner{Run: docker, Image: ScannerImage, OSV: &OSV{BaseURL: osvServer(t).URL}, TempDir: t.TempDir(), Pull: true}
+	return newScannerOSV(t, docker, &fakeOSV{})
+}
+
+func newScannerOSV(t *testing.T, docker *fakeDocker, osv *fakeOSV) *Scanner {
+	return &Scanner{Run: docker, Image: ScannerImage, OSV: &OSV{BaseURL: osv.serve(t).URL}, TempDir: t.TempDir(), Pull: true}
 }
 
 // TestSpikeAcceptance is the scanner decision's acceptance check, on the spike's recorded

@@ -67,6 +67,10 @@ func planImages() map[string]fakeImage {
 		"ghcr.io/compliance-framework/agent:0.9.3": spikeImages["nginx:stable-alpine"],
 		"golang:1.26.1": spikeImages["nginx:stable-alpine"],
 		"golang:1.26.2": {},
+		// A third-party image with a Go binary built with Go 1.26.1 (agent's recorded report), and
+		// its next patch, built with a newer Go.
+		"gotool:1.0.0": {report: "agent.json"},
+		"gotool:1.0.1": {},
 	}
 	return images
 }
@@ -74,7 +78,7 @@ func planImages() map[string]fakeImage {
 func TestPlan(t *testing.T) {
 	reg := fakeRegistry{
 		digests: map[string]string{"nginx:stable-alpine": newDigest},
-		tags:    map[string][]string{"golang": {"1.26.0", "1.26.1", "1.26.2", "1.27.0"}},
+		tags:    map[string][]string{"golang": {"1.26.0", "1.26.1", "1.26.2", "1.27.0"}, "gotool": {"1.0.0", "1.0.1"}},
 	}
 	type tgt struct {
 		ref, stage string
@@ -136,6 +140,14 @@ func TestPlan(t *testing.T) {
 			eolDown:   true,
 			notes:     []string{"endoflife.date nodejs unavailable, EOL rule skipped", "the tag is not pinned by digest"},
 			noteCount: 2,
+		},
+		{
+			// gotool:1.0.1 scans clean, but rule 1 would bump a base image for a fix that is a Go
+			// rebuild; the GO- findings are rated by their aliases (TestRateFromAliases).
+			name:      "Go standard library findings are left out of the plan",
+			targets:   []tgt{{"gotool:1.0.0", "0", RoleFinal}},
+			notes:     []string{"gotool:1.0.0 (Dockerfile, stage 0): 2 actionable Go standard library finding(s), in the Go binaries of the image, left out of the plan"},
+			noteCount: 1,
 		},
 		{
 			name:    "internal images and build stages are only noted",

@@ -67,13 +67,16 @@ type Scan struct {
 	// PackageManager is APK or APT when the image has a shell and that package manager, which
 	// the OS package patches need; "" otherwise (distroless, scratch).
 	PackageManager string
+	// Warnings are what made the scan less than complete without failing it: findings left
+	// UNKNOWN because their aliases could not be looked up.
+	Warnings []string `json:",omitempty"`
 }
 
 // Scanner scans images with osv-scanner, run from its image with Docker, plus the runtime check.
 type Scanner struct {
 	Run     Runner
 	Image   string // the osv-scanner image, ScannerImage
-	OSV     *OSV   // the runtime check's advisories
+	OSV     *OSV   // the runtime check's advisories, and the aliases that rate UNKNOWN findings
 	TempDir string // where image archives are written
 	// CacheDir holds osv-scanner's offline vulnerability databases. When set, the scan uses them
 	// (--offline-vulnerabilities) and refreshes them first (--download-offline-databases, which
@@ -145,7 +148,13 @@ func (s *Scanner) Scan(ctx context.Context, ref string) (*Scan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Scan{Ref: ref, OS: osName, Findings: append(findings, rt...), PackageManager: s.packageManager(ctx, ref)}, nil
+	findings = append(findings, rt...)
+	// Every finding's severity is final here, for check and for the plan alike.
+	var warnings []string
+	if s.OSV != nil {
+		warnings = s.OSV.RateFromAliases(ctx, findings)
+	}
+	return &Scan{Ref: ref, OS: osName, Findings: findings, PackageManager: s.packageManager(ctx, ref), Warnings: warnings}, nil
 }
 
 // packageManager finds apk or apt-get in ref with its shell (with no network). No shell (distroless)

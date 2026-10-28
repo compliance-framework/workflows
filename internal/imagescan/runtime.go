@@ -37,6 +37,7 @@ const OSVAPI = "https://api.osv.dev"
 type OSV struct {
 	BaseURL string // OSVAPI
 	HTTP    *http.Client
+	cache   vulnCache // the advisories Vuln fetched
 }
 
 // Query returns the advisories that affect version of package name in ecosystem.
@@ -136,7 +137,18 @@ func doJSON(client *http.Client, req *http.Request, out any) error {
 		return err
 	}
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("%s %s: %d %s: %.200s", req.Method, req.URL, resp.StatusCode, http.StatusText(resp.StatusCode), data)
+		return &HTTPError{Method: req.Method, URL: req.URL.String(), Code: resp.StatusCode, Body: string(data)}
 	}
 	return json.Unmarshal(data, out)
+}
+
+// HTTPError is a response with a status other than 2xx.
+type HTTPError struct {
+	Method, URL string
+	Code        int
+	Body        string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("%s %s: %d %s: %.200s", e.Method, e.URL, e.Code, http.StatusText(e.Code), e.Body)
 }

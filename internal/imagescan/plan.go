@@ -51,6 +51,8 @@ type Target struct {
 //     human.
 //  3. Anything else actionable is logged as a note: the distribution has the fix, the upstream
 //     image hasn't been rebuilt with it yet.
+//
+// Go standard library findings are left out of all three (docs/image-scan.md#go-standard-library).
 type Planner struct {
 	Owner    string
 	Scanner  ImageScanner
@@ -95,12 +97,16 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) Plann
 			continue
 		}
 		seen[key] = true
+		ref := t.Base.Ref
+		where := fmt.Sprintf("%s (%s, stage %s)", ref, t.Dockerfile, t.Base.Stage)
 		act := actionable(t.Scan.Findings)
+		if std := slices.DeleteFunc(slices.Clone(act), func(f Finding) bool { return !f.GoStdlib() }); len(std) > 0 {
+			note("%s: %d actionable Go standard library finding(s), in the Go binaries of the image, left out of the plan: a newer Go fixes them, not a base image update (the go.mod toolchain line does for CCF's own binaries)", where, len(std))
+			act = slices.DeleteFunc(act, Finding.GoStdlib)
+		}
 		if len(act) == 0 {
 			continue
 		}
-		ref := t.Base.Ref
-		where := fmt.Sprintf("%s (%s, stage %s)", ref, t.Dockerfile, t.Base.Stage)
 		if strings.HasPrefix(ref.Name, "ghcr.io/"+p.Owner+"/") {
 			note("%s: %d actionable finding(s) in an internal image, which ccf-bump moves, not Renovate", where, len(act))
 			continue
