@@ -1,0 +1,8 @@
+lisa-design:
+- Supersedes the digest note: golang image pins are planned against the registry (bump.Registry: Digest + GoVersion from the config's GOLANG_VERSION, bump.Crane) entirely in FollowGo, before any write; Apply only writes Change.To, the full pin (tag[@digest]). Ref.Current includes the digest so digest-only moves settle. Floating tags meeting the go line by name are checked against the Go their pinned build (or unpinned tag) ships; stale pins move to the tag's current digest, or to the go line as a release when even that is behind. Every new tag is looked up (existence), pinned or not.
+- A *bump.RegistryError fails a live bump and is only a warning in a dry run (train dry-runs hourly); nothing is written on it.
+
+lisa-addressed:
+- review PRRT_kwDOKQL6as6xUF57 (must-fix): digest-pinned floating golang tags are checked via GOLANG_VERSION and re-pinned / moved; docs table row fixed.
+- review PRRT_kwDOKQL6as6xUF6G (should-fix): unpinned new tags are looked up; a missing tag fails the bump (RegistryError).
+- reviewer note: registry errors only warn in a dry run.
