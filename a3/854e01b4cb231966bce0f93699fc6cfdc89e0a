@@ -1,2 +1,6 @@
 lisa-design:
 - User decision (review Q at toolchain.go:129): restore the toolchain at the newest stable Go release above the new go line in any minor; hold only when the go line is the newest release.
+
+lisa-addressed:
+- PRRT_kwDOKQL6as6xUzZv (nit): go.dev 30s client, Crane reads 30s context.
+- PRRT_kwDOKQL6as6xUzZ2 (question, decided by user): any-minor restore; hold only when nothing above.
