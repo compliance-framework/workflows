@@ -127,8 +127,8 @@ keeps `\'` out of every YAML file under `.github`.
 ## The org-wide throttle
 
 `prHourlyLimit` is per repo in Renovate (each repo counts the PRs it opened since the top of the
-hour), so on its own it can't bound the org's PRs an hour: with 75 repos active, even `1` would
-allow 75 (the original plan aimed at ~15 an hour with `prHourlyLimit: 1`; the daily schedule
+hour), so on its own it can't bound the org's PRs an hour: with 76 repos active, even `1` would
+allow 76 (the original plan aimed at ~15 an hour with `prHourlyLimit: 1`; the daily schedule
 trades that for `4`, with majors capped apart, see below). Renovate 44.145.1 (the pinned version)
 has one global limit, the self-hosted `prCommitsPerRunLimit`, but it counts commits per run rather
 than PRs per hour, counts vulnerability fixes and rebases, and when it is reached Renovate stops
@@ -173,15 +173,15 @@ instead:
   their repo's shard.
 - Dry runs write nothing, so they aren't sharded and take every selected repo.
 
-Worst case for non-vulnerability PRs opened across the org, from `repos.yaml` (8 core repos, this
-one and factory included; batch 1 has 30 repos, batch 2 27, batch 3 10):
+Worst case for non-vulnerability PRs opened across the org, from `repos.yaml` (9 core repos, this
+one and the two live demo repos included; batch 1 has 30 repos, batch 2 27, batch 3 10):
 
 | Active batches | Active repos | Shards | Repos per shard | PRs in one run (of them majors) | Two runs close together | Each repo visited every |
 | --- | --- | --- | --- | --- | --- | --- |
-| none | 8 | 1 | 8 | 32 (8) | 32 (64 across the top of the hour) | 1 run |
-| 1 | 38 | 3 | 13, 13, 12 | 52 (13) | 104 | 3 runs |
-| 1, 2 | 65 | 5 | 13, 13, 13, 13, 13 | 52 (13) | 104 | 5 runs |
-| 1, 2, 3 (today) | 75 | 5 | 15, 15, 15, 15, 15 | 60 (15) | 120 | 5 runs |
+| none | 9 | 1 | 9 | 36 (9) | 36 (72 across the top of the hour) | 1 run |
+| 1 | 39 | 3 | 13, 13, 13 | 52 (13) | 104 | 3 runs |
+| 1, 2 | 66 | 5 | 14, 13, 13, 13, 13 | 56 (14) | 112 | 5 runs |
+| 1, 2, 3 (today) | 76 | 6 | 13, 13, 13, 13, 12, 12 | 52 (13) | 104 | 6 runs |
 
 These are bounds: `prHourlyLimit` (4) per repo of the shard, at most one of them a major. Since a
 major opens only in an hour with no other Renovate PR, a visit in practice opens either the
@@ -196,7 +196,7 @@ app token's one-hour life.
 
 Every day, a repo gets its non-major group PR on the first visit that finds a non-major update due
 (its release 7 days old), and a major on each later visit while fewer than 3 of its
-non-vulnerability Renovate PRs are open. With 5 shards and 24 runs, that is about five visits a
+non-vulnerability Renovate PRs are open. With 6 shards and 24 runs, that is about four visits a
 day, fewer when GitHub delays or drops runs. On the old 8th/22nd `schedule` a repo had about ten
 visits a month to open anything, one PR each.
 

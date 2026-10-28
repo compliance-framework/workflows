@@ -38,8 +38,8 @@ func TestRunList(t *testing.T) {
 	for _, r := range m.Repos {
 		all = append(all, r.Name)
 	}
-	if len(all) != 75 || !slices.Equal(all[:8], []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts", "workflows", "factory"}) {
-		t.Fatalf("repos.yaml: %d repos %v; want 75, the 8 core repos first", len(all), all)
+	if len(all) != 76 || !slices.Equal(all[:9], []string{"api", "gooci", "agent", "ui", "agent-action", "helm-charts", "workflows", "ccf-live-demo-sandbox", "ccf-live-demo-app"}) {
+		t.Fatalf("repos.yaml: %d repos %v; want 76, the 9 core repos first", len(all), all)
 	}
 	want = strings.Join(all, ",") + "\n"
 	if got := out.String(); got != want {
