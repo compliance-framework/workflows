@@ -1,0 +1,4 @@
+lisa-addressed:
+review pass (PR #156) fixes, commit aad77dd:
+- PRRT_kwDOKQL6as6xFzAu branch ownership checked on the branch (compare base...branch), PR or not.
+- PRRT_kwDOKQL6as6xFzA4 Dockerfiles read at the head SHA the commit builds on; any difference from the scanned content -> no writes, next run rescans (refuse, not regenerate: a changed Dockerfile may have a different base).
