@@ -1,0 +1,4 @@
+lisa-design:
+- preview.yml's policies-kind opa-version default is bumped together with ci-policies.yml and release-policies.yml: it builds the policy preview bundle, so it is the same pin; leaving it would publish :main/:pr previews with a different OPA than the release.
+- go.mod's github.com/open-policy-agent/opa v1.14.1 (plugin-probe's library), docs/plugin-probe.md's sample output and test fixtures (internal/bump/testdata, pluginprobe/ciworkflows/plugin-probe tests) are left alone: they are a Go dependency or arbitrary fixture data, not the policies CLI default.
+- Commit typed fix(deps) (not ci/chore, which release-please hides) so the change cuts a visible workflows release that callers' workflows pins can move to.
