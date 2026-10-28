@@ -1,0 +1,9 @@
+lisa-addressed:
+pass 2 fixes:
+- removes-preexisting-images: Scanner.Scan inspects before pulling and removes only images it pulled (TestScanCommands).
+- relative-cache-dir: cmd/image-scan makes --cache-dir absolute.
+
+lisa-selfreview:
+pass 3 (strict), verdict request_changes:
+- [nit] X:correctness/dockerfile-heredoc instructions(): a here-document body line starting with FROM was parsed as a FROM.
+- [nit] X:correctness/blank-continuation-line a blank line inside a backslash continuation ended the instruction (Docker skips it).
