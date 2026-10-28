@@ -285,7 +285,10 @@ default branch. `ci-image.yml` (`workflow_call`) takes the `images` input of `pu
 preview workflows. `ci-action.yml` calls it with its `dockerfile` and `context` inputs (the image
 the runner builds for agent-action on each use). The `image` job is **not** in `required`'s needs:
 it never gates a merge (Renovate, ccf-bump and the train gate on `ci / required`). Like the other
-CI jobs it is skipped on a closed PR. The osv-scanner image comes from `ghcr.io`, and the runtime
+CI jobs it is skipped on a closed PR. A failed `image` still fails the caller's `ci` job (the
+reusable workflow's result), so `notify-failure.yml`, which reads that job's result, reports it like
+any red run it tracks ([notify.md](notify.md#which-runs)): a push to the default branch, and the
+bot PRs (Renovate, ccf-bump, release-please) while their image has a fixable finding. The osv-scanner image comes from `ghcr.io`, and the runtime
 check queries `api.osv.dev`, so the job needs network access but no token.
 
 ## The job
