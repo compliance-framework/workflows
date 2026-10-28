@@ -1,0 +1,3 @@
+lisa-design:
+- FollowGo aligns images with buildGo(go.mod): the higher of the go line and the toolchain line (user decision: stdlib fixes via toolchain). modfile.Parse, not ParseLax (which drops toolchain).
+- Measured (Go 1.26, GOTOOLCHAIN=auto): go get never adds a toolchain line; keeps one above the new go line; removes one at or below it, and go mod tidy removes one equal to the go line. ccf-bump does not restore it (an equal line would be tidied away); documented, flagged to the user.
