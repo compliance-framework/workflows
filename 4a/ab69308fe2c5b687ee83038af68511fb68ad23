@@ -2,3 +2,8 @@ lisa-addressed:
 pass 1 fixes:
 - apt-block-fails-hadolint: the apt block carries `# hadolint ignore=DL3008` right before its RUN (goldens, cmd test, docs).
 - CORE-SIZE-001: size-exception label + reason in the PR body.
+
+lisa-selfreview:
+pass 2 (strict), verdict request_changes:
+- [should-fix] X:correctness/relabels-held-pr Publisher re-added renovate:automerge on every run, undoing a person who took it off an open PR.
+- [should-fix, deferred as a question] X:intent/closed-pr-reopened with no open PR, an existing image-scan/os-patches branch is force-updated and a new PR opened, also when a person closed the previous one (Renovate would ignore a closed PR). Commits are checked only on an open PR. Open question in the PR body.
