@@ -1,0 +1,2 @@
+lisa-addressed:
+PR#154 thread PRRT_kwDOKQL6as6xEs4P: Dockerfile images row narrowed: floating-tag digests have no timestamp; versioned-tag digests lack one only when Docker Hub's tag list can't be read; timestamped ones still wait 7 days.
