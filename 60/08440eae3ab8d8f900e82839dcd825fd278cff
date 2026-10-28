@@ -1,0 +1,2 @@
+lisa-addressed:
+- PRRT_kwDOKQL6as6xU_Jc (CORE-DOC-001): ToolchainDropped and docs no longer say merge as is; CI's guard fails it until a newer Go.
