@@ -38,6 +38,8 @@ type OSV struct {
 	BaseURL string // OSVAPI
 	HTTP    *http.Client
 	cache   vulnCache // the advisories Vuln fetched
+	// retryWait replaces defaultRetryWait (tests); 0 is the default.
+	retryWait time.Duration
 }
 
 // Query returns the advisories that affect version of package name in ecosystem.
@@ -137,7 +139,7 @@ func doJSON(client *http.Client, req *http.Request, out any) error {
 		return err
 	}
 	if resp.StatusCode/100 != 2 {
-		return &httpError{Method: req.Method, URL: req.URL.String(), Code: resp.StatusCode, Body: string(data)}
+		return &httpError{Method: req.Method, URL: req.URL.String(), Code: resp.StatusCode, Body: string(data), RetryAfter: resp.Header.Get("Retry-After")}
 	}
 	return json.Unmarshal(data, out)
 }
@@ -147,6 +149,7 @@ type httpError struct {
 	Method, URL string
 	Code        int
 	Body        string
+	RetryAfter  string // the Retry-After header, if any
 }
 
 func (e *httpError) Error() string {

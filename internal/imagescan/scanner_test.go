@@ -1,6 +1,7 @@
 package imagescan
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // regexpTemp matches the scan's temporary directory.
@@ -79,13 +81,46 @@ func (f *fakeDocker) Run(_ context.Context, name string, args ...string) ([]byte
 		if img.report == "" {
 			return nil, &ExitError{Code: 128, Stderr: "No package sources found"}
 		}
-		data, err := os.ReadFile(filepath.Join("testdata", "osv-scanner", img.report))
+		data, err := readReports(strings.Split(img.report, ","))
 		if err != nil {
 			return nil, err
 		}
 		return data, &ExitError{Code: 1}
 	}
 	return nil, fmt.Errorf("unexpected docker %v", args)
+}
+
+// readReports reads testdata/osv-scanner reports, one image's: their results together, with the
+// first one's image metadata.
+func readReports(files []string) ([]byte, error) {
+	var out map[string]json.RawMessage
+	var results []json.RawMessage
+	for _, file := range files {
+		data, err := os.ReadFile(filepath.Join("testdata", "osv-scanner", file))
+		if err != nil {
+			return nil, err
+		}
+		if len(files) == 1 {
+			return data, nil
+		}
+		var r map[string]json.RawMessage
+		var res []json.RawMessage
+		if err := json.Unmarshal(data, &r); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(r["results"], &res); err != nil {
+			return nil, err
+		}
+		results = append(results, res...)
+		if out == nil {
+			out = r
+		}
+	}
+	var err error
+	if out["results"], err = json.Marshal(results); err != nil {
+		return nil, err
+	}
+	return json.Marshal(out)
 }
 
 func (f *fakeDocker) mount(args []string) string {
@@ -102,8 +137,12 @@ func (f *fakeDocker) mount(args []string) string {
 // from testdata/osv/vulns/<id>.json, with an unrecorded ID answered 404 as the real API answers an
 // ID it has no record of (CVE-2026-111943, a curl CVE in OSV only as CURL-CVE-...).
 type fakeOSV struct {
-	fetched []string // the IDs /v1/vulns was asked for
+	fetched []string // the IDs /v1/vulns was asked for, once per request
 	down    bool     // /v1/vulns answers 503
+	// fail answers an ID with failCode (503 by default) its first n times; n < 0 is always.
+	fail       map[string]int
+	failCode   int
+	retryAfter string // the failures' Retry-After header
 }
 
 func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
@@ -111,8 +150,15 @@ func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if id, ok := strings.CutPrefix(r.URL.Path, "/v1/vulns/"); ok && r.Method == http.MethodGet {
 			f.fetched = append(f.fetched, id)
-			if f.down {
-				http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+			if n := f.fail[id]; f.down || n != 0 {
+				if n > 0 {
+					f.fail[id] = n - 1
+				}
+				code := cmp.Or(f.failCode, http.StatusServiceUnavailable)
+				if f.retryAfter != "" {
+					w.Header().Set("Retry-After", f.retryAfter)
+				}
+				http.Error(w, "upstream unavailable", code)
 				return
 			}
 			data, err := os.ReadFile(filepath.Join("testdata", "osv", "vulns", id+".json"))
@@ -156,7 +202,7 @@ func newScanner(t *testing.T, docker *fakeDocker) *Scanner {
 }
 
 func newScannerOSV(t *testing.T, docker *fakeDocker, osv *fakeOSV) *Scanner {
-	return &Scanner{Run: docker, Image: ScannerImage, OSV: &OSV{BaseURL: osv.serve(t).URL}, TempDir: t.TempDir(), Pull: true}
+	return &Scanner{Run: docker, Image: ScannerImage, OSV: &OSV{BaseURL: osv.serve(t).URL, retryWait: time.Millisecond}, TempDir: t.TempDir(), Pull: true}
 }
 
 // TestSpikeAcceptance is the scanner decision's acceptance check, on the spike's recorded

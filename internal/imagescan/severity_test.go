@@ -3,10 +3,12 @@ package imagescan
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // goImage is agent's image as published, built with Go 1.26.1: its recorded osv-scanner report
@@ -69,7 +71,8 @@ func TestRateFromAliases(t *testing.T) {
 }
 
 // TestRateFromAliasesOSVDown: with api.osv.dev failing, the findings stay UNKNOWN, the scan goes
-// on with a warning, and the run stops asking after maxLookupFailures failures in a row.
+// on with a warning, and the image's scan stops asking after maxLookupFailures failures in a row
+// (each retried once). The breaker is per image: the next image is rated once OSV is back.
 func TestRateFromAliasesOSVDown(t *testing.T) {
 	osv := &fakeOSV{down: true}
 	s := newScannerOSV(t, &fakeDocker{images: goImage}, osv)
@@ -82,44 +85,76 @@ func TestRateFromAliasesOSVDown(t *testing.T) {
 			t.Errorf("%s: %s from %q, want UNKNOWN", f.IDs[0], f.Severity(), f.ScoreFrom)
 		}
 	}
-	if len(osv.fetched) != maxLookupFailures {
-		t.Errorf("fetched %q, want %d lookups and then none", osv.fetched, maxLookupFailures)
+	if len(osv.fetched) != 2*maxLookupFailures {
+		t.Errorf("fetched %q, want %d lookups, each retried once, and then none", osv.fetched, maxLookupFailures)
 	}
-	if len(scan.Warnings) != 1 || !strings.Contains(scan.Warnings[0], "the severity of 4 finding(s) is UNKNOWN because their aliases could not be looked up") || !strings.Contains(scan.Warnings[0], "503") {
+	if len(scan.Warnings) != 1 || !strings.Contains(scan.Warnings[0], "the severity of 4 finding(s) may be too low") || !strings.Contains(scan.Warnings[0], "503") {
 		t.Errorf("warnings = %q, want one for the 4 findings with aliases, with the error", scan.Warnings)
+	}
+
+	osv.down = false
+	scan, err = s.Scan(context.Background(), "ghcr.io/compliance-framework/agent:main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scan.Warnings) != 0 || !slices.ContainsFunc(scan.Findings, func(f Finding) bool { return f.ScoreFrom == "BIT-golang-2026-97032" }) {
+		t.Errorf("the next image after an outage: warnings %q, findings %+v; want it rated", scan.Warnings, scan.Findings)
 	}
 }
 
 // TestRateFromAliasesTiers: the highest score among the Bitnami aliases wins; the other aliases
-// are tried only when no Bitnami one has a vector (or a record), and the one with a vector rates it;
-// a finding with a score is left alone.
+// are tried only when every Bitnami one was fetched and none has a vector (or a record), and the
+// one with a vector rates it; a failed lookup in the deciding tier is warned about unless the
+// finding is CRITICAL anyway; a 429 or 5xx is retried once; a finding with a score is left alone.
 func TestRateFromAliasesTiers(t *testing.T) {
+	const bit6, bit7, cve9 = "BIT-golang-2026-32282", "BIT-golang-2026-97032", "CVE-2026-39821"
 	for _, tc := range []struct {
-		name      string
-		f         Finding
-		score     float64
-		from      string
-		fetched   []string
-		wantSever string
+		name     string
+		f        Finding
+		osv      fakeOSV
+		score    float64
+		from     string
+		fetched  []string
+		severity string
+		warn     bool
 	}{
-		{"the higher of two Bitnami aliases", Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-golang-2026-32282", "BIT-golang-2026-97032", "CVE-2026-39821"}},
-			7.5, "BIT-golang-2026-97032", []string{"BIT-golang-2026-32282", "BIT-golang-2026-97032"}, "HIGH"},
-		{"a Bitnami alias without a record falls through", Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-golang-2026-00000", "CVE-2026-39821"}},
-			9.6, "CVE-2026-39821", []string{"BIT-golang-2026-00000", "CVE-2026-39821"}, "CRITICAL"},
-		{"the other aliases: the one with a vector", Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-x", "RUSTSEC-2026-0381", "CVE-2026-39821"}},
-			9.6, "CVE-2026-39821", []string{"BIT-x", "RUSTSEC-2026-0381", "CVE-2026-39821"}, "CRITICAL"},
-		{"a finding with a score is not looked up", Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-golang-2026-97032"}, Score: 5},
-			5, "", nil, "MEDIUM"},
+		{name: "the higher of two Bitnami aliases", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{bit6, bit7, cve9}},
+			score: 7.5, from: bit7, fetched: []string{bit6, bit7}, severity: "HIGH"},
+		{name: "a Bitnami alias without a record falls through", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-golang-2026-00000", cve9}},
+			score: 9.6, from: cve9, fetched: []string{"BIT-golang-2026-00000", cve9}, severity: "CRITICAL"},
+		{name: "the other aliases: the one with a vector", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{"BIT-x", "RUSTSEC-2026-0381", cve9}},
+			score: 9.6, from: cve9, fetched: []string{"BIT-x", "RUSTSEC-2026-0381", cve9}, severity: "CRITICAL"},
+		{name: "a finding with a score is not looked up", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{bit7}, Score: 5},
+			score: 5, fetched: nil, severity: "MEDIUM"},
+		{name: "one of two Bitnami aliases fails: the other's score, with a warning", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{bit6, "BIT-golang-2026-99999", cve9}},
+			osv:   fakeOSV{fail: map[string]int{"BIT-golang-2026-99999": -1}},
+			score: 6.4, from: bit6, fetched: []string{bit6, "BIT-golang-2026-99999", "BIT-golang-2026-99999"}, severity: "MEDIUM", warn: true},
+		{name: "every Bitnami alias fails: no fall-through, UNKNOWN with a warning", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{bit7, cve9}},
+			osv:   fakeOSV{fail: map[string]int{bit7: -1}},
+			score: 0, fetched: []string{bit7, bit7}, severity: "UNKNOWN", warn: true},
+		{name: "a failure next to a CRITICAL score: no warning", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{cve9, "GHSA-xxxx"}},
+			osv:   fakeOSV{fail: map[string]int{"GHSA-xxxx": -1}},
+			score: 9.6, from: cve9, fetched: []string{cve9, "GHSA-xxxx", "GHSA-xxxx"}, severity: "CRITICAL"},
+		{name: "a 503 is retried once", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{bit7}},
+			osv:   fakeOSV{fail: map[string]int{bit7: 1}},
+			score: 7.5, from: bit7, fetched: []string{bit7, bit7}, severity: "HIGH"},
+		{name: "a 429 is retried after its Retry-After", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{bit7}},
+			osv:   fakeOSV{fail: map[string]int{bit7: 1}, failCode: http.StatusTooManyRequests, retryAfter: "0"},
+			score: 7.5, from: bit7, fetched: []string{bit7, bit7}, severity: "HIGH"},
+		{name: "a 400 is not retried", f: Finding{IDs: []string{"GO-1"}, Aliases: []string{bit7}},
+			osv:   fakeOSV{fail: map[string]int{bit7: 1}, failCode: http.StatusBadRequest},
+			score: 0, fetched: []string{bit7}, severity: "UNKNOWN", warn: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fake := &fakeOSV{}
-			osv := &OSV{BaseURL: fake.serve(t).URL}
+			fake := &tc.osv
+			osv := &OSV{BaseURL: fake.serve(t).URL, retryWait: time.Millisecond}
 			fs := []Finding{tc.f}
-			if w := osv.RateFromAliases(context.Background(), fs); w != nil {
-				t.Errorf("warnings %q", w)
+			w := osv.RateFromAliases(context.Background(), fs)
+			if (len(w) > 0) != tc.warn {
+				t.Errorf("warnings %q, want a warning: %v", w, tc.warn)
 			}
-			if fs[0].Score != tc.score || fs[0].ScoreFrom != tc.from || fs[0].Severity() != tc.wantSever {
-				t.Errorf("score %v from %q (%s), want %v from %q (%s)", fs[0].Score, fs[0].ScoreFrom, fs[0].Severity(), tc.score, tc.from, tc.wantSever)
+			if fs[0].Score != tc.score || fs[0].ScoreFrom != tc.from || fs[0].Severity() != tc.severity {
+				t.Errorf("score %v from %q (%s), want %v from %q (%s)", fs[0].Score, fs[0].ScoreFrom, fs[0].Severity(), tc.score, tc.from, tc.severity)
 			}
 			if !slices.Equal(fake.fetched, tc.fetched) {
 				t.Errorf("fetched %q, want %q", fake.fetched, tc.fetched)

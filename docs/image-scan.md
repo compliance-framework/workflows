@@ -60,8 +60,9 @@ skipping the finding's own advisories, whose records the report has:
 
 1. the Bitnami ones (`BIT-`) first: the finding takes the highest score among them (`GO-2026-6617`
    is HIGH, 7.5, from `BIT-golang-2026-97032`);
-2. only when none of them has a vector, every other alias (`CVE-`, `GHSA-`, ...): `GO-2026-5026` has
-   no Bitnami alias, and `CVE-2026-39821` rates it CRITICAL.
+2. only when all of them were fetched and none has a vector (or OSV has no record of them), every
+   other alias (`CVE-`, `GHSA-`, ...): `GO-2026-5026` has no Bitnami alias, and `CVE-2026-39821`
+   rates it CRITICAL.
 
 The score is rated as above, and the finding records the alias in `score_from`; the check's step
 summary marks such a severity with `*`. An alias OSV has no record of (a 404) is skipped. A finding
@@ -69,11 +70,17 @@ whose aliases have no vector stays UNKNOWN. Each record is fetched once per run 
 caches it), however many findings and images share it. It happens in the scanner, before anything
 reads a severity, so `image-scan check` and the scheduled scan and plan see the same ratings.
 
-A lookup that fails (network, a 5xx) never fails the scan: the finding stays UNKNOWN, and the scan
-carries a warning with the number of findings left UNKNOWN that way and the first error, which
-`check` writes to the log (`::warning::`) and the step summary, and `scan` as a note of the repo.
-After three failed lookups in a row the run stops asking, so an unreachable api.osv.dev costs at
-most three timeouts. Such a run may pass a check it would fail: the warning says so.
+A lookup answered 429 or 5xx is retried once, after the answer's `Retry-After` (at most 10
+seconds) or 2 seconds. A lookup that still fails (network, a 5xx) never fails the scan, but it is
+never silent either. The finding keeps what the other aliases of the same step gave (UNKNOWN when
+none), and the scan does not go on to the next step: a CVE record doesn't replace a Bitnami one
+that couldn't be fetched. The scan then carries a warning with the number of findings rated that
+way (unless already CRITICAL, which no alias can raise) and the first error, which `check` writes
+to the log (`::warning::`) and the step summary, and `scan` as a note of the repo. Such a run may
+pass a check it would fail: the warning says so. After three failed lookups in a row the scan of
+that image stops asking, so an unreachable api.osv.dev costs at most three timeouts per image; the
+next image starts asking again, so a short outage in a long scheduled run only affects the images
+scanned during it.
 
 `internal/imagescan/testdata` holds the spike's osv-scanner reports of `node:20` and
 `nginx:stable-alpine` and one of agent's published image (`agent.json`, its Go 1.26.1 `stdlib` and
@@ -205,19 +212,23 @@ repo, image name and release, written as a JSON list of Renovate `packageRules`:
 ### Go standard library
 
 A Go standard library finding (`stdlib`, ecosystem `Go`) is in a binary that was compiled with an
-old Go, and only compiling it with a newer Go fixes it. In a base image that binary is the
-upstream's (in a `golang` builder image, the toolchain itself); in a published or CI-built image it
-is the repo's own, which only the built image has. So the planner leaves these findings out of all
-three rules and notes them once per image (`N actionable Go standard library finding(s) ... left out
-of the plan`): otherwise rule 1 would move a `golang` (or any Go tool's) base image to its next
-patch for a fix that is really a rebuild, and an upstream image not yet rebuilt with a newer Go
-would hold back its OS package fixes. They are still reported, and still fail `image-scan check`.
+old Go, and only compiling it with a newer Go fixes it. Who does that depends on whose binary it
+is:
 
-A repo's own binaries get a newer Go from the `toolchain` line of its `go.mod` (with the builder
-allowed to switch to it), which Renovate moves for a Go vulnerability like any other dependency
-(the preset's `vulnerabilityAlerts`, with `osvVulnerabilityAlerts`); the check fails until that
-update is merged and the image rebuilt. That is rolled out separately, with a `toolchain` line in
-every Go repo.
+- **A base image's binary** (a Go tool in a third-party final image, the toolchain of a `golang`
+  builder) is the upstream's: a newer image of the base, rebuilt with a newer Go, fixes it. Rule 1
+  includes such a finding in its fix when the candidate has it fixed, and lists it in the PR body.
+  When the candidate still has it, it doesn't hold back the rest: the candidate must clear the
+  image's other actionable findings, and the planner notes that the Go standard library ones wait
+  for an upstream rebuild with a newer Go. Rule 2 leaves them out of what a newer release must fix
+  (a release jump is not what rebuilds a Go binary). A `golang` builder is a build stage, so its
+  findings are only noted, as for any build stage.
+- **The repo's own binary** exists only in the built image, which `image-scan check` and the
+  published images' report see; the plan never does. It gets a newer Go from the `toolchain` line
+  of the repo's `go.mod` (with the builder allowed to switch to it), which Renovate moves for a Go
+  vulnerability like any other dependency (the preset's `vulnerabilityAlerts`, with
+  `osvVulnerabilityAlerts`); the check fails until that update is merged and the image rebuilt.
+  That is rolled out separately, with a `toolchain` line in every Go repo.
 
 A finding is "still there" in a candidate when the candidate has a finding of the same package
 (the advisory's package, or the installed one) with a shared ID or alias, fixable or not: the
@@ -332,8 +343,9 @@ default branch. `ci-image.yml` (`workflow_call`) takes the `images` input of `pu
    finding**, on PRs and on pushes to the default branch alike. There is no diff against `:main`:
    a red run on `main` is the signal that the image has an issue. That includes the Go standard
    library and modules compiled into the repo's binaries, [rated by their
-   aliases](#severity): a binary built with an old Go fails until the repo's `go.mod` `toolchain`
-   line moves ([Go standard library](#go-standard-library)).
+   aliases](#severity): the repo's own binary built with an old Go fails until the repo's `go.mod`
+   `toolchain` line moves, a base image's until the base is updated ([Go standard
+   library](#go-standard-library)).
 
 `ci-go-service.yml` and `ci-ui.yml` call it as job `image`, with a new `images` input (default
 `[{}]`) passed through; agent's `ci.yml` must pass the same `images` list as its release and
