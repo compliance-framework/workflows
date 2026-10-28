@@ -6,3 +6,8 @@ pass 1 fixes:
 - rule1-matches-other-tags: rule 1 gets matchCurrentVersion /^(tags)$/ of the scanned tags (goldens, docs).
 - stale-version-claim: ScannerImage comment says same tool, not same version.
 - CORE-SIZE-001: not a code fix; size-exception label + reason in the PR body.
+
+lisa-selfreview:
+pass 2 (strict), verdict request_changes:
+- [should-fix] X:correctness/removes-preexisting-images Scanner.Scan removed every image it scanned, also ones that were local before (a local run deletes the user's images).
+- [should-fix] X:correctness/relative-cache-dir cmd/image-scan: a relative --cache-dir reaches `docker run --volume`, which needs an absolute path.
