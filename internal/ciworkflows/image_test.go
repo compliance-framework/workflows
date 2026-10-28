@@ -75,6 +75,77 @@ func TestImageJob(t *testing.T) {
 	}
 }
 
+// TestRequiredResultOutput: ci-go-service.yml, ci-ui.yml and ci-action.yml report their required
+// check's outcome as the required-result output, which notify-failure.yml reads from the caller's
+// toJSON(needs) to tell a failure of `image` alone (it gates nothing) from a failure that gates
+// (internal/notify.RequiredResultOutput).
+func TestRequiredResultOutput(t *testing.T) {
+	type job struct {
+		Outputs map[string]string `yaml:"outputs"`
+		Steps   []struct {
+			ID   string `yaml:"id"`
+			Name string `yaml:"name"`
+		} `yaml:"steps"`
+	}
+	for _, file := range []string{goService, ui, action} {
+		var wf struct {
+			On struct {
+				Call struct {
+					Outputs map[string]struct {
+						Value string `yaml:"value"`
+					} `yaml:"outputs"`
+				} `yaml:"workflow_call"`
+			} `yaml:"on"`
+			Jobs map[string]job `yaml:"jobs"`
+		}
+		read(t, file, &wf)
+		if got := wf.On.Call.Outputs["required-result"].Value; got != "${{ jobs.required.outputs.result }}" || len(wf.On.Call.Outputs) != 1 {
+			t.Errorf("%s: outputs %+v, want required-result from the required job", file, wf.On.Call.Outputs)
+		}
+		req := wf.Jobs["required"]
+		if req.Outputs["result"] != "${{ steps.check.outcome }}" || len(req.Steps) != 1 || req.Steps[0].ID != "check" || req.Steps[0].Name != "Check the results" {
+			t.Errorf("%s: required job outputs %v, steps %+v; want result from its one step, check", file, req.Outputs, req.Steps)
+		}
+	}
+
+	// notify-failure.yml keeps the image incident apart: its own state file and cache key.
+	var notify struct {
+		Jobs map[string]struct {
+			Env   map[string]string `yaml:"env"`
+			Steps []struct {
+				ID   string            `yaml:"id"`
+				Name string            `yaml:"name"`
+				If   string            `yaml:"if"`
+				Run  string            `yaml:"run"`
+				With map[string]string `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	read(t, "notify-failure.yml", &notify)
+	j := notify.Jobs["notify"]
+	if j.Env["IMAGE_STATE_FILE"] == "" || j.Env["IMAGE_STATE_FILE"] == j.Env["STATE_FILE"] {
+		t.Errorf("IMAGE_STATE_FILE %q, want a file of its own", j.Env["IMAGE_STATE_FILE"])
+	}
+	found := map[string]bool{}
+	for _, s := range j.Steps {
+		switch s.Name {
+		case "Restore the image incident state":
+			found[s.Name] = s.If == "${{ !cancelled() && steps.plan.outputs.image == 'true' }}" && s.With["path"] == "${{ env.IMAGE_STATE_FILE }}" &&
+				s.With["key"] == "${{ steps.plan.outputs.image-key }}" && s.With["restore-keys"] == "${{ steps.plan.outputs.image-restore-key }}"
+		case "Post the image incident to Slack":
+			found[s.Name] = s.ID == "post-image" && s.If == "${{ !cancelled() && steps.plan.outputs.image == 'true' }}" && s.Run == `"$RUNNER_TEMP/notify" post-image`
+		case "Save the image incident state":
+			found[s.Name] = s.If == "${{ !cancelled() && steps.post-image.outputs.save == 'true' }}" && s.With["path"] == "${{ env.IMAGE_STATE_FILE }}" &&
+				s.With["key"] == "${{ steps.plan.outputs.image-key }}"
+		}
+	}
+	for _, name := range []string{"Restore the image incident state", "Post the image incident to Slack", "Save the image incident state"} {
+		if !found[name] {
+			t.Errorf("notify-failure.yml: step %q missing or not keyed to the image incident", name)
+		}
+	}
+}
+
 // TestCIImageWorkflow pins ci-image.yml: publish-image.yml's images input, read-only, amd64 only,
 // built and loaded but never pushed (fork PRs), the GitHub Actions layer cache, the tools from this
 // repo at job.workflow_sha, and the check of the built image.

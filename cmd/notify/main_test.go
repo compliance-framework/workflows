@@ -162,6 +162,88 @@ func TestIncidentLifecycle(t *testing.T) {
 	}
 }
 
+// TestImageIncident: a failure of the image check alone (ci-go-service, ci-ui and ci-action
+// report their required check's outcome) posts nothing on a bot PR, and on main opens an incident
+// of its own, apart from the run's: a build failure while it is open opens the run's incident,
+// and each recovers on its own.
+func TestImageIncident(t *testing.T) {
+	const (
+		imageFailed = `{"ci":{"result":"failure","outputs":{"required-result":"success"}}}`
+		buildFailed = `{"ci":{"result":"failure","outputs":{"required-result":"failure"}}}`
+		allPassed   = `{"ci":{"result":"success","outputs":{"required-result":"success"}}}`
+	)
+
+	// A Renovate PR whose image check alone failed: tracked, a pass, no image incident.
+	env, posts := setup(t, "pull_request", "refs/pull/5/merge", renovatePR("aaaaaaaaaa"))
+	env["NEEDS"], env["IMAGE_STATE_FILE"] = imageFailed, filepath.Join(t.TempDir(), "image.json")
+	if _, err := runCmd(t, env, "plan"); err != nil {
+		t.Fatal(err)
+	}
+	if out := outputs(t, env); !strings.HasPrefix(out, "notify=true\nreason=automation-branch\n") || !strings.Contains(out, "\nimage=false\n") {
+		t.Errorf("PR plan outputs = %q, want tracked, no image incident", out)
+	}
+	for _, cmd := range []string{"post", "post-image"} {
+		if _, err := runCmd(t, env, cmd); err != nil {
+			t.Fatal(err)
+		}
+		if out := outputs(t, env); out != "save=false\n" {
+			t.Errorf("PR %s outputs = %q", cmd, out)
+		}
+	}
+	if len(*posts) != 0 {
+		t.Fatalf("an image failure on a PR posted: %v", *posts)
+	}
+
+	// main: the image incident and the run's incident, each with its own state file.
+	env, posts = setup(t, "push", "refs/heads/main", `{"repository":{"default_branch":"main"}}`)
+	env["IMAGE_STATE_FILE"] = filepath.Join(t.TempDir(), "image.json")
+	step := func(sha, needs, wantImage, wantSave, wantImageSave string) {
+		t.Helper()
+		env["GITHUB_SHA"], env["NEEDS"] = sha, needs
+		if _, err := runCmd(t, env, "plan"); err != nil {
+			t.Fatal(err)
+		}
+		out := outputs(t, env)
+		if !strings.Contains(out, "\nimage="+wantImage+"\nimage-key=ccf-notify-image-incident-") || !strings.Contains(out, "-100-1\nimage-restore-key=ccf-notify-image-incident-") {
+			t.Errorf("%s: plan outputs = %q, want image=%s", sha, out, wantImage)
+		}
+		if _, err := runCmd(t, env, "post"); err != nil {
+			t.Fatal(err)
+		}
+		if out := outputs(t, env); out != "save="+wantSave+"\n" {
+			t.Errorf("%s: post outputs = %q, want save=%s", sha, out, wantSave)
+		}
+		if wantImage == "true" { // the workflow runs post-image only then
+			if _, err := runCmd(t, env, "post-image"); err != nil {
+				t.Fatal(err)
+			}
+			if out := outputs(t, env); out != "save="+wantImageSave+"\n" {
+				t.Errorf("%s: post-image outputs = %q, want save=%s", sha, out, wantImageSave)
+			}
+		}
+	}
+	text := func(i int) string { return (*posts)[i]["text"].(string) }
+	cards := func(i int) string { return fmt.Sprint((*posts)[i]["attachments"]) }
+
+	step("aaaaaaaaaa", imageFailed, "true", "false", "true") // the image incident opens
+	if len(*posts) != 1 || text(0) != "CI failing: o/r@main ci" || !strings.Contains(cards(0), "ci / image") {
+		t.Fatalf("posts = %v", *posts)
+	}
+	step("bbbbbbbbbb", buildFailed, "false", "true", "") // a build failure: its own card
+	if len(*posts) != 2 || (*posts)[1]["thread_ts"] != nil || (*posts)[1]["method"] != "chat.postMessage" || strings.Contains(cards(1), "ci / image") {
+		t.Fatalf("the build failure didn't open its own incident: %v", (*posts)[1:])
+	}
+	step("cccccccccc", imageFailed, "true", "true", "true") // the build recovers; the image fails again
+	if len(*posts) != 6 || (*posts)[2]["thread_ts"] != "1700000000.000002" || !strings.HasPrefix(text(2), "✅ passing again") ||
+		(*posts)[4]["thread_ts"] != "1700000000.000001" || !strings.HasPrefix(text(4), "❌ failed: ci / image at") {
+		t.Fatalf("posts = %v", (*posts)[2:])
+	}
+	step("dddddddddd", allPassed, "true", "false", "true") // the image check recovers
+	if len(*posts) != 8 || (*posts)[6]["thread_ts"] != "1700000000.000001" || !strings.HasPrefix(text(6), "✅ passing again") {
+		t.Fatalf("posts = %v", (*posts)[6:])
+	}
+}
+
 // TestCardEditFailureStillSaves: when chat.update fails after the reply, the state is saved
 // anyway, so the reply isn't posted again.
 func TestCardEditFailureStillSaves(t *testing.T) {
@@ -239,7 +321,7 @@ func TestClosedPRDoesNoFailureLogic(t *testing.T) {
 		if _, err := runCmd(t, env, "plan"); err != nil {
 			t.Fatal(err)
 		}
-		if out := outputs(t, env); !strings.HasPrefix(out, "notify=true\nreason=\n") || !strings.Contains(out, "needs-human=true\n") || !strings.HasSuffix(out, "closed=true\n") {
+		if out := outputs(t, env); !strings.HasPrefix(out, "notify=true\nreason=\n") || !strings.Contains(out, "needs-human=true\n") || !strings.Contains(out, "\nclosed=true\n") || !strings.Contains(out, "\nimage=false\n") {
 			t.Errorf("needs %s: plan outputs = %q", needs, out)
 		}
 		for _, cmd := range []string{"post", "needs-human", "closed"} {

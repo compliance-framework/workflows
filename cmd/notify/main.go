@@ -2,10 +2,13 @@
 // workflow, which runs it in two steps around restoring the incident state from the
 // Actions cache:
 //
-//	notify plan         write notify=true|false, reason, key, restore-key, needs-human=true|false
-//	                    and needs-human-key to $GITHUB_OUTPUT
+//	notify plan         write notify=true|false, reason, key, restore-key, needs-human=true|false,
+//	                    needs-human-key, image=true|false, image-key and image-restore-key to
+//	                    $GITHUB_OUTPUT
 //	notify post         post to Slack as the incident state at $STATE_FILE and the run's result
 //	                    say, write the next state there and save=true|false to $GITHUB_OUTPUT
+//	notify post-image   the same for the image checks' incident (state at $IMAGE_STATE_FILE),
+//	                    on a push to the default branch only
 //	notify needs-human  post the run's PR to NEEDS_HUMAN_CHANNEL, write the record to
 //	                    $NEEDS_HUMAN_STATE_FILE and save=true|false to $GITHUB_OUTPUT
 //	notify closed       for a closed PR: mark its needs-human card (record at
@@ -14,6 +17,10 @@
 //
 // plan also writes closed=true|false: a run for a closed tracked PR does no failure logic,
 // and only closed acts on it.
+//
+// A failure of the image check alone (ci-image.yml, which gates nothing) is not a failure of the
+// run: on a push to the default branch it goes to its own incident through post-image, elsewhere
+// it posts nothing (notify.ParseNeeds, notify.TracksImage).
 //
 // NEEDS_HUMAN_CHANNEL (the SLACK_CHANNEL_NEEDS_HUMAN variable) turns on the needs-human rule,
 // which takes a release PR's release-checks failure away from the incidents (notify.Route);
@@ -49,13 +56,15 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	case len(args) == 1 && args[0] == "plan":
 		return plan(getenv, stdout)
 	case len(args) == 1 && args[0] == "post":
-		return post(ctx, getenv, stdout)
+		return post(ctx, getenv, stdout, false)
+	case len(args) == 1 && args[0] == "post-image":
+		return post(ctx, getenv, stdout, true)
 	case len(args) == 1 && args[0] == "needs-human":
 		return needsHuman(ctx, getenv, stdout)
 	case len(args) == 1 && args[0] == "closed":
 		return closed(ctx, getenv, stdout)
 	}
-	return errors.New("usage: notify plan | notify post | notify needs-human | notify closed")
+	return errors.New("usage: notify plan | notify post | notify post-image | notify needs-human | notify closed")
 }
 
 func plan(getenv func(string) string, stdout io.Writer) error {
@@ -68,33 +77,47 @@ func plan(getenv func(string) string, stdout io.Writer) error {
 	track := reason != notify.ReasonNone && res.Outcome != notify.OutcomeNone
 	// A closed tracked PR restores its incident and needs-human record for closed to update.
 	closed := notify.ClosedReason(r) != notify.ReasonNone
-	fmt.Fprintf(stdout, "%s %s on %q at %s: reason %q, outcome %s, failed jobs %v, incident %s, needs a human: %q, closed PR: %t\n",
-		r.Workflow, r.EventName, r.Branch, r.SHA, reason, res.Outcome, res.FailedJobs, notify.IncidentKey(r), human, closed)
-	return writeOutputs(getenv, fmt.Sprintf("notify=%t\nreason=%s\nkey=%s\nrestore-key=%s\nneeds-human=%t\nneeds-human-key=%s\nclosed=%t\n",
+	img := res.ImageResult()
+	image := notify.TracksImage(r) && img.Outcome != notify.OutcomeNone
+	fmt.Fprintf(stdout, "%s %s on %q at %s: reason %q, outcome %s, failed jobs %v, incident %s, needs a human: %q, closed PR: %t, image checks %s %v (own incident: %t)\n",
+		r.Workflow, r.EventName, r.Branch, r.SHA, reason, res.Outcome, res.FailedJobs, notify.IncidentKey(r), human, closed, img.Outcome, img.FailedJobs, image)
+	return writeOutputs(getenv, fmt.Sprintf("notify=%t\nreason=%s\nkey=%s\nrestore-key=%s\nneeds-human=%t\nneeds-human-key=%s\nclosed=%t\nimage=%t\nimage-key=%s\nimage-restore-key=%s\n",
 		track || closed, reason, notify.StateKey(r), notify.IncidentKey(r), human != "" || closed && getenv("NEEDS_HUMAN_CHANNEL") != "",
-		notify.NeedsHumanKey(r), closed))
+		notify.NeedsHumanKey(r), closed, image, notify.ImageStateKey(r), notify.ImageIncidentKey(r)))
 }
 
-func post(ctx context.Context, getenv func(string) string, stdout io.Writer) error {
+// post updates the run's incident; with image, the incident of its image checks instead.
+func post(ctx context.Context, getenv func(string) string, stdout io.Writer, image bool) error {
 	token := getenv("SLACK_BOT_TOKEN")
 	if token == "" {
 		fmt.Fprintln(stdout, "SLACK_BOT_TOKEN is not set; nothing to post")
 		return nil
 	}
-	statePath := getenv("STATE_FILE")
+	stateVar := "STATE_FILE"
+	if image {
+		stateVar = "IMAGE_STATE_FILE"
+	}
+	statePath := getenv(stateVar)
 	if statePath == "" {
-		return errors.New("STATE_FILE is not set")
+		return errors.New(stateVar + " is not set")
 	}
 	r, res, err := load(getenv)
 	if err != nil {
 		return err
 	}
-	if notify.Decide(r) == notify.ReasonNone {
+	key := notify.IncidentKey(r)
+	switch {
+	case image && !notify.TracksImage(r):
+		fmt.Fprintln(stdout, "the image checks have no incident on this run; nothing to post")
+		return writeOutputs(getenv, "save=false\n")
+	case image:
+		res, key = res.ImageResult(), notify.ImageIncidentKey(r)
+	case notify.Decide(r) == notify.ReasonNone:
 		fmt.Fprintln(stdout, "this run is not tracked; nothing to post")
 		return writeOutputs(getenv, "save=false\n")
+	default:
+		res, _ = notify.Route(r, res, getenv("NEEDS_HUMAN_CHANNEL") != "")
 	}
-	res, _ = notify.Route(r, res, getenv("NEEDS_HUMAN_CHANNEL") != "")
-	key := notify.IncidentKey(r)
 	prev, err := notify.LoadIncident(statePath, key)
 	if err != nil {
 		fmt.Fprintf(stdout, "ignoring the restored incident state: %v\n", err)

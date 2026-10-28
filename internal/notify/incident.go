@@ -31,6 +31,23 @@ const (
 type Result struct {
 	Outcome    Outcome
 	FailedJobs []string
+	// Image is the outcome of the image checks alone (ci-image.yml's `image` job in ci-go-service,
+	// ci-ui and ci-action), which gate nothing and are kept out of Outcome; ImageJobs are the
+	// failed ones ("ci / image"). Empty when no job reports it (ImageResult).
+	Image     Outcome
+	ImageJobs []string
+}
+
+// RequiredResultOutput is the output of ci-go-service.yml, ci-ui.yml and ci-action.yml with the
+// outcome of their `required` check, the one that gates merges; `image` is outside it.
+const RequiredResultOutput = "required-result"
+
+// ImageJob is the job those workflows run ci-image.yml as.
+const ImageJob = "image"
+
+// ImageResult is the result of r's image checks, as a Result of their own.
+func (r Result) ImageResult() Result {
+	return Result{Outcome: cmp.Or(r.Image, OutcomeNone), FailedJobs: r.ImageJobs}
 }
 
 // ParseNeeds reads the caller's toJSON(needs). Any failed job makes the run a failure;
@@ -38,12 +55,19 @@ type Result struct {
 // (successes, maybe with skips) it is a success. An empty string is a caller that predates
 // the needs input and calls the workflow only with if: failure(), so the run failed and
 // its failed jobs are unknown.
+//
+// A job that reports RequiredResultOutput (a call of ci-go-service.yml, ci-ui.yml or
+// ci-action.yml) and failed although its required check succeeded failed in `image` alone: it
+// counts as a success in Outcome, and as a failure of "<job> / image" in Image. A job that
+// succeeded passed its image check too. When the required check failed, the image check's own
+// result is unknown, and Image doesn't count the job. A job without the output is read as before.
 func ParseNeeds(s string) (Result, error) {
 	if strings.TrimSpace(s) == "" {
 		return Result{Outcome: OutcomeFailure}, nil
 	}
 	var needs map[string]struct {
-		Result string `json:"result"`
+		Result  string            `json:"result"`
+		Outputs map[string]string `json:"outputs"`
 	}
 	if err := json.Unmarshal([]byte(s), &needs); err != nil {
 		return Result{}, fmt.Errorf("parsing the needs input: %w", err)
@@ -51,9 +75,18 @@ func ParseNeeds(s string) (Result, error) {
 	if len(needs) == 0 {
 		return Result{}, errors.New("the needs input lists no jobs: pass toJSON(needs) from a job that needs the CI jobs")
 	}
-	var failed []string
-	cancelled, succeeded := false, false
+	var failed, imageFailed []string
+	cancelled, succeeded, imageSucceeded := false, false, false
 	for name, job := range needs {
+		if required := job.Outputs[RequiredResultOutput]; required != "" {
+			switch {
+			case job.Result == "failure" && required == "success":
+				imageFailed = append(imageFailed, name+" / "+ImageJob)
+				job.Result = "success"
+			case job.Result == "success":
+				imageSucceeded = true
+			}
+		}
 		switch job.Result {
 		case "failure":
 			failed = append(failed, name)
@@ -63,14 +96,24 @@ func ParseNeeds(s string) (Result, error) {
 			succeeded = true
 		}
 	}
+	var res Result
 	switch {
 	case len(failed) > 0:
 		slices.Sort(failed)
-		return Result{Outcome: OutcomeFailure, FailedJobs: failed}, nil
+		res = Result{Outcome: OutcomeFailure, FailedJobs: failed}
 	case cancelled || !succeeded:
-		return Result{Outcome: OutcomeNone}, nil
+		res = Result{Outcome: OutcomeNone}
+	default:
+		res = Result{Outcome: OutcomeSuccess}
 	}
-	return Result{Outcome: OutcomeSuccess}, nil
+	switch {
+	case len(imageFailed) > 0:
+		slices.Sort(imageFailed)
+		res.Image, res.ImageJobs = OutcomeFailure, imageFailed
+	case imageSucceeded:
+		res.Image = OutcomeSuccess
+	}
+	return res, nil
 }
 
 // Incident is the saved state of one incident key. The zero value is "no incident".

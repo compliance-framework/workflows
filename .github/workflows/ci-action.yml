@@ -1,6 +1,7 @@
 # CI for Docker GitHub Action repos (kind action: agent-action). Calls ci-common.yml, whose
 # actionlint job lints the workflows, and ends in the `required` job, the one status check to
-# require. The `image` job (ci-image.yml) checks the built image for vulnerabilities, outside it. Callers grant the permissions ci-common.yml needs (actions: read, contents: read,
+# require. The `image` job (ci-image.yml) checks the built image for vulnerabilities, outside it.
+# Callers grant the permissions ci-common.yml needs (actions: read, contents: read,
 # pull-requests: read, security-events: write); see README.
 name: ci-action
 
@@ -15,6 +16,12 @@ on:
         description: "Docker build context"
         type: string
         default: .
+    # For notify-failure.yml (docs/notify.md): the caller's toJSON(needs) carries it, so a failed
+    # run whose required check passed is a failure of `image` alone, which gates nothing.
+    outputs:
+      required-result:
+        description: "Outcome of the required job's check (success or failure), the one check that gates merges; empty when it didn't run"
+        value: ${{ jobs.required.outputs.result }}
 
 permissions: {}
 
@@ -103,11 +110,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
+    outputs:
+      result: ${{ steps.check.outcome }} # the workflow's required-result output
     steps:
       # The jobs above skip only on a closed PR, where this job skips too, so anything but
       # success fails (jobs ci-common skips on push events are inside `common`, whose result
       # is still success).
       - name: Check the results
+        id: check
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |

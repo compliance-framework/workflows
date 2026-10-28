@@ -27,6 +27,12 @@ on:
         description: 'JSON list of {"name", "dockerfile", "context"} for the image check (ci-image.yml); pass the same list as the release workflow. name defaults to the repo name, dockerfile to Dockerfile, context to .'
         type: string
         default: '[{}]'
+    # For notify-failure.yml (docs/notify.md): the caller's toJSON(needs) carries it, so a failed
+    # run whose required check passed is a failure of `image` alone, which gates nothing.
+    outputs:
+      required-result:
+        description: "Outcome of the required job's check (success or failure), the one check that gates merges; empty when it didn't run"
+        value: ${{ jobs.required.outputs.result }}
 
 permissions: {}
 
@@ -273,11 +279,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
+    outputs:
+      result: ${{ steps.check.outcome }} # the workflow's required-result output
     steps:
       # The jobs above skip only on a closed PR, where this job skips too, so anything but
       # success fails (jobs ci-common skips on push events are inside `common`, whose result
       # is still success).
       - name: Check the results
+        id: check
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |

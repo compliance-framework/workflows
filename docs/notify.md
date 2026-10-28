@@ -39,6 +39,28 @@ skips) it's a pass.
 | pass | none, or closed | nothing | unchanged |
 | cancelled / all skipped | any | nothing | unchanged |
 
+### The image check
+
+`ci-go-service.yml`, `ci-ui.yml` and `ci-action.yml` run `ci-image.yml` as job `image` beside
+`required`, not under it ([image-scan.md](image-scan.md#the-ci-check-ci-imageyml)): it gates no
+merge, but a red `image` still fails the caller's `ci` job. So these workflows report their
+`required` check's outcome as the `required-result` output, which the caller's `toJSON(needs)`
+carries (`{"ci": {"result": "failure", "outputs": {"required-result": "success"}}}`). A job that
+failed although its required check passed failed in `image` alone, and `notify` reads it as:
+
+- **for the run's incident, a pass**: on a pull request (Renovate, ccf-bump, release-please,
+  `image-scan/os-patches`) or an automation branch, a failure of `image` alone opens nothing and
+  posts nothing, since it doesn't block the PR;
+- **on a push to the default branch, a failure of `ci / image` in an incident of its own**: a red
+  `image` on `main` is the signal that an image needs a fix. It follows the same table (open, reply,
+  recover with `✅ passing again` once `image` passes), with its own card listing `ci / image`, so
+  a build or test failure on `main` while it is open still opens or replies in the run's incident.
+  When the required check fails, `image`'s own result is unknown, and the image incident is left
+  as it is until a run whose required check passes.
+
+A job without the output (another `ci-*.yml`, or a run whose `required` job didn't run) counts as
+before, by its own result.
+
 The top-level message is a Block Kit card (`slackkit.IncidentCard`, [slack.md](slack.md)):
 a red bar while failing and green once resolved; the header `CI failing · <repo>` (or `failing
 again`, `resolved`); the fully qualified PR (`owner/repo#N`, linked) and its title, or
@@ -67,7 +89,8 @@ kept in the Actions cache. A state saved before the cards lacks the card fields,
 shows the last commit instead and no times:
 
 - the key is `ccf-notify-incident-<hash of the incident key>-<run id>-<run attempt>`, so
-  every save is a new entry;
+  every save is a new entry; the image check's incident is `ccf-notify-image-incident-<hash>-...`
+  in its own file, a prefix that neither restores the other's state;
 - the job restores with that prefix as `restore-keys`, and the cache returns the newest
   entry with it, so the latest state wins;
 - it saves only when it posted (so a pass with no incident, or a re-run, saves nothing).

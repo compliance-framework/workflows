@@ -15,6 +15,12 @@
 // A failed tracked run opens an incident (a top-level Slack card) or, while one is open,
 // replies in its thread and edits the card; a passing run closes it with a reply and marks
 // the card resolved. See Handle.
+//
+// The image check of ci-go-service, ci-ui and ci-action (ci-image.yml) gates nothing, so its
+// failure alone is not a failure of the run (ParseNeeds). On a push to the default branch it has
+// an incident of its own (TracksImage, ImageIncidentKey): a red image check on main is the signal
+// that an image needs a fix, and a build or test failure still opens or replies in the run's own
+// incident. On every other run it posts nothing.
 package notify
 
 import (
@@ -208,18 +214,40 @@ func track(r Run) Reason {
 // for a push. Each save appends a unique suffix (StateKey), and the newest entry with this
 // prefix is the current state. Changing it forgets every open incident.
 func IncidentKey(r Run) string {
+	return "ccf-notify-incident-" + scopeHash(r) + "-"
+}
+
+// ImageIncidentKey is IncidentKey for the incident of r's image checks (TracksImage). Its prefix
+// differs from IncidentKey's, so neither restores the other's state.
+func ImageIncidentKey(r Run) string {
+	return "ccf-notify-image-incident-" + scopeHash(r) + "-"
+}
+
+// TracksImage reports whether r's image checks have an incident of their own: on a push to the
+// default branch only. Elsewhere (pull requests, automation branches) they gate nothing and post
+// nothing.
+func TracksImage(r Run) bool {
+	return Decide(r) == ReasonDefaultBranch
+}
+
+func scopeHash(r Run) string {
 	scope := "branch\x00" + r.Branch
 	if r.PRNumber != 0 {
 		scope = "pr\x00" + strconv.Itoa(r.PRNumber)
 	}
 	sum := sha256.Sum256([]byte(r.Repo + "\x00" + cmp.Or(r.WorkflowPath, r.Workflow) + "\x00" + scope))
-	return "ccf-notify-incident-" + hex.EncodeToString(sum[:16]) + "-"
+	return hex.EncodeToString(sum[:16])
 }
 
 // StateKey is the cache key this run saves its incident state under: IncidentKey plus the
 // run ID and attempt, so every save is a new entry.
 func StateKey(r Run) string {
 	return IncidentKey(r) + r.RunID + "-" + r.RunAttempt
+}
+
+// ImageStateKey is StateKey for the image incident.
+func ImageStateKey(r Run) string {
+	return ImageIncidentKey(r) + r.RunID + "-" + r.RunAttempt
 }
 
 // escape escapes the characters Slack mrkdwn treats as control characters.
