@@ -1,0 +1,10 @@
+lisa-addressed:
+pass 3 fixes:
+- dockerfile-heredoc and blank-continuation-line: instructions() skips here-document bodies (<<EOF, <<-"EOF") and blank lines; test case added.
+
+lisa-selfreview:
+pass 4 (final, lenient), verdict approve. Deferred (not fixed):
+- [should-fix] X:performance/published-scan-cost the :main/:latest scans of every image name add two pulls+scans per image to each hourly run (report only); could be throttled (e.g. once a day) if run time becomes a problem.
+- [should-fix] X:error-handling/no-command-timeout docker pull/save/run have no per-command timeout; a hung pull uses up the 50-minute job budget (renovate still runs, without overrides).
+- [nit] X:correctness/eol-skips-rule1 an EOL runtime image whose rule-2 trigger is non-empty never gets rule 1 for its OS findings (by design: the major move is the fix).
+- [blocker, mitigated] CORE-SIZE-001: size-exception label + reason in the PR body (the spec fixes PR 2 as one PR).
