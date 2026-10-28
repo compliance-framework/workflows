@@ -1,0 +1,8 @@
+lisa-design:
+- OS patches are computed from the BASE image scan (not the built image): block packages = installed package names of the final base's actionable os findings; a base fixed by rule 1 (Planned.Fixed) leaves its Dockerfile untouched (block kept until the Renovate update merges); no findings -> block removed; unscanned base -> untouched.
+- Block goes after the FROM instruction (End line, continuations included) of FinalBase() (final stage followed back through FROM <stage>), so for ui it is in `production`, not in the bare `FROM production`.
+- Package manager detected during the scan with `docker run --network none --entrypoint /bin/sh img -c 'command -v apk || command -v apt-get'`; no shell (distroless) => skip with a note. Package names are checked against ^[a-z0-9][a-z0-9+._-]*$ before they go into RUN.
+- One branch per repo, image-scan/os-patches, rebuilt through the Git Data API (tree on default head, commit, force ref update) as GIT_AUTHOR_NAME/EMAIL from the workflow step copied from ccf-bump-sync.yml; no push when the branch already is that tree on the current head (avoids hourly CI reruns). Nothing left to patch => PR closed + branch deleted. PR not opened by --author, or any commit not by --author => left alone.
+- Repos whose scan had errors are skipped for publishing (a partial plan must not close/rewrite the PR).
+- automerge.Merger.BranchPrefix became BranchPrefixes; renovate-config merge passes renovate/ and image-scan/ (literal, to keep imagescan out of renovate-config's imports).
+- image-scan token: contents + pull-requests write on live, read on dry; label added via bump.GitHub.AddLabel (creates renovate:automerge if missing).
