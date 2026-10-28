@@ -144,6 +144,21 @@ func (g *GitHub) File(ctx context.Context, repo, ref, path string) ([]byte, erro
 	return f.Content, err
 }
 
+// Dir returns the names of the entries of directory path in repo at ref.
+func (g *GitHub) Dir(ctx context.Context, repo, ref, path string) ([]string, error) {
+	var entries []struct {
+		Name string `json:"name"`
+	}
+	if err := g.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", g.Owner, repo, path, url.QueryEscape(ref)), nil, &entries); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name
+	}
+	return names, nil
+}
+
 // DefaultBranch returns repo's default branch.
 func (g *GitHub) DefaultBranch(ctx context.Context, repo string) (string, error) {
 	var r struct {

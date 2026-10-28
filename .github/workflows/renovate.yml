@@ -11,6 +11,9 @@ name: renovate
 # defaults below, except that it runs live when the repo variable RENOVATE_LIVE is "true".
 # After a live run, a merge pass merges the shard's green renovate:automerge PRs as the bot: Renovate
 # itself merges at most one PR per repo per run (docs/renovate.md#the-merge-pass).
+# Before Renovate, image-scan scans the container images of the selected repos and turns what a newer
+# base image fixes into package rules appended to the config (docs/image-scan.md). Renovate runs
+# whether or not the scan succeeded.
 
 on:
   schedule:
@@ -39,22 +42,22 @@ concurrency:
   group: renovate
   cancel-in-progress: false
 
+env:
+  # A scheduled run has no inputs: keep these fallbacks equal to the dispatch defaults.
+  MANIFEST: repos.yaml
+  REPOS: ${{ inputs.repos }}
+  # Scheduled runs are full dry runs until RENOVATE_LIVE is "true"; manual ones follow the input.
+  DRY_RUN: ${{ github.event_name == 'schedule' && vars.RENOVATE_LIVE == 'true' && 'off' || inputs.dry_run || 'full' }}
+
 jobs:
-  renovate:
-    name: renovate
+  select:
+    name: select
     runs-on: ubuntu-latest
-    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
-    # (repo-settings), so a workflow on another branch can't read them.
-    environment: release
-    # The app token lasts an hour, which is why a live run takes at most 15 repos. Renovate gets 55
-    # minutes of it, the merge pass a fresh token and 25 minutes (its 20-minute wait plus setup).
-    timeout-minutes: 90
-    env:
-      # A scheduled run has no inputs: keep these fallbacks equal to the dispatch defaults.
-      MANIFEST: repos.yaml
-      REPOS: ${{ inputs.repos }}
-      # Scheduled runs are full dry runs until RENOVATE_LIVE is "true"; manual ones follow the input.
-      DRY_RUN: ${{ github.event_name == 'schedule' && vars.RENOVATE_LIVE == 'true' && 'off' || inputs.dry_run || 'full' }}
+    timeout-minutes: 10
+    outputs:
+      repos: ${{ steps.select.outputs.repos }}
+      slot: ${{ steps.select.outputs.slot }}
+      image-repos: ${{ steps.select.outputs.image-repos }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,17 +79,114 @@ jobs:
             echo "::error::no repos selected"
             exit 1
           fi
+          # The repos of the shard with Dockerfiles (kinds go-service, ui and action), for
+          # image-scan; empty when there are none, and the job is skipped.
+          image_repos="$(go run ./cmd/image-scan list --manifest "$MANIFEST" --repos "$repos" --dry-run "$DRY_RUN")"
           {
             echo "repos=$repos"
             echo "slot=$slot"
+            echo "image-repos=$image_repos"
           } >> "$GITHUB_OUTPUT"
+
+  # Scans the shard's container images and plans Renovate rules for what a newer base image fixes
+  # (docs/image-scan.md). Read-only: its only outputs are the overrides artifact and the step
+  # summary. Dry runs scan too; only the Renovate config they get is a dry run's.
+  image-scan:
+    name: image-scan
+    needs: [select]
+    if: ${{ needs.select.outputs.image-repos != '' }}
+    runs-on: ubuntu-latest
+    # The ccf-release-bot secrets; only main may use the environment (repo-settings).
+    environment: release
+    # The token lasts an hour and reads the repos' files as the scan goes, so the job stays within it.
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Read-only, for the image repos alone: they are a subset of select's, so the list is never
+      # empty here (the job is skipped otherwise), and an empty list would reach every repo.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: token
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: compliance-framework
+          repositories: ${{ needs.select.outputs.image-repos }}
+          permission-contents: read # caller workflows (their images input) and Dockerfiles
+      - name: Choose the database cache key
+        id: cache-key
+        run: echo "key=osv-scanner-db-$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      # osv-scanner's offline databases (one per ecosystem the images have). Each run refreshes them
+      # (only what changed is downloaded); a new key is saved once a day.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/osv-scanner
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: osv-scanner-db-
+      - name: Scan the images
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          IMAGE_REPOS: ${{ needs.select.outputs.image-repos }}
+        run: |
+          mkdir -p ~/.cache/osv-scanner "$RUNNER_TEMP/image-scan"
+          go run ./cmd/image-scan scan --manifest "$MANIFEST" --repos "$IMAGE_REPOS" --dry-run "$DRY_RUN" \
+            --cache-dir ~/.cache/osv-scanner \
+            --overrides "$RUNNER_TEMP/image-scan/overrides.json" \
+            --summary "$GITHUB_STEP_SUMMARY"
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ !cancelled() }}
+        with:
+          path: ~/.cache/osv-scanner
+          key: ${{ steps.cache-key.outputs.key }}
+      # Also after a failed scan: the rules it wrote for the images it could scan still apply.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: image-scan-overrides
+          path: ${{ runner.temp }}/image-scan/overrides.json
+          if-no-files-found: ignore
+          retention-days: 1
+          overwrite: true # a re-run replaces it
+
+  renovate:
+    name: renovate
+    needs: [select, image-scan]
+    # Also when image-scan failed or was skipped: Renovate then runs without its overrides.
+    if: ${{ !cancelled() && needs.select.result == 'success' }}
+    runs-on: ubuntu-latest
+    # This repo's release environment holds the ccf-release-bot secrets; only main may use it
+    # (repo-settings), so a workflow on another branch can't read them.
+    environment: release
+    # The app token lasts an hour, which is why a live run takes at most 15 repos. Renovate gets 55
+    # minutes of it, the merge pass a fresh token and 25 minutes (its 20-minute wait plus setup).
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # No overrides when image-scan was skipped, failed before writing them, or planned none.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ needs.image-scan.result != 'skipped' }}
+        continue-on-error: true
+        with:
+          name: image-scan-overrides
+          path: ${{ runner.temp }}/image-scan
       - name: Build the Renovate config
         id: config
         env:
-          SLOT: ${{ steps.select.outputs.slot }}
+          SLOT: ${{ needs.select.outputs.slot }}
         run: |
           config="$RUNNER_TEMP/renovate-config.json"
-          go run ./cmd/renovate-config config --manifest "$MANIFEST" --repos "$REPOS" --dry-run "$DRY_RUN" --slot "$SLOT" > "$config"
+          # A missing overrides file adds no rules.
+          go run ./cmd/renovate-config config --manifest "$MANIFEST" --repos "$REPOS" --dry-run "$DRY_RUN" --slot "$SLOT" \
+            --overrides "$RUNNER_TEMP/image-scan/overrides.json" > "$config"
           echo "path=$config" >> "$GITHUB_OUTPUT"
           jq '{repositories, dryRun}' "$config"
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -95,7 +195,7 @@ jobs:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
           owner: compliance-framework
-          repositories: ${{ steps.select.outputs.repos }}
+          repositories: ${{ needs.select.outputs.repos }}
           # A dry run writes nothing, so its token can't either.
           permission-contents: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # branches, commits and merges
           permission-pull-requests: ${{ env.DRY_RUN == 'off' && 'write' || 'read' }} # PRs and merges
@@ -112,17 +212,17 @@ jobs:
         env:
           LOG_LEVEL: ${{ inputs.log_level || 'info' }}
       # A fresh token: Renovate may have used most of the first one's hour. Scoped to the same
-      # shard, and only after the select step succeeded: an empty list would mint a token for every
+      # shard, and only after the select job succeeded: an empty list would mint a token for every
       # repo the app is installed on (all of them). After a failed or timed-out Renovate step too:
       # the PRs it opened earlier are still there.
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: merge-token
-        if: ${{ !cancelled() && env.DRY_RUN == 'off' && steps.select.outcome == 'success' && steps.select.outputs.repos != '' }}
+        if: ${{ !cancelled() && env.DRY_RUN == 'off' && needs.select.outputs.repos != '' }}
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
           owner: compliance-framework
-          repositories: ${{ steps.select.outputs.repos }}
+          repositories: ${{ needs.select.outputs.repos }}
           permission-contents: write # merges
           permission-pull-requests: write # merges; lists PRs and their commits
           permission-workflows: write # merging a PR that edits .github/workflows files
@@ -133,5 +233,5 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.merge-token.outputs.token }}
           SLUG: ${{ steps.merge-token.outputs.app-slug }}
-          REPOS: ${{ steps.select.outputs.repos }}
+          REPOS: ${{ needs.select.outputs.repos }}
         run: go run ./cmd/renovate-config merge --manifest "$MANIFEST" --repos "$REPOS" --author "${SLUG}[bot]" --dry-run "$DRY_RUN" --wait 20m

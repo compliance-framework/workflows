@@ -1,11 +1,12 @@
 // Command renovate-config prepares a renovate.yml run from a manifest:
 //
 //	renovate-config list   [--manifest repos.yaml] [--repos a,b] [--dry-run full] [--max-repos 15] [--slot N]
-//	renovate-config config [--manifest repos.yaml] [--repos a,b] [--dry-run full] [--max-repos 15] [--slot N] [--preset renovate/default.json] [--owner compliance-framework]
+//	renovate-config config [--manifest repos.yaml] [--repos a,b] [--dry-run full] [--max-repos 15] [--slot N] [--preset renovate/default.json] [--owner compliance-framework] [--overrides file]
 //	renovate-config merge  --repos a,b [--manifest repos.yaml] [--dry-run full] [--wait 20m] [--author ccf-release-bot[bot]]
 //
 // list prints the selected repo names, comma-separated, to scope the token. config prints the
-// Renovate global config (internal/renovate) as JSON. Both select every active repo in the
+// Renovate global config (internal/renovate) as JSON, with the package rules of --overrides (written
+// by image-scan; a missing or empty file adds none) after the preset's. Both select every active repo in the
 // manifest unless --repos names a subset; a dry run may name repos of an inactive batch. A live run
 // (--dry-run off) takes only one shard of at most --max-repos of them, picked by --slot, so pass
 // both commands the same --slot (renovate.yml passes its run number). merge merges the green
@@ -58,6 +59,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	repos := fs.String("repos", "", "comma- or space-separated repo names (default: every active repo in the manifest)")
 	owner := fs.String("owner", "compliance-framework", "the repos' owner")
 	preset := fs.String("preset", "renovate/default.json", "the shared Renovate preset (config)")
+	overrides := fs.String("overrides", "", "package rules to append after the preset's (config; image-scan's JSON list); a missing or empty file adds none")
 	dryRun := fs.String("dry-run", "full", "full, lookup, extract, or off to run live; only a dry run may name repos of an inactive batch")
 	maxRepos := fs.Int("max-repos", renovate.MaxLiveRepos, "a live run takes one shard of at most this many repos (0: every selected repo)")
 	slot := fs.Int64("slot", time.Now().Unix()/3600, "picks the live run's shard (slot mod shards); renovate.yml passes its run number; default: hours since the Unix epoch")
@@ -95,7 +97,20 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("read preset: %w", err)
 	}
-	cfg, err := renovate.GlobalConfig(data, renovate.Options{Owner: *owner, Repos: selected, DryRun: *dryRun})
+	var rules []any
+	if *overrides != "" {
+		raw, err := os.ReadFile(*overrides)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read overrides: %w", err)
+		}
+		if rules, err = renovate.ParseOverrides(raw, *owner, selected); err != nil {
+			return err
+		}
+		if len(rules) > 0 {
+			fmt.Fprintf(stderr, "%d override rule(s) from %s\n", len(rules), *overrides)
+		}
+	}
+	cfg, err := renovate.GlobalConfig(data, renovate.Options{Owner: *owner, Repos: selected, DryRun: *dryRun, Overrides: rules})
 	if err != nil {
 		return err
 	}

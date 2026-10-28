@@ -1,0 +1,194 @@
+# Image scan
+
+CVEs inside the CCF container images (OS packages of a base image, a runtime such as Node in a
+base image) are fixed by PRs from the same pipeline as Renovate's own vulnerability fixes:
+`renovate.yml`'s `image-scan` job scans the images of the run's shard, and turns what a newer base
+image fixes into Renovate package rules that the same run's Renovate applies. The fixes are then
+ordinary Renovate PRs, opened by `ccf-release-bot` and merged by the same [merge
+pass](renovate.md#the-merge-pass). Only fixable HIGH and CRITICAL findings are acted on. The job
+log and the step summary are the only report: there is no issue, SARIF upload, or Slack message.
+
+The logic is `cmd/image-scan`, with the rules in `internal/imagescan`.
+
+## The scanner
+
+[osv-scanner](https://github.com/google/osv-scanner) v2 (`scan image`), the same tool as
+`ci-common.yml`'s `vulns` job, run from its official image pinned by digest
+(`imagescan.ScannerImage`, `ghcr.io/google/osv-scanner:v2.7.0@sha256:...`). This repo's
+`renovate.json` tracks that constant with a regex custom manager, so Renovate updates it like any
+other dependency (`TestScannerImageRenovate`).
+
+No scanner inventories a language runtime installed from an upstream tarball: in October 2026
+osv-scanner v2.7.0, Trivy 0.76.1 and Grype v0.121.0 all flagged CVE-2026-111497 (brotli) in the
+Debian `libbrotli1` of `node:20` and in the `brotli-libs` of `nginx:stable-alpine`, but none in the
+brotli built into `node:20`'s Node binary. So image-scan adds a **runtime check**:
+
+- It reads the runtime's version from the image: the variable the official images set
+  (`NODE_VERSION=20.20.2` in `node:20`), or else the output of the runtime's binary run with
+  `--version` (`docker run --network none --entrypoint node <image> --version`), for a runtime
+  installed another way. No binary means no runtime.
+- It looks the version up in OSV (`POST https://api.osv.dev/v1/query` with
+  `{"package": {"name": "node", "ecosystem": "Bitnami"}, "version": "20.20.2"}`): Bitnami's
+  advisories track Node.js releases. For 20.20.2 that returns `BIT-node-2026-111497` (alias
+  CVE-2026-111497), fixed in 22.23.4, 24.22.1 and 26.12.1: no fix in 20.
+- Runtimes are a table (`imagescan.Runtimes`); Node is the only one today. Add another with the
+  variable its images set, its binary and its OSV package.
+
+Every finding has the image, the stage, the package, its type (`os`, `lang` or `binary` for a
+runtime), the installed and fixed versions, the advisory IDs and their aliases, and a severity.
+The severity is the highest CVSS base score of the advisory's vectors (CVSS v2, v3.0, v3.1 or v4.0,
+computed with the library osv-scanner uses, so both agree): **CRITICAL** from 9.0, **HIGH** from
+7.0, then MEDIUM and LOW; an advisory with no vector takes osv-scanner's own rating of its group,
+and none at all is UNKNOWN. Distribution ratings (Grype's, Debian's urgency) are not used. A
+finding is **actionable** when it is HIGH or CRITICAL and has a fixed version.
+
+`internal/imagescan/testdata` holds the spike's osv-scanner reports of `node:20` and
+`nginx:stable-alpine` (trimmed to a few packages) and the OSV and endoflife.date responses,
+recorded; `TestSpikeAcceptance` checks that CVE-2026-111497 is flagged as actionable in `node:20`
+(the Node runtime, by the runtime check, and Debian's `libbrotli1`) and in `nginx:stable-alpine`
+(`brotli-libs`, fixed in `1.2.1-r0`). No test reaches the network.
+
+## What is scanned
+
+For each repo of the shard whose kind has Dockerfiles: `go-service` and `ui`, which publish images,
+and `action` (agent-action's `action.yml` runs its `Dockerfile`, which the runner builds on each
+use and never publishes):
+
+- **Every base image of every Dockerfile.** A `go-service` or `ui` repo's Dockerfiles are those of
+  the `images` input its caller workflows pass to `release-go-image.yml`, `release-ui.yml`,
+  `preview.yml` (kind `image`) or `publish-image.yml`, read from its default branch (agent passes
+  three: `Dockerfile`, `Dockerfile-ci`, `Dockerfile-custodian`). A call without `images`, or a repo
+  with no such call, means the default: one image named after the repo, from `Dockerfile`. An
+  `action` repo has `Dockerfile`. A repo without the Dockerfile is noted and skipped.
+- **The published images**, for `go-service` and `ui`: `ghcr.io/compliance-framework/<name>:main`
+  (the default branch's preview) and `:latest` (the latest release), for each image name. They are
+  reported only (a repo without a release has no `:latest`, which is a note). Their findings include
+  what the Dockerfile adds on top of the base image, such as the Go modules of the binary.
+
+The Dockerfile parser reads the stages: `FROM [--platform=...] <image> [AS <name>]`, the `ARG`
+defaults declared before the first `FROM` (`${VAR}`, `${VAR:-default}` and the other forms),
+`FROM <stage>`, `scratch`, and references with a tag, a digest or both. The final stage is the last
+`FROM` (`publish-image.yml` builds without `--target`); its base image, followed through
+`FROM <stage>` (the ui's `FROM production`), is tagged `final`, every other one `build`.
+
+Each image is pulled for `linux/amd64`, saved to an archive, scanned, and removed; an image used
+by several repos is scanned once per run. osv-scanner runs with its offline databases
+(`--offline-vulnerabilities --download-offline-databases`) in `~/.cache/osv-scanner`, which the job
+caches (a new cache key a day, restored from the newest); each run refreshes them, downloading only
+what changed.
+
+## Remediation
+
+The plan (`imagescan.Planner`) makes at most one rule per repo and image, written as a JSON list
+of Renovate `packageRules`:
+
+1. **Rule 1: a newer image of the same tag fixes it.** A final-stage base image with actionable
+   findings, whose candidate scans clean of all of them. The candidate is what Renovate would move
+   to without a major: for an `X.Y.Z` tag, the newest `X.Y` patch with the same suffix; otherwise,
+   when the reference pins a digest, the tag's current digest (`nginx:stable-alpine@sha256:<old>`
+   moves to the tag's rebuild). The rule:
+
+   ```json
+   {
+     "matchRepositories": ["compliance-framework/ui"],
+     "matchManagers": ["dockerfile"],
+     "matchDepNames": ["nginx"],
+     "minimumReleaseAge": null,
+     "prHourlyLimit": 0, "prConcurrentLimit": 0, "branchConcurrentLimit": 0,
+     "semanticCommitType": "fix",
+     "groupName": "security fixes (dockerfile)", "groupSlug": "security-dockerfile",
+     "automerge": true, "addLabels": ["renovate:automerge"],
+     "prPriority": 10,
+     "prBodyNotes": ["**image-scan** (compliance-framework/workflows): this update of `nginx:stable-alpine@sha256:...` fixes: ..."]
+   }
+   ```
+
+   It mirrors the preset's `vulnerabilityAlerts`: no waiting period, no PR limit, `fix(deps)`, one
+   `renovate/security-dockerfile` PR per repo, auto-merged by Renovate and the merge pass. The PR
+   body lists the CVEs with the package, versions and severity of each.
+2. **Rule 2: the image is on an end-of-life release.** A base image of any stage whose tag names an
+   end-of-life release of `node`, `debian` or `alpine` (`imagescan.eolLines`; [endoflife.date](https://endoflife.date/)'s
+   API, failing soft: when it can't be read the image goes through rules 1 and 3) with actionable
+   findings that a newer release can fix: for a runtime image, the runtime's own findings (its
+   packages are fixed by a rebuild of the same release); for an OS image, all of them. The rule
+   opens the **lowest supported release whose current image scans clean of them** (`node:22` for
+   `node:20`, not 24), keeping the tag's suffix (`20-alpine` moves to `22-alpine`):
+
+   ```json
+   {
+     "matchRepositories": ["compliance-framework/ui"],
+     "matchManagers": ["dockerfile"],
+     "matchDepNames": ["node"],
+     "matchCurrentVersion": "/^20(\\.|-|$)/",
+     "allowedVersions": "/^22(\\.|-|$)/",
+     "prHourlyLimit": 0, "prConcurrentLimit": 0,
+     "automerge": false, "addLabels": ["needs-human"],
+     "prBodyNotes": ["**image-scan** (compliance-framework/workflows): `node:20` is on nodejs 20, which is end-of-life; this update to nodejs 22 fixes: ..."]
+   }
+   ```
+
+   `matchCurrentVersion` keeps the rule off the repo's other `node` images (a `node:24` stage). A
+   major is for a human, so it never auto-merges and gets `needs-human`. Rule 1 is not applied to
+   an image rule 2 moves. A codename tag (`bookworm-slim`) or an image the table doesn't know
+   (`nginx`, distroless) is never moved to another release.
+3. **Anything else actionable is noted**: the distribution has the fix but the upstream image
+   hasn't been rebuilt with it yet (the candidate still has the finding, the tag wasn't rebuilt
+   since the pinned digest, or the tag isn't pinned by digest, so it already is the newest image),
+   or the finding is in a build stage (not shipped), or in an internal `ghcr.io/compliance-framework`
+   image (ccf-bump moves those).
+
+A finding is "still there" in a candidate when the candidate has a finding of the same package
+(the advisory's package, or the installed one) with a shared ID or alias, fixable or not: the
+distribution advisory IDs differ between releases (`ALPINE-CVE-...` per Alpine branch), the CVE
+alias doesn't.
+
+### How Renovate gets the rules
+
+`image-scan scan` writes the rules to `--overrides` (the job uploads it as the
+`image-scan-overrides` artifact), and `renovate-config config --overrides <file>` appends them after
+the preset's `packageRules`, so they win over the preset's (Renovate applies matching rules in
+order, later ones last). The file is generated input, so `renovate.ParseOverrides` checks it
+strictly and the config step fails on anything else:
+
+- every rule names exactly one `matchRepositories` entry, `compliance-framework/<repo>`, with the
+  repo in the run's selection;
+- `matchManagers` is exactly `["dockerfile"]` and `matchDepNames` lists at least one image;
+- only these keys: `matchRepositories`, `matchManagers`, `matchDepNames`, `matchCurrentVersion`,
+  `allowedVersions`, `minimumReleaseAge`, `prHourlyLimit`, `prConcurrentLimit`,
+  `branchConcurrentLimit`, `semanticCommitType`, `groupName`, `groupSlug`, `automerge`,
+  `addLabels`, `prPriority` and `prBodyNotes`.
+
+A missing or empty file adds no rules.
+
+## The job
+
+`image-scan` runs in `renovate.yml` between `select` and `renovate` ([renovate.md](renovate.md#the-workflow-renovateyml)):
+
+1. `select` lists the shard's image repos with `go run ./cmd/image-scan list` (the selected repos of
+   kind `go-service`, `ui` or `action`). With none, `image-scan` is skipped.
+2. It mints a `ccf-release-bot` token scoped with `repositories:` to exactly those repos, with only
+   **Contents: read** (the caller workflows and the Dockerfiles), on dry and live runs alike: it
+   writes nothing anywhere. The list is never empty here, and an empty list would reach every repo.
+3. `go run ./cmd/image-scan scan` scans, plans, writes the overrides, logs every finding to the job
+   log (one line each), and writes the step summary: per repo, a table of the images scanned
+   (findings, HIGH/CRITICAL, actionable), a table of their HIGH and CRITICAL findings (fixable or
+   not; the first 150), the number of rules, and the notes. It exits non-zero, after writing both,
+   when an image or Dockerfile could not be scanned; the rules for the rest still apply.
+4. The overrides are uploaded, also after a failed scan.
+
+`renovate` runs once `select` succeeded, whether `image-scan` succeeded, failed or was skipped
+(`if: ${{ !cancelled() && needs.select.result == 'success' }}`); it downloads the overrides when
+there are any. Dry runs scan too: only their Renovate config is a dry run's, so the log shows the
+PRs the rules would make.
+
+The job has 50 minutes, within its token's hour. A run now takes the scan's time before Renovate
+starts (about a minute per image, more for the large `node` and `golang` images); a run still in
+progress when the next one is due delays it (the `renovate` concurrency group queues one), which
+slows the rotation but never skips a shard.
+
+Locally, with Docker and a token that reads the repos:
+
+```sh
+GH_TOKEN=$(gh auth token) go run ./cmd/image-scan scan --repos ui --overrides /tmp/overrides.json --summary /tmp/summary.md
+go run ./cmd/renovate-config config --repos ui --overrides /tmp/overrides.json | jq '.packageRules[-1]'
+```

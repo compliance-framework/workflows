@@ -1,0 +1,78 @@
+{
+  "Ref": "nginx:stable-alpine",
+  "OS": "Alpine Linux v3.24",
+  "Findings": [
+    {
+      "image": "nginx:stable-alpine",
+      "package": "brotli-libs",
+      "source": "brotli",
+      "type": "os",
+      "ecosystem": "Alpine:v3.24",
+      "installed": "1.2.0-r1",
+      "fixed": [
+        "1.2.1-r0"
+      ],
+      "ids": [
+        "ALPINE-CVE-2026-111497"
+      ],
+      "aliases": [
+        "CVE-2026-111497"
+      ],
+      "score": 9.2
+    },
+    {
+      "image": "nginx:stable-alpine",
+      "package": "curl",
+      "source": "curl",
+      "type": "os",
+      "ecosystem": "Alpine:v3.24",
+      "installed": "8.22.0-r0",
+      "fixed": [
+        "8.23.0-r0"
+      ],
+      "ids": [
+        "ALPINE-CVE-2026-107928"
+      ],
+      "aliases": [
+        "CVE-2026-107928"
+      ],
+      "score": 0
+    },
+    {
+      "image": "nginx:stable-alpine",
+      "package": "curl",
+      "source": "curl",
+      "type": "os",
+      "ecosystem": "Alpine:v3.24",
+      "installed": "8.22.0-r0",
+      "fixed": [
+        "8.23.0-r0"
+      ],
+      "ids": [
+        "ALPINE-CVE-2026-86409"
+      ],
+      "aliases": [
+        "CVE-2026-86409"
+      ],
+      "score": 0
+    },
+    {
+      "image": "nginx:stable-alpine",
+      "package": "curl",
+      "source": "curl",
+      "type": "os",
+      "ecosystem": "Alpine:v3.24",
+      "installed": "8.22.0-r0",
+      "fixed": [
+        "8.23.0-r0"
+      ],
+      "ids": [
+        "ALPINE-CVE-2026-92392"
+      ],
+      "aliases": [
+        "CVE-2026-92392"
+      ],
+      "score": 8.1
+    }
+  ]
+}

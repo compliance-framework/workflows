@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/compliance-framework/workflows/internal/imagescan"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -253,4 +255,195 @@ func golangciVersion(t *testing.T, file string) string {
 		t.Fatalf("%s: golangci-lint-action versions %q, want one", file, versions)
 	}
 	return versions[0]
+}
+
+// TestScannerImageRenovate checks this repo's renovate.json custom manager for the osv-scanner
+// image image-scan runs (imagescan.ScannerImage, a Go constant no manager reads): it reads
+// scanner.go and finds the constant's image, tag and digest, so Renovate updates the pin.
+func TestScannerImageRenovate(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "renovate.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		CustomManagers []struct {
+			CustomType          string   `json:"customType"`
+			ManagerFilePatterns []string `json:"managerFilePatterns"`
+			MatchStrings        []string `json:"matchStrings"`
+			DatasourceTemplate  string   `json:"datasourceTemplate"`
+		} `json:"customManagers"`
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	const file = "internal/imagescan/scanner.go"
+	src, err := os.ReadFile(filepath.Join("..", "..", file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	for _, m := range cfg.CustomManagers {
+		if m.DatasourceTemplate != "docker" {
+			continue
+		}
+		matched := false
+		for _, p := range m.ManagerFilePatterns {
+			re, prefixed := strings.CutPrefix(p, "/")
+			re, suffixed := strings.CutSuffix(re, "/")
+			if !prefixed || !suffixed {
+				t.Fatalf("managerFilePatterns %q: want a /regex/", p)
+			}
+			matched = matched || regexp.MustCompile(re).MatchString(file)
+		}
+		if !matched || m.CustomType != "regex" {
+			continue
+		}
+		for _, s := range m.MatchStrings {
+			re := regexp.MustCompile(s)
+			for _, g := range []string{"depName", "currentValue", "currentDigest"} {
+				if re.SubexpIndex(g) < 0 {
+					t.Fatalf("matchStrings %q: no %s group", s, g)
+				}
+			}
+			for _, sm := range re.FindAllStringSubmatch(string(src), -1) {
+				found = append(found, sm[re.SubexpIndex("depName")]+":"+sm[re.SubexpIndex("currentValue")]+"@"+sm[re.SubexpIndex("currentDigest")])
+			}
+		}
+	}
+	if len(found) != 1 || found[0] != imagescan.ScannerImage {
+		t.Errorf("renovate.json's docker custom managers find %q in %s, want [%s]", found, file, imagescan.ScannerImage)
+	}
+}
+
+// renovateWorkflow is the part of renovate.yml the tests below pin.
+type renovateWorkflow struct {
+	Env  map[string]string `yaml:"env"`
+	Jobs map[string]struct {
+		Needs       []string          `yaml:"needs"`
+		If          string            `yaml:"if"`
+		Environment string            `yaml:"environment"`
+		Outputs     map[string]string `yaml:"outputs"`
+		Timeout     int               `yaml:"timeout-minutes"`
+		Steps       []struct {
+			ID              string            `yaml:"id"`
+			Name            string            `yaml:"name"`
+			Uses            string            `yaml:"uses"`
+			If              string            `yaml:"if"`
+			ContinueOnError bool              `yaml:"continue-on-error"`
+			With            map[string]string `yaml:"with"`
+			Env             map[string]string `yaml:"env"`
+			Run             string            `yaml:"run"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
+}
+
+// TestRenovateJobs pins renovate.yml's split into select, image-scan and renovate: image-scan runs
+// on the shard's image repos with a read-only token scoped to them, and Renovate runs whenever
+// select succeeded, with the overrides when there are any.
+func TestRenovateJobs(t *testing.T) {
+	var wf renovateWorkflow
+	read(t, "renovate.yml", &wf)
+	if len(wf.Jobs) != 3 {
+		t.Fatalf("jobs: %d, want select, image-scan and renovate", len(wf.Jobs))
+	}
+	sel, scan, ren := wf.Jobs["select"], wf.Jobs["image-scan"], wf.Jobs["renovate"]
+	for _, out := range []string{"repos", "slot", "image-repos"} {
+		if sel.Outputs[out] != "${{ steps.select.outputs."+out+" }}" {
+			t.Errorf("select output %s = %q", out, sel.Outputs[out])
+		}
+	}
+	if sel.Environment != "" {
+		t.Errorf("select has environment %q: it reads no secret", sel.Environment)
+	}
+	if !strings.Contains(wf.Env["DRY_RUN"], "vars.RENOVATE_LIVE == 'true'") {
+		t.Errorf("DRY_RUN = %q, want the workflow-level fallback for every job", wf.Env["DRY_RUN"])
+	}
+
+	if !slices.Equal(scan.Needs, []string{"select"}) || scan.If != "${{ needs.select.outputs.image-repos != '' }}" || scan.Environment != "release" {
+		t.Errorf("image-scan: needs %v, if %q, environment %q", scan.Needs, scan.If, scan.Environment)
+	}
+	if scan.Timeout == 0 || scan.Timeout > 55 {
+		t.Errorf("image-scan timeout %d, want within the token's hour", scan.Timeout)
+	}
+	var minted, scanned, uploaded bool
+	for _, s := range scan.Steps {
+		switch {
+		case strings.HasPrefix(s.Uses, "actions/create-github-app-token@"):
+			minted = true
+			if s.With["repositories"] != "${{ needs.select.outputs.image-repos }}" {
+				t.Errorf("image-scan token repositories = %q, want the image repos", s.With["repositories"])
+			}
+			var perms []string
+			for k, v := range s.With {
+				if strings.HasPrefix(k, "permission-") {
+					perms = append(perms, k+": "+v)
+				}
+			}
+			if !slices.Equal(perms, []string{"permission-contents: read"}) {
+				t.Errorf("image-scan token permissions %v, want contents: read only", perms)
+			}
+		case s.Name == "Scan the images":
+			scanned = strings.Contains(s.Run, "go run ./cmd/image-scan scan") &&
+				strings.Contains(s.Run, `--overrides "$RUNNER_TEMP/image-scan/overrides.json"`) &&
+				strings.Contains(s.Run, `--summary "$GITHUB_STEP_SUMMARY"`) &&
+				strings.Contains(s.Run, "--cache-dir ~/.cache/osv-scanner") &&
+				s.Env["GH_TOKEN"] == "${{ steps.token.outputs.token }}"
+		case strings.HasPrefix(s.Uses, "actions/upload-artifact@"):
+			uploaded = s.If == "${{ !cancelled() }}" && s.With["name"] == "image-scan-overrides" && s.With["if-no-files-found"] == "ignore"
+		}
+	}
+	if !minted || !scanned || !uploaded {
+		t.Errorf("image-scan: token %v, scan step %v, overrides upload after a failure too %v", minted, scanned, uploaded)
+	}
+
+	if !slices.Equal(ren.Needs, []string{"select", "image-scan"}) || ren.If != "${{ !cancelled() && needs.select.result == 'success' }}" {
+		t.Errorf("renovate: needs %v, if %q; want it to run whenever select succeeded", ren.Needs, ren.If)
+	}
+	var downloaded, configured bool
+	for _, s := range ren.Steps {
+		if strings.HasPrefix(s.Uses, "actions/download-artifact@") {
+			downloaded = s.ContinueOnError && s.With["name"] == "image-scan-overrides" && s.If == "${{ needs.image-scan.result != 'skipped' }}"
+		}
+		if s.Name == "Build the Renovate config" {
+			configured = strings.Contains(s.Run, `--overrides "$RUNNER_TEMP/image-scan/overrides.json"`)
+		}
+		if strings.HasPrefix(s.Uses, "actions/create-github-app-token@") && s.With["repositories"] != "${{ needs.select.outputs.repos }}" {
+			t.Errorf("renovate token %s: repositories %q, want the shard", s.ID, s.With["repositories"])
+		}
+	}
+	if !downloaded || !configured {
+		t.Errorf("renovate: overrides downloaded (soft) %v, passed to the config %v", downloaded, configured)
+	}
+}
+
+// TestRenovateSelect runs the select step with a fake go: it outputs the shard and the shard's
+// image repos (empty skips image-scan), and fails on an empty shard, which would scope a token to
+// every repo.
+func TestRenovateSelect(t *testing.T) {
+	src := script(t, "renovate.yml", "select", "Select repos")
+	path := fakeBin(t, "go", `#!/bin/sh
+case "$2" in
+./cmd/renovate-config) echo "$FAKE_REPOS" ;;
+./cmd/image-scan) [ "$3" = list ] && echo "$FAKE_IMAGES" ;;
+*) exit 1 ;;
+esac
+`)
+	for _, tc := range []struct {
+		name, repos, images string
+		failed              bool
+	}{
+		{"image repos in the shard", "api,ui,plugin-a", "api,ui", false},
+		{"none", "plugin-a", "", false},
+		{"empty shard", "", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := run(t, t.TempDir(), src, path, "FAKE_REPOS="+tc.repos, "FAKE_IMAGES="+tc.images, "RUN_NUMBER=7", "MANIFEST=repos.yaml", "REPOS=", "DRY_RUN=full")
+			if r.failed != tc.failed {
+				t.Fatalf("failed = %v, want %v; output:\n%s", r.failed, tc.failed, r.out)
+			}
+			if !tc.failed && (r.outputs["repos"] != tc.repos || r.outputs["image-repos"] != tc.images || r.outputs["slot"] != "7") {
+				t.Errorf("outputs = %v", r.outputs)
+			}
+		})
+	}
 }

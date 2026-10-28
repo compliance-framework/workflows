@@ -97,7 +97,9 @@ npx --yes --package renovate -- renovate-config-validator --strict renovate/defa
 
 ### This repo's `renovate.json`
 
-This repo has one, for a version only its own workflows hold. The Go kind workflows (`ci-go-lib`,
+This repo has one, for two versions only this repo holds, each tracked by a regex custom manager.
+
+The first is the golangci-lint schema URL. The Go kind workflows (`ci-go-lib`,
 `ci-go-plugin`, `ci-go-service`) verify the golangci-lint config against the JSON schema of the
 golangci-lint version their `golangci/golangci-lint-action` step installs, downloaded from that
 version's tag (`SCHEMA_URL: https://raw.githubusercontent.com/golangci/golangci-lint/<version>/jsonschema/...`),
@@ -110,6 +112,12 @@ golangci-lint bump used to break CI. A regex custom manager (`customManagers`, `
 each file's URL with the action's version. The file is merged on top of the preset as any repo's
 would be (`requireConfig: "optional"`) and sets nothing else. Validate it like the preset:
 `renovate-config-validator --strict --no-global renovate.json`.
+
+The second is the osv-scanner image that [image-scan](image-scan.md) runs, the Go constant
+`ScannerImage` in `internal/imagescan/scanner.go` (`ghcr.io/google/osv-scanner:<tag>@sha256:<digest>`).
+A Go string is nothing to Renovate's managers, so a manager on that file reads its image, tag and
+digest as a `docker` dependency, and Renovate moves both in the non-major group.
+`TestScannerImageRenovate` checks the manager finds exactly the constant.
 
 ### Workflow YAML must be valid YAML 1.2
 
@@ -202,28 +210,44 @@ visits a month to open anything, one PR each.
 
 ## The workflow: `renovate.yml`
 
-Runs hourly at minute 17 and on `workflow_dispatch`, as one job:
+Runs hourly at minute 17 and on `workflow_dispatch`, as three jobs:
 
-1. `go run ./cmd/renovate-config list` selects the repos from the manifest (every active repo,
-   this `workflows` repo included, or the `repos` subset) and fails on an empty selection. A live
-   run then keeps only one shard of the selection ([The org-wide throttle](#the-org-wide-throttle)).
-2. `go run ./cmd/renovate-config config` writes the Renovate global config: the preset's settings
-   plus `platform: github`, `autodiscover: false`, `repositories` (the selection, as
-   `compliance-framework/<name>`), `onboarding: false`, `requireConfig: "optional"` and `dryRun`.
-   It refuses a preset that sets any of those itself.
-3. `actions/create-github-app-token` mints a `ccf-release-bot` token scoped with `repositories:` to
-   exactly the selected repos (the app is installed on every org repo, so an unscoped token would
-   reach all of them). A dry run gets read-only permissions; a live run gets Contents, Pull requests
-   and Issues write, Workflows write (to update actions in `.github/workflows`), and Checks and
-   Dependabot alerts read.
-4. `renovatebot/github-action` runs Renovate, pinned with its `renovate-version` input, with that config and token.
-   This repo is in Renovate's list, so Renovate updates the action's SHA pin like any third-party
-   action; check that `renovate-version` moves with it, and bump it by hand if it doesn't. The step
-   has 55 minutes, within the token's hour.
-5. A live run only, also after a failed or timed-out Renovate step: a second token, minted fresh
-   because Renovate may have used most of the first one's hour, for the same repos (Contents, Pull
-   requests and Workflows write, Checks read), then `go run ./cmd/renovate-config merge` with it:
-   the [merge pass](#the-merge-pass), with `--wait 20m` and 25 minutes. The job's limit is 90 minutes.
+1. **`select`**: `go run ./cmd/renovate-config list` selects the repos from the manifest (every
+   active repo, this `workflows` repo included, or the `repos` subset) and fails on an empty
+   selection. A live run then keeps only one shard of the selection ([The org-wide
+   throttle](#the-org-wide-throttle)). `go run ./cmd/image-scan list` then picks the shard's repos
+   that have Dockerfiles (kinds `go-service`, `ui` and `action`). The job outputs both lists and the
+   slot.
+2. **`image-scan`**, when the shard has image repos: scans their container images and writes the
+   Renovate package rules that fix what a newer base image fixes, with a read-only
+   `ccf-release-bot` token scoped to those repos, on dry runs too ([image-scan.md](image-scan.md)).
+   It uploads the rules as the `image-scan-overrides` artifact and writes its report to the step
+   summary.
+3. **`renovate`**, once `select` succeeded, whether `image-scan` succeeded, failed or was skipped:
+   1. It downloads the `image-scan-overrides` artifact when there is one.
+   2. `go run ./cmd/renovate-config config` writes the Renovate global config: the preset's settings
+      plus `platform: github`, `autodiscover: false`, `repositories` (the selection, as
+      `compliance-framework/<name>`), `onboarding: false`, `requireConfig: "optional"` and `dryRun`.
+      It refuses a preset that sets any of those itself. With `--overrides`, image-scan's rules are
+      appended after the preset's `packageRules`, so they win; the file is checked strictly
+      ([image-scan.md](image-scan.md#how-renovate-gets-the-rules)), and a missing one adds none.
+   3. `actions/create-github-app-token` mints a `ccf-release-bot` token scoped with `repositories:` to
+      exactly the selected repos (the app is installed on every org repo, so an unscoped token would
+      reach all of them). A dry run gets read-only permissions; a live run gets Contents, Pull requests
+      and Issues write, Workflows write (to update actions in `.github/workflows`), and Checks and
+      Dependabot alerts read.
+   4. `renovatebot/github-action` runs Renovate, pinned with its `renovate-version` input, with that config and token.
+      This repo is in Renovate's list, so Renovate updates the action's SHA pin like any third-party
+      action; check that `renovate-version` moves with it, and bump it by hand if it doesn't. The step
+      has 55 minutes, within the token's hour.
+   5. A live run only, also after a failed or timed-out Renovate step: a second token, minted fresh
+      because Renovate may have used most of the first one's hour, for the same repos (Contents, Pull
+      requests and Workflows write, Checks read), then `go run ./cmd/renovate-config merge` with it:
+      the [merge pass](#the-merge-pass), with `--wait 20m` and 25 minutes. The job's limit is 90 minutes.
+
+The scan runs before Renovate, so a run takes up to its 50 minutes longer; a run still going when
+the next is due delays that one (the `renovate` concurrency group queues it), which slows the
+rotation but never skips a shard.
 
 | Input | Default | What |
 | --- | --- | --- |

@@ -397,3 +397,84 @@ func TestThrottle(t *testing.T) {
 		t.Errorf("MaxLiveRepos %d x prHourlyLimit %d = %d non-vulnerability PRs a run, want at most 60", MaxLiveRepos, p.PrHourlyLimit, perRun)
 	}
 }
+
+func TestGlobalConfigOverrides(t *testing.T) {
+	preset := []byte(`{"packageRules": [{"matchUpdateTypes": ["major"], "automerge": false}]}`)
+	overrides, err := ParseOverrides([]byte(`[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"], "minimumReleaseAge": null, "prHourlyLimit": 0}]`), "o", []string{"r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := GlobalConfig(preset, Options{Owner: "o", Repos: []string{"r"}, DryRun: "full", Overrides: overrides})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, _ := decode(t, out)["packageRules"].([]any)
+	if len(rules) != 2 {
+		t.Fatalf("packageRules = %v, want the preset's then the override", rules)
+	}
+	last, _ := rules[1].(map[string]any)
+	if v, set := last["minimumReleaseAge"]; !set || v != nil || last["prHourlyLimit"] != float64(0) {
+		t.Errorf("override = %v, want minimumReleaseAge null and prHourlyLimit 0 kept", last)
+	}
+	if !strings.Contains(string(out), `"prHourlyLimit": 0`) {
+		t.Errorf("override number not kept as written:\n%s", out)
+	}
+
+	// A preset without packageRules gets the overrides alone; with none, nothing changes.
+	out, err = GlobalConfig([]byte(`{}`), Options{Owner: "o", Repos: []string{"r"}, DryRun: "full", Overrides: overrides})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rules, _ := decode(t, out)["packageRules"].([]any); len(rules) != 1 {
+		t.Errorf("packageRules = %v, want the override", rules)
+	}
+	out, err = GlobalConfig([]byte(`{}`), Options{Owner: "o", Repos: []string{"r"}, DryRun: "full"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decode(t, out)["packageRules"]; ok {
+		t.Errorf("no overrides added packageRules:\n%s", out)
+	}
+	if _, err := GlobalConfig([]byte(`{"packageRules": {}}`), Options{Owner: "o", Repos: []string{"r"}, DryRun: "full", Overrides: overrides}); err == nil {
+		t.Error("packageRules not a list: want an error")
+	}
+}
+
+func TestParseOverrides(t *testing.T) {
+	const ok = `"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]`
+	for _, tc := range []struct {
+		name, data string
+		n          int
+		err        string
+	}{
+		{"empty", "", 0, ""},
+		{"blank", " \n", 0, ""},
+		{"empty list", "[]", 0, ""},
+		{"rule 1", `[{` + ok + `, "minimumReleaseAge": null, "prHourlyLimit": 0, "prConcurrentLimit": 0, "branchConcurrentLimit": 0, "semanticCommitType": "fix", "groupName": "g", "groupSlug": "s", "automerge": true, "addLabels": ["renovate:automerge"], "prPriority": 10, "prBodyNotes": ["n"]}]`, 1, ""},
+		{"rule 2", `[{` + ok + `, "matchCurrentVersion": "/^20(\\.|-|$)/", "allowedVersions": "/^22(\\.|-|$)/", "automerge": false, "addLabels": ["needs-human"]}]`, 1, ""},
+		{"not JSON", `[{`, 0, "overrides"},
+		{"not a list", `{}`, 0, "overrides"},
+		{"trailing data", `[] []`, 0, "trailing"},
+		{"null rule", `[null]`, 0, "JSON object"},
+		{"unknown key", `[{` + ok + `, "enabled": false}]`, 0, `"enabled" is not allowed`},
+		{"extends", `[{` + ok + `, "extends": ["x"]}]`, 0, `"extends" is not allowed`},
+		{"no repository", `[{"matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "matchRepositories must list exactly one"},
+		{"two repositories", `[{"matchRepositories": ["o/r", "o/s"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "exactly one"},
+		{"repository not in the run", `[{"matchRepositories": ["o/s"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "not in this run"},
+		{"other owner", `[{"matchRepositories": ["x/r"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "not in this run"},
+		{"a pattern", `[{"matchRepositories": ["/.*/"], "matchManagers": ["dockerfile"], "matchDepNames": ["nginx"]}]`, 0, "not in this run"},
+		{"other manager", `[{"matchRepositories": ["o/r"], "matchManagers": ["npm"], "matchDepNames": ["nginx"]}]`, 0, "matchManagers"},
+		{"no deps", `[{"matchRepositories": ["o/r"], "matchManagers": ["dockerfile"], "matchDepNames": []}]`, 0, "matchDepNames"},
+	} {
+		rules, err := ParseOverrides([]byte(tc.data), "o", []string{"r"})
+		if tc.err != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.err) {
+				t.Errorf("%s: err = %v, want one containing %q", tc.name, err, tc.err)
+			}
+			continue
+		}
+		if err != nil || len(rules) != tc.n {
+			t.Errorf("%s: %d rules, %v; want %d", tc.name, len(rules), err, tc.n)
+		}
+	}
+}

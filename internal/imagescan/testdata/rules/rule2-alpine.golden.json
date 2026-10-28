@@ -1,0 +1,24 @@
+[
+  {
+    "addLabels": [
+      "needs-human"
+    ],
+    "allowedVersions": "/^22(\\.|-|$)/",
+    "automerge": false,
+    "matchCurrentVersion": "/^20(\\.|-|$)/",
+    "matchDepNames": [
+      "node"
+    ],
+    "matchManagers": [
+      "dockerfile"
+    ],
+    "matchRepositories": [
+      "compliance-framework/ui"
+    ],
+    "prBodyNotes": [
+      "**image-scan** (compliance-framework/workflows): `node:20-alpine` is on nodejs 20, which is end-of-life; this update to nodejs 22 fixes:\n\n- CVE-2026-111497: binary node 20.20.2, fixed in 22.23.4, 24.22.1, 26.12.1 (CRITICAL)\n- CVE-2026-48617: binary node 20.20.2, fixed in 22.23.0, 24.17.0, 26.3.1 (HIGH)\n- CVE-2026-48937: binary node 20.20.2, fixed in 22.23.0, 24.17.0 (HIGH)\n- CVE-2026-56846: binary node 20.20.2, fixed in 22.23.2, 24.18.1 (HIGH)\n- CVE-2026-56848: binary node 20.20.2, fixed in 22.23.2, 24.18.1, 26.5.1 (HIGH)\n- CVE-2026-58043: binary node 20.20.2, fixed in 22.23.2, 24.18.1, 26.5.1 (HIGH)"
+    ],
+    "prConcurrentLimit": 0,
+    "prHourlyLimit": 0
+  }
+]

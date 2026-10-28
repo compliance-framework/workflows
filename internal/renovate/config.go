@@ -28,6 +28,8 @@ type Options struct {
 	Repos []string
 	// DryRun is "full", "lookup", "extract" or DryRunOff.
 	DryRun string
+	// Overrides are package rules appended after the preset's (ParseOverrides).
+	Overrides []any
 }
 
 // runnerKeys are the settings GlobalConfig owns. The preset must not set them: they decide which
@@ -126,6 +128,15 @@ func GlobalConfig(preset []byte, opts Options) ([]byte, error) {
 		}
 	}
 
+	if len(opts.Overrides) > 0 {
+		rules, ok := cfg["packageRules"].([]any)
+		if _, set := cfg["packageRules"]; set && !ok {
+			return nil, errors.New("preset: packageRules is not a list")
+		}
+		// Later rules win in Renovate, so the overrides take precedence over the preset's.
+		cfg["packageRules"] = append(rules, opts.Overrides...)
+	}
+
 	repos := make([]string, len(opts.Repos))
 	for i, r := range opts.Repos {
 		repos[i] = opts.Owner + "/" + r
@@ -153,4 +164,72 @@ func GlobalConfig(preset []byte, opts Options) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// overrideKeys are the keys an override rule may set: the ones image-scan's rules use
+// (internal/imagescan, docs/image-scan.md#remediation).
+var overrideKeys = []string{
+	"matchRepositories", "matchManagers", "matchDepNames", "matchCurrentVersion",
+	"allowedVersions", "minimumReleaseAge", "prHourlyLimit", "prConcurrentLimit",
+	"branchConcurrentLimit", "semanticCommitType", "groupName", "groupSlug", "automerge",
+	"addLabels", "prPriority", "prBodyNotes",
+}
+
+// ParseOverrides reads the package rules image-scan writes (a JSON list) for a run on owner's
+// repos. The file is generated, so it is checked strictly: every rule must set only overrideKeys,
+// name exactly one repository in matchRepositories that is one of repos, match only the
+// dockerfile manager, and name at least one dependency. Empty data is no overrides.
+func ParseOverrides(data []byte, owner string, repos []string) ([]any, error) {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var rules []map[string]any
+	if err := dec.Decode(&rules); err != nil {
+		return nil, fmt.Errorf("overrides: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("overrides: trailing data after the JSON list")
+	}
+	out := make([]any, 0, len(rules))
+	for i, r := range rules {
+		if r == nil {
+			return nil, fmt.Errorf("overrides: rule %d: want a JSON object", i)
+		}
+		for k := range r {
+			if !slices.Contains(overrideKeys, k) {
+				return nil, fmt.Errorf("overrides: rule %d: key %q is not allowed (want only %s)", i, k, strings.Join(overrideKeys, ", "))
+			}
+		}
+		repo, err := single(r, "matchRepositories")
+		if err != nil {
+			return nil, fmt.Errorf("overrides: rule %d: %w", i, err)
+		}
+		name, ok := strings.CutPrefix(repo, owner+"/")
+		if !ok || !slices.Contains(repos, name) {
+			return nil, fmt.Errorf("overrides: rule %d: repository %q is not in this run (%s/%s)", i, repo, owner, strings.Join(repos, ","))
+		}
+		if m, err := single(r, "matchManagers"); err != nil || m != "dockerfile" {
+			return nil, fmt.Errorf("overrides: rule %d: matchManagers must be [\"dockerfile\"]", i)
+		}
+		if deps, ok := r["matchDepNames"].([]any); !ok || len(deps) == 0 {
+			return nil, fmt.Errorf("overrides: rule %d: matchDepNames must list the images", i)
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// single returns the one string in rule[key], a list.
+func single(rule map[string]any, key string) (string, error) {
+	list, ok := rule[key].([]any)
+	if !ok || len(list) != 1 {
+		return "", fmt.Errorf("%s must list exactly one entry", key)
+	}
+	s, ok := list[0].(string)
+	if !ok {
+		return "", fmt.Errorf("%s must list a string", key)
+	}
+	return s, nil
 }

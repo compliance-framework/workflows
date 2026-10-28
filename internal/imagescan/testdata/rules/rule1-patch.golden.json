@@ -1,0 +1,28 @@
+[
+  {
+    "addLabels": [
+      "renovate:automerge"
+    ],
+    "automerge": true,
+    "branchConcurrentLimit": 0,
+    "groupName": "security fixes (dockerfile)",
+    "groupSlug": "security-dockerfile",
+    "matchDepNames": [
+      "golang"
+    ],
+    "matchManagers": [
+      "dockerfile"
+    ],
+    "matchRepositories": [
+      "compliance-framework/ui"
+    ],
+    "minimumReleaseAge": null,
+    "prBodyNotes": [
+      "**image-scan** (compliance-framework/workflows): this update of `golang:1.26.1` fixes:\n\n- CVE-2026-111497: os brotli-libs 1.2.0-r1, fixed in 1.2.1-r0 (CRITICAL)\n- CVE-2026-92392: os curl 8.22.0-r0, fixed in 8.23.0-r0 (HIGH)"
+    ],
+    "prConcurrentLimit": 0,
+    "prHourlyLimit": 0,
+    "prPriority": 10,
+    "semanticCommitType": "fix"
+  }
+]
