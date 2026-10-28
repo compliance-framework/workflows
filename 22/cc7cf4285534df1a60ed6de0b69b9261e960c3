@@ -4,3 +4,6 @@ review pass (PR #157) fixes, commit 22cc7cf:
 - PRRT_kwDOKQL6as6xFy6b README agent snippet check-opa-version check-proto.
 - PRRT_kwDOKQL6as6xFy8G rewrapped ci-action.yml:3, README kind-CI paragraph, docs/image-scan.md CI paragraph.
 - review body: README layout table cmd/ (image-scan scan/check, release build-version) and .github/workflows/ (ci-image.yml).
+
+lisa-design:
+- notify: a need with output required-result that failed while required-result == success is an image-only failure (image is the only job outside required in ci-go-service/ci-ui/ci-action). PRs/automation branches ignore it; default-branch pushes track it in a separate incident (ImageIncidentKey, distinct cache prefix). Missing output = old behaviour.
