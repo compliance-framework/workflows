@@ -8,6 +8,7 @@ package imagescan
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -149,15 +150,24 @@ type instruction struct {
 }
 
 // instructions splits a Dockerfile into instructions: comment lines dropped (also inside a
-// continuation, as Docker does), lines ending in a backslash joined to the next.
+// continuation, as Docker does), lines ending in a backslash joined to the next (blank lines
+// inside a continuation skipped), and here-document bodies (RUN <<EOF ... EOF) skipped, so a body
+// line that starts with FROM is not read as one.
 func instructions(src string) []instruction {
 	var out []instruction
 	var cur []string
 	start := 0
+	heredoc := ""
 	for i, line := range strings.Split(src, "\n") {
 		line = strings.TrimRight(line, "\r")
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") || (trimmed == "" && len(cur) == 0) {
+		if heredoc != "" {
+			if trimmed == heredoc {
+				heredoc = ""
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") || trimmed == "" {
 			continue
 		}
 		if len(cur) == 0 {
@@ -168,14 +178,21 @@ func instructions(src string) []instruction {
 			continue
 		}
 		cur = append(cur, trimmed)
-		out = append(out, instruction{line: start, text: strings.Join(strings.Fields(strings.Join(cur, " ")), " ")})
+		text := strings.Join(strings.Fields(strings.Join(cur, " ")), " ")
+		out = append(out, instruction{line: start, text: text})
 		cur = nil
+		if m := heredocStart.FindStringSubmatch(text); m != nil {
+			heredoc = m[1]
+		}
 	}
 	if len(cur) > 0 {
 		out = append(out, instruction{line: start, text: strings.Join(strings.Fields(strings.Join(cur, " ")), " ")})
 	}
 	return out
 }
+
+// heredocStart finds the first here-document of an instruction (<<EOF, <<-EOF, <<"EOF").
+var heredocStart = regexp.MustCompile(`<<-?["']?([A-Za-z_][A-Za-z0-9_]*)["']?`)
 
 // expand substitutes $NAME, ${NAME}, ${NAME:-default}, ${NAME-default}, ${NAME:+alt} and
 // ${NAME+alt} from args; an undeclared ARG is empty, as in Docker.

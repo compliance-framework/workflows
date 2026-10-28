@@ -72,6 +72,22 @@ FROM FINAL
 			want: []string{"debian:bookworm-slim Base final 1"},
 		},
 		{
+			name: "here-documents and blank lines in a continuation",
+			src: `FROM alpine:3.20 AS gen
+RUN <<EOF
+FROM is not an instruction here
+EOF
+RUN apk add \
+
+  curl
+COPY <<-"CONF" /etc/x.conf
+	FROM neither
+	CONF
+FROM debian:12
+`,
+			want: []string{"alpine:3.20 gen build 1", "debian:12 1 final 11"},
+		},
+		{
 			name: "registry port and tag with digest",
 			src:  "FROM localhost:5000/team/app:1.2.3@" + digest + "\n",
 			want: []string{"localhost:5000/team/app:1.2.3@" + digest + " 0 final 1"},
