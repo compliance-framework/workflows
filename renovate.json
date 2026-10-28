@@ -3,17 +3,6 @@
   "description": "This repo's overrides, merged on top of the shared preset (renovate/default.json) that renovate.yml passes as global config. See docs/renovate.md#this-repos-renovatejson.",
   "customManagers": [
     {
-      "description": "The golangci-lint JSON schema that the ci-go-* lint jobs verify the config against (SCHEMA_URL) must be the one of the golangci-lint version the golangci-lint-action step installs (with.version). Renovate's github-actions manager bumps that version but can't see the URL, so this tracks it as the same dependency (depName and packageName golangci/golangci-lint, github-releases) and both land in the same PR at the same version.",
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/ci-go-[^/]+\\.ya?ml$/"],
-      "matchStrings": [
-        "SCHEMA_URL: https://raw\\.githubusercontent\\.com/golangci/golangci-lint/(?<currentValue>v[^/\\s]+)/jsonschema/"
-      ],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "golangci/golangci-lint",
-      "packageNameTemplate": "golangci/golangci-lint"
-    },
-    {
       "description": "The osv-scanner image that image-scan runs (internal/imagescan's ScannerImage, see docs/image-scan.md) is a Go string constant, which no manager reads, so this tracks it as the Docker image it is, tag and digest.",
       "customType": "regex",
       "managerFilePatterns": ["/^internal/imagescan/scanner\\.go$/"],

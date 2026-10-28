@@ -194,7 +194,7 @@ Go comes from the caller's `go.mod`.
 
 | Job | Checks |
 | --- | --- |
-| `golangci-lint` | golangci-lint (version pinned in the workflow) with the repo's config, or this repo's `.golangci.yml` when it has none. Then `golangci-lint config verify` checks that config against the JSON schema of that version, downloaded from the golangci-lint repo at its tag, so golangci-lint.run isn't needed (the action's own verify, which fetches from there, is off). If that download fails it verifies with the schema golangci-lint fetches from golangci-lint.run, retrying only schema load failures; if neither host answers, the step warns and passes. An invalid config fails the job. |
+| `golangci-lint` | golangci-lint (version pinned in the workflow) with the repo's config, or this repo's `.golangci.yml` when it has none. Then `golangci-lint config verify` checks that config against the JSON schema built into that version (no download), also when the lint found issues, so one run reports both. An invalid config fails the job. |
 | `go` | `gofmt -l .` (prints the diff), `go mod tidy` leaves `go.mod`/`go.sum` unchanged, `go test ./...`. |
 | `goreleaser` | GoReleaser (version pinned in the workflow): `goreleaser check` (deprecated properties only warn), `goreleaser build --snapshot --clean --single-target`. |
 

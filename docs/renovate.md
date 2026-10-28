@@ -121,27 +121,14 @@ npx --yes --package renovate -- renovate-config-validator --strict renovate/defa
 
 ### This repo's `renovate.json`
 
-This repo has one, for two versions only this repo holds, each tracked by a regex custom manager.
-
-The first is the golangci-lint schema URL. The Go kind workflows (`ci-go-lib`,
-`ci-go-plugin`, `ci-go-service`) verify the golangci-lint config against the JSON schema of the
-golangci-lint version their `golangci/golangci-lint-action` step installs, downloaded from that
-version's tag (`SCHEMA_URL: https://raw.githubusercontent.com/golangci/golangci-lint/<version>/jsonschema/...`),
-and `TestGolangciVerifySetup` fails when the two versions differ. Renovate's github-actions manager
-bumps the action's `with.version`, but a URL in an `env:` value is just a string to it, so every
-golangci-lint bump used to break CI. A regex custom manager (`customManagers`, `managerFilePatterns`
-`.github/workflows/ci-go-*.yml`) reads the URL's version as the same dependency as the action's
-(`depName` and `packageName` `golangci/golangci-lint`, `github-releases`), so both move in the same
-`renovate/all-non-major` PR to the same version. `TestSchemaURLRenovate` checks the manager finds
-each file's URL with the action's version. The file is merged on top of the preset as any repo's
-would be (`requireConfig: "optional"`) and sets nothing else. Validate it like the preset:
-`renovate-config-validator --strict --no-global renovate.json`.
-
-The second is the osv-scanner image that [image-scan](image-scan.md) runs, the Go constant
+This repo has one, for a version only this repo holds, tracked by a regex custom manager: the
+osv-scanner image that [image-scan](image-scan.md) runs, the Go constant
 `ScannerImage` in `internal/imagescan/scanner.go` (`ghcr.io/google/osv-scanner:<tag>@sha256:<digest>`).
 A Go string is nothing to Renovate's managers, so a manager on that file reads its image, tag and
 digest as a `docker` dependency, and Renovate moves both in the non-major group.
-`TestScannerImageRenovate` checks the manager finds exactly the constant.
+`TestScannerImageRenovate` checks the manager finds exactly the constant. The file is merged on
+top of the preset as any repo's would be (`requireConfig: "optional"`) and sets nothing else.
+Validate it like the preset: `renovate-config-validator --strict --no-global renovate.json`.
 
 ### Workflow YAML must be valid YAML 1.2
 
