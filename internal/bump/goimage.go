@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -111,14 +112,21 @@ type Registry interface {
 // Crane is the Registry, with go-containerregistry.
 type Crane struct{}
 
+// craneTimeout bounds each registry read, as outsideClient bounds go.dev's.
+const craneTimeout = 30 * time.Second
+
 // Digest returns ref's digest.
 func (Crane) Digest(ctx context.Context, ref string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, craneTimeout)
+	defer cancel()
 	return crane.Digest(ref, crane.WithContext(ctx))
 }
 
 // GoVersion reads GOLANG_VERSION from ref's image config (linux/amd64 of an index; the official
 // images set it to the same version on every platform).
 func (Crane) GoVersion(ctx context.Context, ref string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, craneTimeout)
+	defer cancel()
 	data, err := crane.Config(ref, crane.WithContext(ctx))
 	if err != nil {
 		return "", err

@@ -13,11 +13,12 @@ import (
 func TestToolchainTarget(t *testing.T) {
 	stable := []string{"go1.27.1", "go1.27.0", "go1.26.10", "go1.26.9", "go1.26.3", "go1.25.12"}
 	for _, tc := range []struct{ goLine, old, want string }{
-		{"1.26.3", "go1.26.1", "go1.26.10"}, // the newest patch of the go line's minor
-		{"1.26.10", "go1.26.2", ""},         // none above it, and the old one is below
-		{"1.26.10", "go1.26.12", "go1.26.12"},
+		{"1.26.3", "go1.26.1", "go1.27.1"},  // the newest release, of any minor
+		{"1.26.10", "go1.26.2", "go1.27.1"}, // the newest 1.26 patch: the next minor's
 		{"1.27.0", "go1.26.10", "go1.27.1"},
 		{"1.27rc1", "go1.26.10", "go1.27.1"},
+		{"1.27.1", "go1.26.2", ""}, // the newest release: nothing above it
+		{"1.27.1", "go1.27.2", "go1.27.2"},
 		{"1.28.0", "", ""},
 	} {
 		if got := toolchainTarget(tc.goLine, tc.old, stable); got != tc.want {
@@ -46,9 +47,11 @@ func TestKeepToolchain(t *testing.T) {
 		err           string
 		regErr        bool
 	}{
-		"restored": {before: cloned, after: raised, releases: releases("go1.27.0", "go1.26.10", "go1.26.3"),
+		"restored": {before: cloned, after: raised, releases: releases("go1.26.10", "go1.26.3"),
 			want: raised[:len(raised)-1] + "\n\ntoolchain go1.26.10\n", change: "go toolchain go.mod toolchain: go1.26.2 -> go1.26.10"},
-		"nothing above the go line": {before: cloned, after: raised, releases: releases("go1.26.3"), hold: true},
+		"restored at the next minor": {before: cloned, after: raised, releases: releases("go1.27.0", "go1.26.3"),
+			want: raised[:len(raised)-1] + "\n\ntoolchain go1.27.0\n", change: "go toolchain go.mod toolchain: go1.26.2 -> go1.27.0"},
+		"nothing above the go line": {before: cloned, after: raised, releases: releases("go1.26.3", "go1.25.12"), hold: true},
 		"never had one":             {before: "module example.com/m\n\ngo 1.26.1\n", after: raised, releases: releases("go1.26.10")},
 		"still there": {before: cloned, after: "module example.com/m\n\ngo 1.26.3\n\ntoolchain go1.26.6\n",
 			releases: func(context.Context) ([]string, error) { panic("go.dev read") }},

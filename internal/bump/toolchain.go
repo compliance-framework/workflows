@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"golang.org/x/mod/modfile"
 )
@@ -92,6 +93,10 @@ func (g goToolchain) Apply(ctx context.Context, dir string, changes []Change) er
 // GoReleases lists the stable Go releases (go1.26.10, go1.27.0).
 type GoReleases func(ctx context.Context) ([]string, error)
 
+// outsideClient reads go.dev; like the GitHub client, a stalled server can't hang the run (the
+// train's dry run must warn, not be killed by the job's timeout).
+var outsideClient = &http.Client{Timeout: 30 * time.Second}
+
 // GoDev is the GoReleases of go.dev's download list (all releases, not only the two supported
 // lines).
 func GoDev(ctx context.Context) ([]string, error) {
@@ -99,7 +104,7 @@ func GoDev(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := outsideClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -124,13 +129,13 @@ func GoDev(ctx context.Context) ([]string, error) {
 }
 
 // toolchainTarget returns the toolchain to restore once go get raised the go line to goLine and
-// dropped old: the newest stable patch of goLine's minor above goLine, else old when it is still
-// above goLine; "" when neither is.
+// dropped old: the newest stable Go release, of any minor, when it is above goLine (Renovate moves
+// the line across minors too: go 1.26.10 gets toolchain go1.27.3), else old when it is still above
+// goLine; "" when neither is, i.e. goLine is the newest release.
 func toolchainTarget(goLine, old string, stable []string) string {
 	want, best := "go"+goLine, ""
 	for _, v := range stable {
-		if goversion.IsValid(v) && goversion.Lang(v) == goversion.Lang(want) && goversion.Compare(v, want) > 0 &&
-			(best == "" || goversion.Compare(v, best) > 0) {
+		if goversion.IsValid(v) && goversion.Compare(v, want) > 0 && (best == "" || goversion.Compare(v, best) > 0) {
 			best = v
 		}
 	}
@@ -140,11 +145,13 @@ func toolchainTarget(goLine, old string, stable []string) string {
 	return best
 }
 
-// ToolchainDropped is the hold reason of a plan whose go get dropped the toolchain line with no
-// toolchain to put back above the new go line: the repo would get no stdlib security PRs.
-const ToolchainDropped = "go get dropped the go.mod toolchain line and no Go release above the new go line " +
-	"exists to restore it: without it the repo gets no Go standard-library security PRs (docs/ccf-bump.md#the-toolchain-line); " +
-	"add it once one is released, then merge"
+// ToolchainDropped is the hold reason of a plan whose go get dropped the toolchain line while its
+// new go line is the newest Go release, so no toolchain above it exists yet: the repo would get no
+// stdlib security PRs.
+const ToolchainDropped = "go get dropped the go.mod toolchain line, and the new go line is the newest Go release, " +
+	"so there is no toolchain above it to restore: without the line the repo gets no Go standard-library security PRs " +
+	"(docs/ccf-bump.md#the-toolchain-line); merge once you accept that, and add `toolchain goX.Y.Z` above the go line " +
+	"when the next Go release is out"
 
 // KeepToolchain keeps the root go.mod's toolchain line, after ApplyAll applied the plan to the
 // checkout in dir: before (the ScanAll of the checkout as cloned) says whether there was one. If

@@ -780,12 +780,12 @@ func goReleases(vs ...string) bump.GoReleases {
 }
 
 // TestGolangImagesFollowGoLine: when go get raises the go line (mock-api needs go 1.26.3) and drops
-// the toolchain line, ccf-bump puts it back at the newest 1.26 patch (go1.26.10), and the
+// the toolchain line, ccf-bump puts it back at the newest Go release (go1.26.10 here), and the
 // Dockerfiles' golang builders follow it: the release to 1.26.10 with its digest, the floating
 // tag pinned to an old build to the tag's current digest. The PR lists them, and is auto-merged.
 func TestGolangImagesFollowGoLine(t *testing.T) {
 	root, e, gh, out := setup(t)
-	e.registry, e.goReleases = golangRegistry, goReleases("go1.27.0", "go1.26.10", "go1.26.3", "go1.26.2")
+	e.registry, e.goReleases = golangRegistry, goReleases("go1.26.10", "go1.26.3", "go1.26.2", "go1.25.12")
 	if err := run(context.Background(), golangImageRepo(t, root, gh, "--pr", "--dry-run"), e); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -811,8 +811,8 @@ func TestGolangImagesFollowGoLine(t *testing.T) {
 	}
 }
 
-// TestToolchainLineLost: with no Go release above the new go line to put the toolchain line back
-// at, the PR goes without it and needs a human, saying why.
+// TestToolchainLineLost: when the new go line is the newest Go release, no toolchain line above it
+// can be put back: the PR goes without it and needs a human, saying why.
 func TestToolchainLineLost(t *testing.T) {
 	root, e, gh, out := setup(t)
 	e.registry, e.goReleases = golangRegistry, goReleases("go1.26.3", "go1.26.2")

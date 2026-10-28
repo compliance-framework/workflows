@@ -74,7 +74,7 @@ for its releases).
 | ui sync script | `scripts/sync-agentconfig-conformance.sh <tag>` (writes the conformance fixture; its current version is unknown) | the ui's `go-service` dependency |
 | helm | `charts/*/values.yaml` image tags next to `repository: ghcr.io/<owner>/<repo>` (empty tags follow appVersion and stay empty); `Chart.yaml` `appVersion` | the image's repo; appVersion tracks the first org image whose tag is empty or equals appVersion |
 | `uses: <owner>/workflows/...@<ref>` in a job | workflow files; the job's `workflows-ref` input is deleted when its pin moves | the latest final release of the `kind: workflows` repo (sync), or `--set workflows=<ref>` |
-| `toolchain goX.Y.Z` | the root `go.mod`, only in a repo that had the line, only when `go get` dropped it ([below](#the-toolchain-line)) | the newest stable patch of the new `go` line's minor, above the `go` line |
+| `toolchain goX.Y.Z` | the root `go.mod`, only in a repo that had the line, only when `go get` dropped it ([below](#the-toolchain-line)) | the newest stable Go release, of any minor, above the new `go` line |
 | `FROM golang:<version>[-variant][@sha256:...]` | the root `Dockerfile*` and `*.Dockerfile` files, any stage, after `--platform=` and other flags; `golang`, `docker.io/golang` or `docker.io/library/golang` | the higher of the root `go.mod`'s `go` and `toolchain` lines, once the Go modules moved ([below](#golang-builder-images)) |
 
 Files are edited in place, so comments and layout stay. Chart versions are left to release-please.
@@ -88,16 +88,18 @@ and `go mod tidy` removes one equal to the `go` line ([Go toolchains](#go-toolch
 Go module changes are applied (only when the plan moves one), ccf-bump checks the line of a repo
 whose `go.mod` had one when it was cloned. If it is gone, ccf-bump writes it back:
 
-- at the newest stable patch of the new `go` line's minor that is above the `go` line, from
-  `https://go.dev/dl/?mode=json&include=all` (`go 1.26.3` gets `toolchain go1.26.10`);
+- at the newest stable Go release, of any minor, that is above the `go` line, from
+  `https://go.dev/dl/?mode=json&include=all` (`go 1.26.3` gets `toolchain go1.27.3` when 1.27.3 is
+  the newest; Renovate moves the line across minors too, so this is where it would go anyway);
 - else at the old `toolchain` if that is still above the `go` line;
 - then runs `go mod tidy` again and fails the repo's bump if the line didn't survive.
 
 The restored line is a change like any other: it is in the PR's title and table (`go toolchain`,
 `go1.26.2` → `go1.26.10`), auto-merged as a patch or minor, and the golang builder images below
-follow it. When no release is above the new `go` line (it is the newest patch), the PR goes without
-the line and needs a human, saying why: until the line is back, the repo gets no standard-library
-security PRs. A repo that never had a `toolchain` line gets none. Failing to read go.dev fails a live
+follow it. Only when no release is above the new `go` line (it is the newest Go release) does the PR go
+without the line; it then needs a human, saying why: until a `toolchain` line above the `go` line is
+added (after the next Go release), the repo gets no standard-library security PRs. go.dev and the
+registry are read with a 30-second timeout each. A repo that never had a `toolchain` line gets none. Failing to read go.dev fails a live
 bump, and only warns in a dry run, like the registry below.
 
 ### golang builder images
