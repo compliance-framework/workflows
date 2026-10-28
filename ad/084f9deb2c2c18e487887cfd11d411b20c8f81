@@ -1,0 +1,3 @@
+lisa-design:
+- Supersedes the go-directive notes (user decision): no go directive bumping. Go stdlib security fixes come through the go.mod toolchain line only (Renovate vulnerabilities.js matches stdlib for depType toolchain). The toolchain line needs no new rule: the final/toolchain rule makes it fix(deps), the all-non-major group rule groups it, vulnerabilityAlerts gives it renovate/security-gomod (proved with platform=local lookups on a scratch agent with toolchain go1.26.1 / go1.26.10). Adding toolchain lines to repos is a separate sweep.
+- Docker majors stay timestamp-required (user undecided).

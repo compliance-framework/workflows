@@ -1,0 +1,2 @@
+lisa-addressed:
+- review PRRT_kwDOKQL6as6xUKdU (should-fix CORE-DOC-001): README and docs/renovate.md no longer claim the go line and golang image move in the same PR
