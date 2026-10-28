@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.0](https://github.com/compliance-framework/workflows/compare/v1.8.1...v1.9.0) (2026-10-28)
+
+
+### Features
+
+* **image-scan:** check the built images in CI with ci-image.yml ([#157](https://github.com/compliance-framework/workflows/issues/157)) ([5cea4f7](https://github.com/compliance-framework/workflows/commit/5cea4f761d09f388c9d93362c0153bdcbeca0044))
+* **image-scan:** patch OS packages the base image doesn't ship yet ([#156](https://github.com/compliance-framework/workflows/issues/156)) ([407e550](https://github.com/compliance-framework/workflows/commit/407e55042286ec4fe3ed36baaa987d91e64d5d4a))
+* **image-scan:** scan container images and plan Renovate overrides ([#155](https://github.com/compliance-framework/workflows/issues/155)) ([5e7ea23](https://github.com/compliance-framework/workflows/commit/5e7ea23b2879f6c2f9159aa1acd63d1b19b2239a))
+* **renovate:** pin Dockerfile base images by digest ([#154](https://github.com/compliance-framework/workflows/issues/154)) ([a416c26](https://github.com/compliance-framework/workflows/commit/a416c267e8b8db099e7bbe42193fe11aa4b87533))
+
 ## [1.8.1](https://github.com/compliance-framework/workflows/compare/v1.8.0...v1.8.1) (2026-10-28)
 
 
