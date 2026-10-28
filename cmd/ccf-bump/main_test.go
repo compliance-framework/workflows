@@ -610,25 +610,30 @@ func TestCommandEnv(t *testing.T) {
 	for name, tc := range map[string]struct{ env, want []string }{
 		"unset": {
 			env:  []string{"PATH=/bin", "GH_TOKEN=x", "GITHUB_TOKEN=y"},
-			want: []string{"PATH=/bin", "GOPRIVATE=" + org},
+			want: []string{"PATH=/bin", "GOPRIVATE=" + org, "GOTOOLCHAIN=auto"},
 		},
-		"empty": {env: []string{"GOPRIVATE="}, want: []string{"GOPRIVATE=" + org}},
+		"empty": {env: []string{"GOPRIVATE="}, want: []string{"GOPRIVATE=" + org, "GOTOOLCHAIN=auto"}},
 		"appended": {
 			env:  []string{"GOPRIVATE=example.com/*", "PATH=/bin"},
-			want: []string{"PATH=/bin", "GOPRIVATE=example.com/*," + org},
+			want: []string{"PATH=/bin", "GOPRIVATE=example.com/*," + org, "GOTOOLCHAIN=auto"},
 		},
 		"already there": {
 			env:  []string{"GOPRIVATE=example.com/*," + org},
-			want: []string{"GOPRIVATE=example.com/*," + org},
+			want: []string{"GOPRIVATE=example.com/*," + org, "GOTOOLCHAIN=auto"},
 		},
 		"last value wins": {
 			env:  []string{"GOPRIVATE=a.com/*", "GOPRIVATE=b.com/*"},
-			want: []string{"GOPRIVATE=b.com/*," + org},
+			want: []string{"GOPRIVATE=b.com/*," + org, "GOTOOLCHAIN=auto"},
 		},
 		// Set explicitly, they override GOPRIVATE, so they get the pattern too; unset, they follow it.
 		"GONOPROXY and GONOSUMDB": {
 			env:  []string{"GONOPROXY=example.com/*", "GONOSUMDB=other.com/*", "GOFLAGS=-mod=mod"},
-			want: []string{"GOFLAGS=-mod=mod", "GOPRIVATE=" + org, "GONOPROXY=example.com/*," + org, "GONOSUMDB=other.com/*," + org},
+			want: []string{"GOFLAGS=-mod=mod", "GOPRIVATE=" + org, "GONOPROXY=example.com/*," + org, "GONOSUMDB=other.com/*," + org, "GOTOOLCHAIN=auto"},
+		},
+		// actions/setup-go's local becomes auto, once, whatever its place.
+		"setup-go's GOTOOLCHAIN": {
+			env:  []string{"GOTOOLCHAIN=local", "PATH=/bin", "GOTOOLCHAIN=local"},
+			want: []string{"PATH=/bin", "GOPRIVATE=" + org, "GOTOOLCHAIN=auto"},
 		},
 	} {
 		if got := commandEnv(tc.env, "compliance-framework"); !slices.Equal(got, tc.want) {
@@ -637,12 +642,27 @@ func TestCommandEnv(t *testing.T) {
 	}
 }
 
+// TestGoToolchain: go may always switch to a newer toolchain, at least the one asked for.
+func TestGoToolchain(t *testing.T) {
+	for in, want := range map[string]string{
+		"": "auto", "local": "auto", "auto": "auto", "local+auto": "local+auto", "path": "path",
+		"local+path": "local+path", "go1.26.1": "go1.26.1+auto", "go1.26.1+auto": "go1.26.1+auto", "go1.26.1+path": "go1.26.1+path",
+	} {
+		if got := goToolchain(in); got != want {
+			t.Errorf("goToolchain(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // fakeGo puts a go on PATH that logs its arguments and the environment it got to the returned
 // file, and changes nothing.
-func fakeGo(t *testing.T) (log string) {
+func fakeGo(t *testing.T) (log string) { return fakeGoRunning(t, "") }
+
+// fakeGoRunning is fakeGo that also runs the shell command then in the repo after logging.
+func fakeGoRunning(t *testing.T, then string) (log string) {
 	bin := t.TempDir()
 	log = filepath.Join(t.TempDir(), "go.log")
-	script := "#!/bin/sh\nprintf '%s|GOPRIVATE=%s|GONOSUMDB=%s|GH_TOKEN=%s\\n' \"$*\" \"$GOPRIVATE\" \"$GONOSUMDB\" \"$GH_TOKEN\" >> " + log + "\n"
+	script := "#!/bin/sh\nprintf '%s|GOPRIVATE=%s|GONOSUMDB=%s|GOTOOLCHAIN=%s|GH_TOKEN=%s\\n' \"$*\" \"$GOPRIVATE\" \"$GONOSUMDB\" \"$GOTOOLCHAIN\" \"$GH_TOKEN\" >> " + log + "\n" + then + "\n"
 	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -670,12 +690,13 @@ func addGoMod(t *testing.T, root, repo string) {
 }
 
 // TestGoFetchesOrgModulesDirectly: go runs with the org's modules in GOPRIVATE (kept: one already
-// set) and without the token.
+// set), may switch toolchains, and runs without the token.
 func TestGoFetchesOrgModulesDirectly(t *testing.T) {
 	root, e, gh, out := setup(t)
 	log := fakeGo(t)
 	t.Setenv("GOPRIVATE", "example.com/*")
 	t.Setenv("GONOSUMDB", "")
+	t.Setenv("GOTOOLCHAIN", "local") // as actions/setup-go sets it
 	t.Setenv("GH_TOKEN", "secret")
 	gh.commits = map[string]string{"mock-api@v0.1.0": "0123456789abcdef0123456789abcdef01234567"}
 	if err := run(context.Background(), goModRepo(t, root), e); err != nil {
@@ -685,9 +706,54 @@ func TestGoFetchesOrgModulesDirectly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const env = "|GOPRIVATE=example.com/*,github.com/compliance-framework/*|GONOSUMDB=|GH_TOKEN=\n"
+	const env = "|GOPRIVATE=example.com/*,github.com/compliance-framework/*|GONOSUMDB=|GOTOOLCHAIN=auto|GH_TOKEN=\n"
 	if want := "get github.com/compliance-framework/mock-api@v0.1.0" + env + "mod tidy" + env; string(got) != want {
 		t.Errorf("go ran:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestGolangImagesFollowGoLine: when go get raises the go line (mock-api needs go 1.26.3), the
+// Dockerfile's golang builder follows, re-pinned by digest, and the PR lists it (auto-merged).
+func TestGolangImagesFollowGoLine(t *testing.T) {
+	const oldDigest, newDigest = "sha256:" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256:" + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	root, e, gh, out := setup(t)
+	fakeGoRunning(t, `[ "$1" = get ] && sed -i -e 's/^go 1.26.1$/go 1.26.3/' -e 's/mock-api v0.0.9/mock-api v0.1.0/' go.mod || true`)
+	var asked []string
+	e.digest = func(_ context.Context, ref string) (string, error) {
+		asked = append(asked, ref)
+		return newDigest, nil
+	}
+	gh.commits = map[string]string{"mock-api@v0.1.0": "0123456789abcdef0123456789abcdef01234567"}
+	dir := filepath.Join(root, "clones", "mock-agent")
+	files := map[string]string{
+		"Dockerfile":    "FROM golang:1.26.1@" + oldDigest + " AS builder\nFROM gcr.io/distroless/base-debian12\n",
+		"Dockerfile-ci": "FROM golang:1.26 AS builder\n",
+	}
+	for f, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := run(context.Background(), goModRepo(t, root), e); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, s := range []string{
+		"bump      golang       1.26.1 -> v1.26.3 (Dockerfile golang)",
+		"-FROM golang:1.26.1@" + oldDigest + " AS builder",
+		"+FROM golang:1.26.3@" + newDigest + " AS builder",
+		`open "fix(deps): bump golang to v1.26.3, mock-api to v0.1.0"`,
+		"| [golang](https://go.dev/doc/devel/release) | `1.26.1` | `v1.26.3` | `Dockerfile` golang |",
+		"would add label ccf-bump:automerge",
+	} {
+		if !strings.Contains(out.String(), s) {
+			t.Errorf("output lacks %q:\n%s", s, out)
+		}
+	}
+	if strings.Contains(out.String(), "Dockerfile-ci") {
+		t.Errorf("golang:1.26 meets go 1.26.3 but was planned:\n%s", out)
+	}
+	if !slices.Equal(asked, []string{"golang:1.26.3"}) {
+		t.Errorf("digests asked for: %q", asked)
 	}
 }
 

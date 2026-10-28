@@ -4,7 +4,8 @@
 dependencies in the manifest's repos and opens one PR per repo, titled `fix(deps): bump <list>`, or
 `ci(deps): bump workflows to vX.Y.Z` when it moves only shared-workflow pins: `ci` is a hidden
 section in `release-please/defaults.json`, so such a PR proposes no release. A PR that also moves
-anything that ships (Go modules, images, helm, the action's Dockerfile, OPA) stays `fix(deps)`.
+anything that ships (Go modules, images, helm, the action's Dockerfile, the golang builder images,
+OPA) stays `fix(deps)`.
 
 ```text
 ccf-bump --repo NAME [--set dep=version]... [--mode sync|train] [--pr] [--dry-run] [flags]
@@ -54,7 +55,8 @@ ccf-bump list [--repos a,b] [--chunk 10] [--dry-run]
 - Environment: `GH_TOKEN` (API, clone and push), `GITHUB_API_URL`, and the git identity in
   `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. The commands it runs (`go`, the ui sync script) get neither
   token, and get `GOPRIVATE=github.com/<owner>/*`
-  ([why](#why-org-modules-are-fetched-directly)).
+  ([why](#why-org-modules-are-fetched-directly)) and `GOTOOLCHAIN=auto`
+  ([why](#go-toolchains)).
 
 ## Updaters
 
@@ -72,8 +74,33 @@ for its releases).
 | ui sync script | `scripts/sync-agentconfig-conformance.sh <tag>` (writes the conformance fixture; its current version is unknown) | the ui's `go-service` dependency |
 | helm | `charts/*/values.yaml` image tags next to `repository: ghcr.io/<owner>/<repo>` (empty tags follow appVersion and stay empty); `Chart.yaml` `appVersion` | the image's repo; appVersion tracks the first org image whose tag is empty or equals appVersion |
 | `uses: <owner>/workflows/...@<ref>` in a job | workflow files; the job's `workflows-ref` input is deleted when its pin moves | the latest final release of the `kind: workflows` repo (sync), or `--set workflows=<ref>` |
+| `FROM golang:<version>[-variant][@sha256:...]` | the root `Dockerfile*` and `*.Dockerfile` files, any stage, after `--platform=` and other flags; `golang`, `docker.io/golang` or `docker.io/library/golang` | the root `go.mod`'s `go` line once the Go modules moved ([below](#golang-builder-images)) |
 
 Files are edited in place, so comments and layout stay. Chart versions are left to release-please.
+
+### golang builder images
+
+`go get` raises a repo's `go` line to the highest of its dependencies' (an org module that moved to
+`go 1.26.3` takes its consumers there). The official golang image sets `GOTOOLCHAIN=local`, so a
+`docker build` whose builder is older than the `go` line fails with `go.mod requires go >= 1.26.3
+(running go 1.26.1; GOTOOLCHAIN=local)`. So once the Go module changes are applied (only when the
+plan moves one), ccf-bump reads the `go` line from `go.mod` and moves each golang image below it:
+
+| Image | `go 1.26.3` | Why |
+| --- | --- | --- |
+| `golang:1.26.1`, `golang:1.26.1-alpine3.22` | `golang:1.26.3`, `golang:1.26.3-alpine3.22` | a full version moves to the `go` line; the variant stays |
+| `golang:1.25-bookworm` | `golang:1.26-bookworm` | a floating tag keeps its precision |
+| `golang:1.26`, `golang:1`, `golang:1.26.5`, `golang:1.27.0` | unchanged | they already build `go 1.26.3` (ccf-bump never downgrades) |
+| `golang:alpine`, `golang:latest`, `golang:${GO_VERSION}` | unchanged | not a version, or a placeholder |
+
+An image pinned by digest (`golang:1.26.1@sha256:...`, as Renovate pins them,
+[renovate.md](renovate.md)) gets the new tag's digest, read anonymously from the registry: the
+multi-platform index digest Renovate pins. The old digest is the old tag's, and dropping it would
+leave the image unpinned until Renovate's next `pinDigest` PR. If the registry can't be read, the
+repo's bump fails (a run retries it); the Dockerfile is never left with a wrong digest. The moves
+are listed in the PR as `golang` rows, and are auto-merged like any minor or patch (a
+release-candidate `go` line needs a human). Dockerfiles below the root and `FROM` lines whose
+version comes from an `ARG` are left alone.
 
 ### What counts as a pin
 
@@ -156,6 +183,21 @@ inside a flow mapping
 (`with: {...}`) fails the repo's bump, for a human to remove. A ref that is not a release
 (`--set workflows=main`, a SHA) is used as given: every other pin moves to it, needing a human,
 and its version comment is dropped.
+
+## Go toolchains
+
+`ccf-bump-sync.yml`, `ccf-bump-merge.yml` and `train.yml` install Go from this repo's `go.mod` with
+`actions/setup-go`, which sets `GOTOOLCHAIN=local`: `go` then never runs a newer toolchain than the
+runner's. A bump that takes a repo to an org module with a higher `go` line then fails with
+`go: ... requires go >= 1.26.3 (running go 1.26.1; GOTOOLCHAIN=local)`: the train hit it, and
+[#161](https://github.com/compliance-framework/workflows/pull/161) raised this repo's own `go` line
+to get past it, which only lasts until the next Go release. So the commands ccf-bump runs
+get `GOTOOLCHAIN=auto` (a version such as `go1.26.1` becomes `go1.26.1+auto`; `auto`, `path` and a
+value with `+auto` or `+path` are kept): when the repo's `go.mod`, or a module `go get` moves it to,
+needs a newer Go, `go` downloads that toolchain from proxy.golang.org, checks it against
+sum.golang.org, and runs it. Only the org's modules are in `GOPRIVATE`, so the toolchain
+(`golang.org/toolchain`) still comes through the proxy. The train runs the ccf-bump binary, so its
+bumps get the same environment.
 
 ## Why org modules are fetched directly
 

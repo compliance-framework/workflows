@@ -345,6 +345,20 @@ func TestMajor(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct {
+		from, to string
+		major    bool
+	}{
+		{"1.26.1", "v1.26.3", false},
+		{"1.26.1-alpine3.22", "v1.27.0", false},
+		{"1.25-bookworm", "v1.26", false},
+		{"1.26.3", "v1.27rc1", true}, // a release candidate is a human's call
+	} {
+		c := Change{Ref: Ref{Updater: goImage{}.Name(), Dep: DepGo, Current: tc.from}, To: tc.to}
+		if got := c.Major(); got != tc.major {
+			t.Errorf("Major(golang %s -> %s) = %v, want %v", tc.from, tc.to, got, tc.major)
+		}
+	}
+	for _, tc := range []struct {
 		from, version, to string
 		major             bool
 	}{

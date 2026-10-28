@@ -1,0 +1,10 @@
+ARG GO_VERSION=1.25.0
+from golang:1.26 as floating
+FROM golang:1.26-bookworm AS older-floating
+FROM docker.io/library/golang:1.26.3-alpine3.22@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb AS same-image-again
+FROM docker.io/library/golang:1.27.0 AS newer
+FROM golang:1 AS major
+FROM golang:alpine AS no-version
+FROM golang:${GO_VERSION} AS templated
+FROM golangci/golangci-lint:v2.15.0 AS lint
+FROM debian:bookworm-slim

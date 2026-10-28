@@ -67,7 +67,7 @@ func (b *bumper) summary() {
 
 // config derives the updaters' settings for repo from its kind and dependencies.
 func (b *bumper) config(r manifest.Repo) bump.Config {
-	c := bump.Config{Owner: b.o.owner, Run: runner(b.o.owner)}
+	c := bump.Config{Owner: b.o.owner, Run: runner(b.o.owner), Digest: b.e.digest}
 	service := ""
 	for _, d := range r.DependsOn {
 		i := slices.IndexFunc(b.m.Repos, func(x manifest.Repo) bool { return x.Name == d })
@@ -108,13 +108,13 @@ func runner(owner string) bump.Runner {
 // GOPRIVATE, so go fetches them from GitHub directly, never through proxy.golang.org or
 // sum.golang.org (docs/ccf-bump.md#why-org-modules-are-fetched-directly). The pattern is appended
 // to a GOPRIVATE already set, and to GONOPROXY and GONOSUMDB when they are set (they override
-// GOPRIVATE).
+// GOPRIVATE). GOTOOLCHAIN lets go switch toolchains (goToolchain).
 func commandEnv(env []string, owner string) []string {
 	pattern := "github.com/" + owner + "/*"
 	vals := map[string]string{} // the last value of each, as exec uses
 	env = slices.DeleteFunc(withoutTokens(env), func(kv string) bool {
 		k, v, _ := strings.Cut(kv, "=")
-		if k == "GOPRIVATE" || k == "GONOPROXY" || k == "GONOSUMDB" {
+		if k == "GOPRIVATE" || k == "GONOPROXY" || k == "GONOSUMDB" || k == "GOTOOLCHAIN" {
 			vals[k] = v
 			return true
 		}
@@ -135,7 +135,23 @@ func commandEnv(env []string, owner string) []string {
 			env = append(env, k+"="+add(vals[k]))
 		}
 	}
-	return env
+	return append(env, "GOTOOLCHAIN="+goToolchain(vals["GOTOOLCHAIN"]))
+}
+
+// goToolchain returns the GOTOOLCHAIN the commands get, from the one inherited: go may download
+// and switch to a newer toolchain when the repo or a module go get moves it to needs one
+// (docs/ccf-bump.md#go-toolchains). actions/setup-go sets GOTOOLCHAIN=local, under which go get
+// fails with "go.mod requires go >= X (running go Y; GOTOOLCHAIN=local)" as soon as an org module
+// raises its go line past the runner's Go. Unset or local becomes auto, a version (go1.26.1)
+// becomes go1.26.1+auto; auto, path and a value with +auto or +path are kept.
+func goToolchain(v string) string {
+	switch {
+	case v == "" || v == "local":
+		return "auto"
+	case v == "auto" || v == "path" || strings.Contains(v, "+"):
+		return v
+	}
+	return v + "+auto"
 }
 
 // withoutTokens drops GH_TOKEN and GITHUB_TOKEN from env.
@@ -187,7 +203,7 @@ func (b *bumper) targets(ctx context.Context, cfg bump.Config, refs []bump.Ref) 
 		return v, nil
 	}
 	for _, r := range refs {
-		if r.Dep == bump.DepWorkflows || r.Dep == bump.DepOPA {
+		if r.Dep == bump.DepWorkflows || r.Dep == bump.DepOPA || r.Dep == bump.DepGo {
 			continue
 		}
 		v, err := final(r.Dep)
@@ -340,6 +356,14 @@ func (b *bumper) bump(ctx context.Context, name string) (bool, error) {
 	}
 	if err := bump.ApplyAll(ctx, dir, us, plan.Changes); err != nil {
 		return false, err
+	}
+	// go get may have raised the go line: the golang builder images follow it.
+	plan, followed, err := bump.FollowGo(ctx, dir, us, plan)
+	if err != nil {
+		return false, err
+	}
+	if len(followed) > 0 {
+		fmt.Fprint(out, report(bump.Plan{Changes: followed}))
 	}
 	if _, err := b.git(ctx, dir, "add", "-A"); err != nil {
 		return false, err
@@ -560,6 +584,8 @@ func releaseURL(owner string, c bump.Change) string {
 	switch c.Dep {
 	case bump.DepOPA:
 		return "https://github.com/open-policy-agent/opa/releases/tag/" + c.To
+	case bump.DepGo:
+		return "https://go.dev/doc/devel/release"
 	case bump.DepWorkflows:
 		if ref, tag := bump.SplitWorkflowsPin(c.To); tag == "" {
 			return "https://github.com/" + owner + "/workflows/tree/" + ref

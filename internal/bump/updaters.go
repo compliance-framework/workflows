@@ -31,11 +31,14 @@ type Config struct {
 	UIDep     string // ui repos: the repo whose tag the sync script takes
 	OPASource string // policy repos: the repo whose go.mod sets the OPA version ("opa" pins)
 	Run       Runner
+	// Digest returns the digest an image reference (golang:1.26.3) points at, to pin a golang
+	// image that FollowGo moves again when it was pinned by digest.
+	Digest func(ctx context.Context, ref string) (string, error)
 }
 
 // Updaters returns every updater for c; one with nothing to do in a checkout finds no refs.
 func Updaters(c Config) []Updater {
-	us := []Updater{goMod{c}, goInstall{c}, workflowRef{c}, helm{c}}
+	us := []Updater{goMod{c}, goInstall{c}, workflowRef{c}, helm{c}, goImage{c}}
 	if c.Source != "" {
 		us = append(us, dockerfile{c})
 	}

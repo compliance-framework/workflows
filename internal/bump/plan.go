@@ -1,7 +1,8 @@
 // Package bump finds the pinned versions of internal dependencies in a repo checkout (Go modules,
 // go install pins, the action's source image, policy repos' OPA version, the ui sync script, helm
 // appVersions and image tags, shared-workflow refs), decides which to move to a target version
-// (never downgrading), and rewrites them. cmd/ccf-bump drives it.
+// (never downgrading), and rewrites them; the golang builder images then follow the go line that
+// go get left (FollowGo). cmd/ccf-bump drives it.
 package bump
 
 import (
@@ -17,11 +18,14 @@ import (
 	"github.com/compliance-framework/workflows/internal/manifest"
 )
 
-// Dependency names that are not repos: OPA (policy repos copy it from the agent's go.mod) and the
-// shared workflows (pinned to a release's commit SHA, see WorkflowsPin).
+// Dependency names that are not repos: OPA (policy repos copy it from the agent's go.mod), the
+// shared workflows (pinned to a release's commit SHA, see WorkflowsPin) and the Go toolchain of
+// the golang builder images, which must be at least the go line of the repo's go.mod: the
+// official golang image sets GOTOOLCHAIN=local, so a build in an older one fails (FollowGo).
 const (
 	DepOPA       = "opa"
 	DepWorkflows = "workflows"
+	DepGo        = "golang"
 )
 
 // Ref is one pinned version of a dependency, as found in a repo.
@@ -108,13 +112,17 @@ func Bare(v string) string {
 	return strings.TrimPrefix(Canonical(v), "v")
 }
 
-// Decide plans refs against targets (dep -> version). It never downgrades: a pin newer than the
+// Decide plans refs against targets (dep -> version), except the golang images (DepGo), which
+// FollowGo plans once go.mod has moved. It never downgrades: a pin newer than the
 // target, including a pseudo-version of a later commit, is a conflict. A pin that is not a version
 // (an image like alpine:3.20, a branch, a SHA, "latest") or is unknown is replaced, and so is a
 // shared-workflow ref that differs from the target ref.
 func Decide(refs []Ref, targets map[string]string, tagTime TagTime) (Plan, error) {
 	var p Plan
 	for _, r := range refs {
+		if r.Dep == DepGo {
+			continue // its target is the go line go get leaves: FollowGo plans it
+		}
 		target, ok := targets[r.Dep]
 		if !ok || target == "" {
 			p.NoTarget = append(p.NoTarget, r)
@@ -232,6 +240,9 @@ func (c Change) Major() bool {
 		return c.pinnedVersion() == "" || tag == "" || semver.Major(c.pinnedVersion()) != semver.Major(tag)
 	}
 	from := Canonical(c.Current)
+	if m := goTag.FindStringSubmatch(c.Current); c.Dep == DepGo && m != nil {
+		from = Canonical(m[1]) // the image's version, without its variant (1.26.1-alpine)
+	}
 	if !semver.IsValid(from) || !semver.IsValid(c.To) {
 		return true
 	}

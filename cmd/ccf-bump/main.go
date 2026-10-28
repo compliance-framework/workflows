@@ -30,6 +30,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/compliance-framework/workflows/internal/bump"
+	"github.com/compliance-framework/workflows/internal/imagescan"
 	"github.com/compliance-framework/workflows/internal/manifest"
 )
 
@@ -64,6 +65,8 @@ type env struct {
 	now    func() time.Time
 	sleep  func(time.Duration)
 	remote func(owner, repo string) string // clone/push URL
+	// digest returns the digest an image reference points at (bump.Config.Digest).
+	digest func(ctx context.Context, ref string) (string, error)
 }
 
 func main() {
@@ -76,6 +79,7 @@ func main() {
 		gh:     &bump.GitHub{BaseURL: base, Token: getenv("GH_TOKEN"), Owner: "compliance-framework"},
 		getenv: getenv, stdout: os.Stdout, now: time.Now, sleep: time.Sleep,
 		remote: func(owner, repo string) string { return "https://github.com/" + owner + "/" + repo + ".git" },
+		digest: imagescan.Crane{}.Digest,
 	}
 	if err := run(context.Background(), os.Args[1:], e); err != nil {
 		fmt.Fprintln(os.Stderr, "::error::ccf-bump: "+err.Error())
