@@ -52,7 +52,7 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "The go.mod go directive is a minimum, which every newer Go already meets, so by default Renovate never moves it. rangeStrategy bump moves it to the latest Go (minor and patch, in the non-major group with the golang image, so the builder keeps up with the go line) and it is fix(deps): setup-go builds the releases with the go line's Go, so a bump ships its stdlib fixes. When an org module raises its go line, ccf-bump moves its consumers' go line and golang images instead (docs/ccf-bump.md#golang-builder-images).",
+      "description": "The go.mod go directive is a minimum, which every newer Go already meets, so by default Renovate never moves it. rangeStrategy bump moves it to the latest Go (minor and patch, in the non-major group with the golang image, so the builder keeps up with the go line) and it is fix(deps): setup-go builds the releases with the go line's Go, so a bump ships its stdlib fixes. When an org module raises its go line, ccf-bump keeps its consumers in step: its go get raises their go line and it moves their golang images with it (docs/ccf-bump.md#golang-builder-images).",
       "matchManagers": ["gomod"],
       "matchDepTypes": ["golang"],
       "rangeStrategy": "bump",
