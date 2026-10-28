@@ -4,3 +4,8 @@ lisa-design:
 - image-scan check scans the local image (Scanner.Pull false), OSV online (no DB cache in CI), every finding to the summary (actionable first, capped at 1000 rows), exit 1 on any actionable finding. No diff against :main by design.
 - image job: contents: read only (the gha layer cache needs no actions permission), closed-PR guard, not in required's needs; TestRequiredNeedsEveryJob now excludes image.
 - ci-action.yml passes images built with format() from its dockerfile/context inputs (agent-action's container is built by the runner on each use).
+
+lisa-selfreview:
+pass 1 (strict), verdict request_changes:
+- [should-fix] CORE-DOC-001 docs/image-scan.md didn't say that a failed `image` job fails the caller's `ci` job, which notify-failure.yml reads: red main runs and red bot PRs (renovate/, ccf-bump/, release-please) get Slack incident posts.
+- [question] X:intent/image-failure-notifies the same interaction: is a #ccf-ci-failures incident for every bot PR of a repo whose image has a fixable finding wanted (the owner ruled out Slack reporting)? Not changed; open question in the PR body.
