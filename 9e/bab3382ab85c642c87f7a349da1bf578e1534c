@@ -3,3 +3,6 @@ lisa-design:
 - cut-prerelease.yml is left without workflows: it tags the default branch's head SHA read seconds before creating the release, so the tagged tree matches the head barring a push in that window.
 - release-action.yml's major-tag move uses GITHUB_TOKEN, not ccf-release-bot, so permission-workflows does not apply; out of scope.
 - release-finished.yml only sends repository_dispatch; it creates no refs.
+
+lisa-selfreview:
+- pass 1 (approve): CORE-CI-001 considered: workflows write broadens the token, but it is required for the release to be created and is scoped to the caller repo; recorded as a design decision. CORE-TEST-001 considered: config-only change enforced server-side by GitHub, no local behaviour to test; ciworkflows has no permission-pinning tests to update. go test ./... and actionlint v1.7.12 pass.
