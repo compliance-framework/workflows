@@ -26,6 +26,28 @@ func TestParseNeeds(t *testing.T) {
 		{"failed jobs, sorted", `{"z":{"result":"failure"},"ci":{"result":"failure"},"ok":{"result":"success"},"c":{"result":"cancelled"}}`, Result{Outcome: OutcomeFailure, FailedJobs: []string{"ci", "z"}}, ""},
 		{"cancelled", `{"ci":{"result":"cancelled"},"release-checks":{"result":"success"}}`, Result{Outcome: OutcomeNone}, ""},
 		{"all skipped", `{"ci":{"result":"skipped"}}`, Result{Outcome: OutcomeNone}, ""},
+		// ci-go-service, ci-ui and ci-action report their required check's outcome.
+		{"image alone failed: the run passed, the image check failed",
+			`{"ci":{"result":"failure","outputs":{"required-result":"success"}},"release-checks":{"result":"success"}}`,
+			Result{Outcome: OutcomeSuccess, Image: OutcomeFailure, ImageJobs: []string{"ci / image"}}, ""},
+		{"image alone failed, another job too",
+			`{"ci":{"result":"failure","outputs":{"required-result":"success"}},"release-checks":{"result":"failure"}}`,
+			Result{Outcome: OutcomeFailure, FailedJobs: []string{"release-checks"}, Image: OutcomeFailure, ImageJobs: []string{"ci / image"}}, ""},
+		{"the required check failed: a failure, the image check unknown",
+			`{"ci":{"result":"failure","outputs":{"required-result":"failure"}}}`,
+			Result{Outcome: OutcomeFailure, FailedJobs: []string{"ci"}}, ""},
+		{"all passed, the image check too",
+			`{"ci":{"result":"success","outputs":{"required-result":"success"}}}`,
+			Result{Outcome: OutcomeSuccess, Image: OutcomeSuccess}, ""},
+		{"no required result (a caller of another ci-*.yml): as before",
+			`{"ci":{"result":"failure","outputs":{}}}`,
+			Result{Outcome: OutcomeFailure, FailedJobs: []string{"ci"}}, ""},
+		{"an empty required result (the check didn't run): as before",
+			`{"ci":{"result":"failure","outputs":{"required-result":""}}}`,
+			Result{Outcome: OutcomeFailure, FailedJobs: []string{"ci"}}, ""},
+		{"cancelled with the required check passed: left alone",
+			`{"ci":{"result":"cancelled","outputs":{"required-result":"success"}}}`,
+			Result{Outcome: OutcomeNone}, ""},
 		{"no jobs", `{}`, Result{}, "no jobs"},
 		{"not JSON", `{`, Result{}, "parsing"},
 	}
@@ -42,6 +64,16 @@ func TestParseNeeds(t *testing.T) {
 				t.Errorf("ParseNeeds = %+v, %v; want %+v", got, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestImageResult(t *testing.T) {
+	if got := (Result{Outcome: OutcomeFailure, FailedJobs: []string{"ci"}}).ImageResult(); !reflect.DeepEqual(got, Result{Outcome: OutcomeNone}) {
+		t.Errorf("no image result: %+v, want OutcomeNone", got)
+	}
+	got := (Result{Outcome: OutcomeSuccess, Image: OutcomeFailure, ImageJobs: []string{"ci / image"}}).ImageResult()
+	if !reflect.DeepEqual(got, Result{Outcome: OutcomeFailure, FailedJobs: []string{"ci / image"}}) {
+		t.Errorf("image failure: %+v", got)
 	}
 }
 

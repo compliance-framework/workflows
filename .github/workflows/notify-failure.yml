@@ -3,7 +3,9 @@
 # SLACK_CHANNEL_NEEDS_HUMAN variable set, it also posts a tracked bot PR that needs a human
 # (the needs-human label, or a release PR's failed release-checks) there, once per PR. When the
 # caller also runs on `closed`, a closed PR's run does no failure logic: it marks the PR's
-# needs-human card handled and closes its open incident.
+# needs-human card handled and closes its open incident. A failure of the `image` check of
+# ci-go-service, ci-ui or ci-action alone (it gates nothing) is not a failure of the run: on a
+# push to the default branch it has an incident of its own, elsewhere it posts nothing.
 # Call it from a job with `needs: <CI jobs>`, `if: always()`, `with: {needs: ${{ toJSON(needs) }}}`,
 # `secrets: inherit` and `permissions: {contents: read}`; see docs/notify.md.
 name: notify-failure
@@ -40,6 +42,7 @@ jobs:
     env:
       TOOLS_DIR: ${{ github.workspace }}/.ccf-workflows
       STATE_FILE: .ccf-notify-incident.json
+      IMAGE_STATE_FILE: .ccf-notify-image-incident.json
       NEEDS: ${{ inputs.needs }}
       # Empty turns the needs-human rule off (docs/attention.md).
       NEEDS_HUMAN_CHANNEL: ${{ vars.SLACK_CHANNEL_NEEDS_HUMAN }}
@@ -112,6 +115,32 @@ jobs:
         with:
           path: ${{ env.STATE_FILE }}
           key: ${{ steps.plan.outputs.key }}
+
+      # The image check's own incident, on a push to the default branch only (notify.TracksImage),
+      # so a build or test failure there still gets its own card. Its key prefix differs from the
+      # run's, so neither restores the other's state.
+      - name: Restore the image incident state
+        if: ${{ !cancelled() && steps.plan.outputs.image == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.IMAGE_STATE_FILE }}
+          key: ${{ steps.plan.outputs.image-key }}
+          restore-keys: ${{ steps.plan.outputs.image-restore-key }}
+
+      - name: Post the image incident to Slack
+        id: post-image
+        if: ${{ !cancelled() && steps.plan.outputs.image == 'true' }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ inputs.channel || vars.SLACK_CHANNEL_CI_FAILURES }}
+        run: '"$RUNNER_TEMP/notify" post-image'
+
+      - name: Save the image incident state
+        if: ${{ !cancelled() && steps.post-image.outputs.save == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.IMAGE_STATE_FILE }}
+          key: ${{ steps.plan.outputs.image-key }}
 
       # A PR is posted once: the record's key is per repo + PR, and only a miss posts. The
       # record (the card's channel and ts) is restored for closed to edit the card.

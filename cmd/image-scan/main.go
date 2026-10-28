@@ -2,6 +2,7 @@
 // and plans their fixes as Renovate package rules, for renovate.yml's image-scan job:
 //
 //	image-scan list [--manifest repos.yaml] --repos a,b [--dry-run full]
+//	image-scan check --image ref [--name name] [--summary file] [--cache-dir dir]
 //	image-scan scan [--manifest repos.yaml] --repos a,b --overrides file [--summary file] [--cache-dir dir] [--owner org] [--dry-run full] [--author ccf-release-bot[bot]]
 //
 // list prints the repos of --repos (renovate-config list's selection) whose kind has Dockerfiles
@@ -13,7 +14,10 @@
 // keeps each repo's image-scan/os-patches branch and PR in line with the OS package patches it
 // plans, committing as GIT_AUTHOR_NAME <GIT_AUTHOR_EMAIL> with GH_TOKEN (Contents and Pull
 // requests write); a dry run only logs them. It exits non-zero, after all that, if an image could
-// not be scanned or a PR not updated. The rules are in internal/imagescan; see docs/image-scan.md.
+// not be scanned or a PR not updated. check, for ci-image.yml, scans a locally built image (--image,
+// not pulled) with the same scanner and runtime check, writes every finding to --summary and the
+// log, and fails when any is fixable and HIGH or CRITICAL. The rules are in internal/imagescan;
+// see docs/image-scan.md.
 package main
 
 import (
@@ -41,7 +45,7 @@ func main() {
 	}
 }
 
-const usage = "usage: image-scan list|scan [flags]"
+const usage = "usage: image-scan list|scan|check [flags]"
 
 // deps are the scan's outside world; nil uses the real ones (tests pass fakes).
 type deps struct {
@@ -53,8 +57,11 @@ type deps struct {
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string, stdout io.Writer, d *deps) error {
-	if len(args) == 0 || (args[0] != "list" && args[0] != "scan") {
+	if len(args) == 0 || (args[0] != "list" && args[0] != "scan" && args[0] != "check") {
 		return errors.New(usage)
+	}
+	if args[0] == "check" {
+		return check(ctx, args[1:], getenv, stdout, d)
 	}
 	fs := flag.NewFlagSet("image-scan "+args[0], flag.ContinueOnError)
 	path := fs.String("manifest", manifest.DefaultPath, "path to the repo manifest")
@@ -180,6 +187,83 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return fmt.Errorf("could not scan or patch everything in %s (the rules for the rest are written)", strings.Join(compact(failed), ", "))
 	}
 	return nil
+}
+
+// check scans a locally built image and fails on any fixable HIGH or CRITICAL finding.
+func check(ctx context.Context, args []string, getenv func(string) string, stdout io.Writer, d *deps) error {
+	fs := flag.NewFlagSet("image-scan check", flag.ContinueOnError)
+	image := fs.String("image", "", "the local image to check (required; not pulled)")
+	name := fs.String("name", "", "the image's name in the report (default: --image)")
+	summary := fs.String("summary", "", "append the report here (ci-image.yml passes $GITHUB_STEP_SUMMARY)")
+	cacheDir := fs.String("cache-dir", "", "osv-scanner's offline database cache; empty queries the OSV API")
+	scannerImage := fs.String("scanner", imagescan.ScannerImage, "the osv-scanner image")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if *image == "" {
+		return errors.New("--image is required")
+	}
+	if *name == "" {
+		*name = *image
+	}
+	var scanner imagescan.ImageScanner
+	if d != nil {
+		scanner = d.scanner
+	} else {
+		dir := *cacheDir
+		if dir != "" {
+			var err error
+			if dir, err = filepath.Abs(dir); err != nil {
+				return err
+			}
+		}
+		scanner = &imagescan.Scanner{
+			Run: imagescan.ExecRunner{}, Image: *scannerImage, OSV: &imagescan.OSV{BaseURL: imagescan.OSVAPI},
+			TempDir: getenv("RUNNER_TEMP"), CacheDir: dir,
+		}
+	}
+	s, err := scanner.Scan(ctx, *image)
+	if err != nil {
+		return err
+	}
+	for _, f := range s.Findings {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\t%s\n", f.Package, f.Type, f.Installed, orDash(strings.Join(f.Fixed, ",")), f.Severity(), strings.Join(append(slices.Clone(f.IDs), f.Aliases...), ","))
+	}
+	if *summary != "" {
+		f, err := os.OpenFile(*summary, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		werr := imagescan.WriteCheckSummary(f, *name, s)
+		if err := f.Close(); werr == nil {
+			werr = err
+		}
+		if werr != nil {
+			return werr
+		}
+	}
+	n := 0
+	for _, f := range s.Findings {
+		if f.Actionable() {
+			n++
+			fmt.Fprintf(stdout, "::error::%s: %s %s %s is %s (%s), fixed in %s\n", *name, f.Type, f.Package, f.Installed, f.Severity(), strings.Join(f.CVEs(), ", "), strings.Join(f.Fixed, ", "))
+		}
+	}
+	if n > 0 {
+		return fmt.Errorf("%s: %d fixable HIGH or CRITICAL finding(s)", *name, n)
+	}
+	fmt.Fprintf(stdout, "%s: no fixable HIGH or CRITICAL finding (%d finding(s) in all)\n", *name, len(s.Findings))
+	return nil
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // imageRepos returns the repos of list (validated as renovate-config validates them) whose kind

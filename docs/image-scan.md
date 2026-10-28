@@ -258,6 +258,42 @@ labelled `renovate:automerge`, opened by the bot, every commit by the bot, not `
 `ci / required` passes. A dry run writes nothing: it logs the branch, the PR title and the lines it
 would add or remove. A repo whose scan was incomplete is skipped.
 
+## The CI check: `ci-image.yml`
+
+The scheduled scan sees base images and published images; a Dockerfile change is only seen once
+it is published. So each repo's CI checks the image it builds, on every PR and every push to the
+default branch. `ci-image.yml` (`workflow_call`) takes the `images` input of `publish-image.yml`
+(same shape and default `[{}]`) and runs one job per image, on `ubuntu-latest`, amd64 only:
+
+1. It checks out this repo at `job.workflow_sha` (the commit the caller pinned, the `preview.yml`
+   pattern), for `cmd/release` and `cmd/image-scan`, and the caller's code under `caller/`.
+2. Without the image's Dockerfile it writes a notice and skips the rest.
+3. `go run ./cmd/release build-version` picks the single `VERSION` build arg, in the preview's form
+   (`pr-<n>-<sha7>` on a PR, `main-<sha7>` on a push) but whatever the PR's labels or fork.
+4. `docker/build-push-action` builds it with `load: true` and `push: false` (nothing is pushed, so
+   fork PRs work, and the job needs only `contents: read`), with the GitHub Actions layer cache
+   (one scope per image).
+5. `go run ./cmd/image-scan check --image ci-image:local` scans the **full built image** with the
+   same scanner, parser and runtime check as the scheduled job, so `FROM safe` followed by
+   `RUN apk add unsafe` is caught. Every finding, fixable or not, goes to the step summary (the
+   fixable HIGH and CRITICAL ones first), and the job **fails on any fixable HIGH or CRITICAL
+   finding**, on PRs and on pushes to the default branch alike. There is no diff against `:main`:
+   a red run on `main` is the signal that the image has an issue.
+
+`ci-go-service.yml` and `ci-ui.yml` call it as job `image`, with a new `images` input (default
+`[{}]`) passed through; agent's `ci.yml` must pass the same `images` list as its release and
+preview workflows. `ci-action.yml` calls it with its `dockerfile` and `context` inputs (the image
+the runner builds for agent-action on each use). The `image` job is **not** in `required`'s needs:
+it never gates a merge (Renovate, ccf-bump and the train gate on `ci / required`). Like the other
+CI jobs it is skipped on a closed PR. A failed `image` still fails the caller's `ci` job (the
+reusable workflow's result), so the three workflows also report their `required` check's outcome
+(the `required-result` output), and `notify-failure.yml` tells a failure of `image` alone from one
+that gates ([notify.md](notify.md#the-image-check)): on a pull request (Renovate, ccf-bump,
+release-please, `image-scan/os-patches`) it posts nothing, and on a push to the default branch it
+opens an incident of its own, so a build or test failure on `main` still gets its own card. The
+osv-scanner image comes from `ghcr.io`, and the runtime check queries `api.osv.dev`, so the job
+needs network access but no token.
+
 ## The job
 
 `image-scan` runs in `renovate.yml` between `select` and `renovate` ([renovate.md](renovate.md#the-workflow-renovateyml)):

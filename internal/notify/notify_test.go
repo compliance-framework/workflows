@@ -3,6 +3,7 @@ package notify
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -126,6 +127,38 @@ func TestIncidentKey(t *testing.T) {
 			t.Errorf("collision for %+v", r)
 		} else {
 			seen[key] = true
+		}
+	}
+
+	// The image incident has a key of its own, which the run's restore prefix doesn't match
+	// (actions/cache restores the newest entry whose key starts with restore-keys), nor the
+	// other way round.
+	main := Run{Repo: "o/r", WorkflowPath: ".github/workflows/ci.yml", Branch: "main", RunID: "7", RunAttempt: "1"}
+	if got, want := ImageIncidentKey(main), "ccf-notify-image-incident-"; !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "-") {
+		t.Errorf("ImageIncidentKey = %s, want %s<hash>-", got, want)
+	}
+	if strings.HasPrefix(ImageStateKey(main), IncidentKey(main)) || strings.HasPrefix(StateKey(main), ImageIncidentKey(main)) {
+		t.Errorf("the keys %s and %s restore each other's state", IncidentKey(main), ImageIncidentKey(main))
+	}
+	if got, want := ImageStateKey(main), ImageIncidentKey(main)+"7-1"; got != want {
+		t.Errorf("ImageStateKey = %s, want %s", got, want)
+	}
+}
+
+func TestTracksImage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  Run
+		want bool
+	}{
+		{"push to the default branch", Run{EventName: "push", Branch: "main", DefaultBranch: "main"}, true},
+		{"push to another branch", Run{EventName: "push", Branch: "fix", DefaultBranch: "main"}, false},
+		{"push to an automation branch", Run{EventName: "push", Branch: "renovate/x", DefaultBranch: "main"}, false},
+		{"a bot PR", Run{EventName: "pull_request", PRNumber: 3, PRAuthor: ReleaseBotLogin, Branch: "image-scan/os-patches", DefaultBranch: "main"}, false},
+		{"a Renovate PR", Run{EventName: "pull_request", PRNumber: 4, PRAuthor: "renovate[bot]", Branch: "renovate/x", DefaultBranch: "main"}, false},
+	} {
+		if got := TracksImage(tc.run); got != tc.want {
+			t.Errorf("%s: TracksImage = %t, want %t", tc.name, got, tc.want)
 		}
 	}
 }

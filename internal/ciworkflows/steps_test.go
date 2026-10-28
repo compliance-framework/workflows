@@ -152,7 +152,8 @@ func TestRequiredNeedsEveryJob(t *testing.T) {
 		read(t, file, &wf)
 		var others []string
 		for name := range wf.Jobs {
-			if name != "required" {
+			// image (ci-image.yml) is deliberately outside: it must not gate merges (TestImageJob).
+			if name != "required" && name != "image" {
 				others = append(others, name)
 			}
 		}

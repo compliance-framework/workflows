@@ -5,11 +5,12 @@
 //	release check version-guard --base base.json [--head .release-please-manifest.json]
 //	release next-rc --version X.Y.Z [--prefix v]    (existing tags on stdin, one per line)
 //	release preview-tags [--on-main=true|false]     (appends tags=... and version=... to $GITHUB_OUTPUT)
+//	release build-version                          (appends version=pr-<n>-<sha7>|main-<sha7> to $GITHUB_OUTPUT)
 //	release release-tags --tag T [--prefix v] [--style image|artifact]
 //	                                               (appends tags=..., final=..., major=vX and version=X.Y.Z[-pre] to $GITHUB_OUTPUT)
 //	release chart --tag T [--charts-dir charts]    (appends path=..., name=... and version=... to $GITHUB_OUTPUT)
 //
-// version-guard and preview-tags read the PR from $GITHUB_EVENT_PATH.
+// version-guard, preview-tags and build-version read the PR from $GITHUB_EVENT_PATH.
 package main
 
 import (
@@ -37,7 +38,7 @@ func main() {
 	}
 }
 
-const usage = "usage: release check internal-deps|module-path|version-guard [flags] | next-rc [flags] | preview-tags [flags] | release-tags [flags] | chart [flags]"
+const usage = "usage: release check internal-deps|module-path|version-guard [flags] | next-rc [flags] | preview-tags [flags] | build-version | release-tags [flags] | chart [flags]"
 
 func run(args []string, getenv func(string) string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 0 {
@@ -59,6 +60,11 @@ func run(args []string, getenv func(string) string, stdin io.Reader, stdout io.W
 			return err
 		}
 		return previewTags(*onMain, getenv, stdout)
+	case "build-version":
+		if len(args) > 1 {
+			return fmt.Errorf("build-version takes no arguments: %s", strings.Join(args[1:], " "))
+		}
+		return buildVersion(getenv, stdout)
 	case "release-tags":
 		fs := flag.NewFlagSet("release release-tags", flag.ContinueOnError)
 		tag := fs.String("tag", "", "the release's git tag (required)")
@@ -209,6 +215,24 @@ func previewTags(onMain bool, getenv func(string) string, stdout io.Writer) erro
 		fmt.Fprintln(stdout, "Preview tags: "+strings.Join(tags, " ")+" (VERSION "+version+")")
 	}
 	return writeOutputs(getenv, "tags="+strings.Join(tags, " "), "version="+version)
+}
+
+// buildVersion writes the VERSION build arg of an image CI builds and doesn't publish
+// (ci-image.yml): release.BuildVersion of the event.
+func buildVersion(getenv func(string) string, stdout io.Writer) error {
+	e, err := readEvent(getenv("GITHUB_EVENT_PATH"))
+	if err != nil {
+		return err
+	}
+	version, err := release.BuildVersion(release.Event{
+		Name: getenv("GITHUB_EVENT_NAME"), Ref: getenv("GITHUB_REF"), SHA: getenv("GITHUB_SHA"),
+		DefaultBranch: e.Repository.DefaultBranch, PRNumber: e.PullRequest.Number,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, "VERSION "+version)
+	return writeOutputs(getenv, "version="+version)
 }
 
 func releaseTags(tag, prefix, style string, getenv func(string) string, stdout io.Writer) error {

@@ -272,7 +272,7 @@ func TestRunErrors(t *testing.T) {
 		err  string
 	}{
 		{nil, "usage"},
-		{[]string{"check"}, "usage"},
+		{[]string{"lint"}, "usage"},
 		{[]string{"list", "extra"}, "unexpected arguments"},
 		{[]string{"scan", "--manifest", mock}, "--overrides is required"},
 		{[]string{"scan", "--manifest", mock, "--overrides", "x"}, "GH_TOKEN is not set"},
@@ -281,5 +281,50 @@ func TestRunErrors(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.err) {
 			t.Errorf("%v: err = %v, want one containing %q", tc.args, err, tc.err)
 		}
+	}
+}
+
+// TestCheck: the CI check fails on a fixable HIGH or CRITICAL finding of the built image, and only
+// then; every finding, fixable or not, is in the summary.
+func TestCheck(t *testing.T) {
+	brotli := imagescan.Finding{Package: "brotli-libs", Type: imagescan.TypeOS, Installed: "1.2.0-r1", Fixed: []string{"1.2.1-r0"}, IDs: []string{"ALPINE-CVE-2026-111497"}, Aliases: []string{"CVE-2026-111497"}, Score: 9.2}
+	unfixed := imagescan.Finding{Package: "libc6", Type: imagescan.TypeOS, Installed: "2.36", IDs: []string{"CVE-2019-1010022"}, Score: 9.8}
+	medium := imagescan.Finding{Package: "curl", Type: imagescan.TypeOS, Installed: "8.22.0-r0", Fixed: []string{"8.23.0-r0"}, IDs: []string{"CVE-2026-1"}, Score: 5}
+	for _, tc := range []struct {
+		name     string
+		findings []imagescan.Finding
+		err      string
+		summary  []string
+	}{
+		{"a fixable CRITICAL fails", []imagescan.Finding{medium, unfixed, brotli}, "1 fixable HIGH or CRITICAL",
+			[]string{"# Image check: ui", "**1 fixable HIGH or CRITICAL finding(s)**, which fail the check, of 3 in all.",
+				"| brotli-libs | os | 1.2.0-r1 | 1.2.1-r0 | CRITICAL | yes | CVE-2026-111497 |\n| libc6 | os | 2.36 | - | CRITICAL |  | CVE-2019-1010022 |\n| curl | os | 8.22.0-r0 | 8.23.0-r0 | MEDIUM |  | CVE-2026-1 |"}},
+		{"unfixable or MEDIUM passes", []imagescan.Finding{medium, unfixed}, "", []string{"No fixable HIGH or CRITICAL finding; 2 other(s)."}},
+		{"clean", nil, "", []string{"No findings."}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			summary := filepath.Join(t.TempDir(), "summary.md")
+			d := &deps{scanner: fakeScanner{"ci-image:local": tc.findings}}
+			var out bytes.Buffer
+			err := run(context.Background(), []string{"check", "--image", "ci-image:local", "--name", "ui", "--summary", summary}, env(nil), &out, d)
+			if tc.err == "" && err != nil || tc.err != "" && (err == nil || !strings.Contains(err.Error(), tc.err)) {
+				t.Fatalf("err = %v, want %q\n%s", err, tc.err, out.String())
+			}
+			md, rerr := os.ReadFile(summary)
+			if rerr != nil {
+				t.Fatal(rerr)
+			}
+			for _, want := range tc.summary {
+				if !strings.Contains(string(md), want) {
+					t.Errorf("summary has no %q:\n%s", want, md)
+				}
+			}
+		})
+	}
+	if err := run(context.Background(), []string{"check"}, env(nil), &bytes.Buffer{}, &deps{}); err == nil || !strings.Contains(err.Error(), "--image is required") {
+		t.Errorf("check without --image: err = %v", err)
+	}
+	if err := run(context.Background(), []string{"check", "--image", "missing:local"}, env(nil), &bytes.Buffer{}, &deps{scanner: fakeScanner{}}); err == nil {
+		t.Error("check of an image that can't be scanned: want an error")
 	}
 }

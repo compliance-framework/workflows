@@ -95,6 +95,35 @@ func TestPreviewTags(t *testing.T) {
 	}
 }
 
+func TestBuildVersion(t *testing.T) {
+	dir := t.TempDir()
+	repo := `"repository": {"full_name": "compliance-framework/mock-api", "default_branch": "main"}`
+	fork := write(t, dir, "fork.json", `{`+repo+`, "pull_request": {"number": 12, "labels": [], "head": {"repo": {"full_name": "someone/mock-api"}}}}`)
+	for _, tc := range []struct {
+		name, eventName, event, want string
+	}{
+		{"push to main", "push", write(t, dir, "push.json", `{`+repo+`}`), "version=main-0123456"},
+		{"unlabelled fork PR", "pull_request", fork, "version=pr-12-0123456"},
+		{"release", "release", write(t, dir, "release.json", `{`+repo+`}`), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ghOut := filepath.Join(t.TempDir(), "out")
+			env := map[string]string{"GITHUB_EVENT_PATH": tc.event, "GITHUB_EVENT_NAME": tc.eventName, "GITHUB_SHA": "0123456789abcdef", "GITHUB_OUTPUT": ghOut}
+			err := run([]string{"build-version"}, func(k string) string { return env[k] }, strings.NewReader(""), &strings.Builder{})
+			if tc.want == "" {
+				if err == nil {
+					t.Fatal("want an error")
+				}
+				return
+			}
+			b, rerr := os.ReadFile(ghOut)
+			if err != nil || rerr != nil || strings.TrimSpace(string(b)) != tc.want {
+				t.Fatalf("GITHUB_OUTPUT = %q, %v, %v; want %q", b, err, rerr, tc.want)
+			}
+		})
+	}
+}
+
 func TestReleaseTags(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
