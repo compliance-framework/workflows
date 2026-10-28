@@ -1,0 +1,5 @@
+lisa-addressed:
+review pass (PR #155) fixes, commit f3811c2:
+- PRRT_kwDOKQL6as6xF3iS rule 1 scope: matchUpdateTypes [digest] / [patch]+matchNewValue (scanned tag) + a separateMinorPatch rule; verified with Renovate 44.145.1's applyPackageRules/getBucket and its validator (matchUpdateTypes can't sit next to allowedVersions/separateMinorPatch).
+- PRRT_kwDOKQL6as6xF3kw ParseOverrides checks values (types, plain image names, limits, null age, anchored regexes, update types, automerge needs update types).
+- PRRT_kwDOKQL6as6xF3mq typed renovate.PackageRule shared by planner and validator; every rules golden runs through ParseOverrides.
