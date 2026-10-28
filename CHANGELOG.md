@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/compliance-framework/workflows/compare/v1.9.0...v1.9.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ci:** verify the golangci-lint config with the schema built into v2.15.0 ([#166](https://github.com/compliance-framework/workflows/issues/166)) ([cb7d5d2](https://github.com/compliance-framework/workflows/commit/cb7d5d2da0fcb766a008326f54897d40fb031fd6))
+
 ## [1.9.0](https://github.com/compliance-framework/workflows/compare/v1.8.1...v1.9.0) (2026-10-28)
 
 
