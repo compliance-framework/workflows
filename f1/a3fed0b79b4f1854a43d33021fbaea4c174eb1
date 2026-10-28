@@ -1,3 +1,9 @@
 lisa-addressed:
 pass 1 fixes:
 - CORE-DOC-001: docs/image-scan.md explains the notify-failure.yml consequence of a red image job.
+
+lisa-selfreview:
+pass 2 (strict), verdict approve. Deferred (not fixed):
+- [nit] X:performance/action-built-twice ci-action.yml builds the action's image twice (docker job and image job); the image job could replace the docker job's build, but that job is in required and this one must not be.
+- [nit] X:performance/no-db-cache-in-ci ci-image.yml queries the OSV API rather than an actions/cache'd offline DB (the spec allowed actions permission for a cache "as needed"; none was needed).
+- [question] X:intent/image-failure-notifies (pass 1).
