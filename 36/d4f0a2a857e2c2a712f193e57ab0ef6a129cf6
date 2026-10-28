@@ -1,2 +1,7 @@
 lisa-addressed:
 - GO-NIL-001 goImage.Apply: the variant is read only when goTag matches (fp c17145ed3de2)
+
+lisa-selfreview:
+pass 2: request_changes
+- [must-fix] CORE-TEST-001 cmd/ccf-bump/bumper.go targets(): the DepGo skip had no test that fails without it (sync mode would ask GitHub for a release of "golang") -> fix: TestGolangImagesFollowGoLine runs in sync mode with LatestFinal failing for golang
+- [nit] docs/ccf-bump.md: "a run retries it" vague -> fix: name the next sync run and the train's /retry
