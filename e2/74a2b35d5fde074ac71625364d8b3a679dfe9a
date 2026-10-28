@@ -1,0 +1,3 @@
+lisa-selfreview:
+pass 1: approve
+- [question] docs/renovate.md / renovate/default.json: docker majors (node 22 -> 26, postgres 17 -> 18) keep timestamp-required, so like the tag updates before this PR they stay pending for good and never get their needs-human PR. Scoped out per the request (minor/patch); listed as an open question for reviewers.
