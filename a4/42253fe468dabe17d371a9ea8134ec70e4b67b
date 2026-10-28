@@ -1,0 +1,2 @@
+lisa-addressed:
+- review PRRT_kwDOKQL6as6xVTbD: run-wide bound is now maxRunFailures=6 consecutive failed lookups across images (reset only by an answered lookup, 404 included), replacing maxTrippedImages; per-image breaker kept. TestRateFromAliasesOutageBoundSmallImages: 20 one-finding images during an outage -> 6 lookups (12 requests); a 404 resets the count. fakeOSV.down now toggled under its lock (setDown).
