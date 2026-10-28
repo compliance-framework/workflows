@@ -210,6 +210,14 @@ func TestScanCommands(t *testing.T) {
 	}
 }
 
+func TestScanRejectsBadRefs(t *testing.T) {
+	docker := &fakeDocker{images: spikeImages}
+	s := newScanner(t, docker)
+	if _, err := s.Scan(context.Background(), "--privileged"); err == nil || len(docker.calls) > 0 {
+		t.Errorf("err = %v, docker calls %q; want an error and no docker call", err, docker.calls)
+	}
+}
+
 func golden(t *testing.T, path string, v any) {
 	t.Helper()
 	got, err := json.MarshalIndent(v, "", "  ")

@@ -117,6 +117,12 @@ func TestPlan(t *testing.T) {
 			notes:   []string{"nodejs 20 is end-of-life; node:22 fixes CVE-2026-111497, CVE-2026-48617, CVE-2026-48937, CVE-2026-56846, CVE-2026-56848, CVE-2026-58043 (rule 2)"},
 		},
 		{
+			name:    "rule 2 once for an image in two stages",
+			targets: []tgt{{"node:20", "build", RoleBuild}, {"node:20", "final", RoleFinal}},
+			rules:   "rule2.golden.json",
+			notes:   []string{"(rule 2)"},
+		},
+		{
 			name:    "rule 2 keeps the tag's suffix; an image without node findings isn't moved",
 			targets: []tgt{{"node:20-alpine", "0", RoleFinal}},
 			rules:   "rule2-alpine.golden.json",

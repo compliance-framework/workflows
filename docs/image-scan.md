@@ -79,8 +79,8 @@ what changed.
 
 ## Remediation
 
-The plan (`imagescan.Planner`) makes at most one rule per repo and image, written as a JSON list
-of Renovate `packageRules`:
+The plan (`imagescan.Planner`) makes at most one rule 1 per repo and image name, and one rule 2 per
+repo, image name and release, written as a JSON list of Renovate `packageRules`:
 
 1. **Rule 1: a newer image of the same tag fixes it.** A final-stage base image with actionable
    findings, whose candidate scans clean of all of them. The candidate is what Renovate would move
@@ -93,6 +93,7 @@ of Renovate `packageRules`:
      "matchRepositories": ["compliance-framework/ui"],
      "matchManagers": ["dockerfile"],
      "matchDepNames": ["nginx"],
+     "matchCurrentVersion": "/^(stable-alpine)$/",
      "minimumReleaseAge": null,
      "prHourlyLimit": 0, "prConcurrentLimit": 0, "branchConcurrentLimit": 0,
      "semanticCommitType": "fix",
@@ -105,7 +106,9 @@ of Renovate `packageRules`:
 
    It mirrors the preset's `vulnerabilityAlerts`: no waiting period, no PR limit, `fix(deps)`, one
    `renovate/security-dockerfile` PR per repo, auto-merged by Renovate and the merge pass. The PR
-   body lists the CVEs with the package, versions and severity of each.
+   body lists the CVEs with the package, versions and severity of each. `matchCurrentVersion`
+   limits it to the tags scanned, so another image of the same name in the repo (a `node:20` build
+   stage next to a `node:22` final stage) keeps its own rules.
 2. **Rule 2: the image is on an end-of-life release.** A base image of any stage whose tag names an
    end-of-life release of `node`, `debian` or `alpine` (`imagescan.eolLines`; [endoflife.date](https://endoflife.date/)'s
    API, failing soft: when it can't be read the image goes through rules 1 and 3) with actionable

@@ -17,7 +17,7 @@ import (
 
 // ScannerImage is the osv-scanner the tool runs, from its official image, pinned by digest. This
 // repo's renovate.json tracks the line with a custom manager (TestScannerImageRenovate), so
-// Renovate updates it like any other dependency; ci-common.yml's vulns job uses the same version.
+// Renovate updates it like any other dependency. It is the same tool as ci-common.yml's vulns job.
 const ScannerImage = "ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0"
 
 // Platform is the platform the tool pulls and scans: the one the CI runners build and run.
@@ -83,6 +83,10 @@ type Scanner struct {
 
 // Scan scans ref: its packages with osv-scanner, then the runtimes it carries against OSV.
 func (s *Scanner) Scan(ctx context.Context, ref string) (*Scan, error) {
+	// Every reference goes on docker's command line: only well-formed ones.
+	if _, err := ParseRef(ref); err != nil {
+		return nil, err
+	}
 	if s.Pull {
 		if _, err := s.Run.Run(ctx, "docker", "pull", "--quiet", "--platform", Platform, ref); err != nil {
 			return nil, fmt.Errorf("pull %s: %w", ref, err)

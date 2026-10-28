@@ -62,9 +62,11 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 	type fix struct {
 		findings []Finding
 		images   []string
+		tags     []string
 	}
 	security := map[string]*fix{}
 	var majors []Rule
+	majorKeys := map[string]bool{}
 	seen := map[string]bool{}
 	for _, t := range targets {
 		if t.Scan == nil {
@@ -86,7 +88,9 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 			continue
 		}
 		if rule, msg, eol := p.eolRule(ctx, repo, ref, act); eol {
-			if rule != nil {
+			// One rule per image and release, however many stages use it.
+			if key := fmt.Sprint(rule["matchDepNames"], rule["matchCurrentVersion"]); rule != nil && !majorKeys[key] {
+				majorKeys[key] = true
 				majors = append(majors, rule)
 			}
 			note("%s: %s", where, msg)
@@ -123,6 +127,7 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 		}
 		f.findings = append(f.findings, act...)
 		f.images = append(f.images, ref.String())
+		f.tags = append(f.tags, ref.Tag)
 		note("%s: %s fixes %s (rule 1)", where, cand, strings.Join(cves(act), ", "))
 	}
 
@@ -130,9 +135,12 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) ([]Ru
 	for _, dep := range slices.Sorted(maps.Keys(security)) {
 		f := security[dep]
 		rules = append(rules, Rule{
-			"matchRepositories":     []string{p.Owner + "/" + repo},
-			"matchManagers":         []string{"dockerfile"},
-			"matchDepNames":         []string{dep},
+			"matchRepositories": []string{p.Owner + "/" + repo},
+			"matchManagers":     []string{"dockerfile"},
+			"matchDepNames":     []string{dep},
+			// Only the tags scanned: another image of the same name (a build stage on an
+			// end-of-life release) keeps its own rules.
+			"matchCurrentVersion":   tagsRegex(f.tags),
 			"minimumReleaseAge":     nil,
 			"prHourlyLimit":         0,
 			"prConcurrentLimit":     0,
@@ -298,6 +306,17 @@ func cves(fs []Finding) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// tagsRegex matches exactly the given tags.
+func tagsRegex(tags []string) string {
+	tags = slices.Clone(tags)
+	slices.Sort(tags)
+	tags = slices.Compact(tags)
+	for i, t := range tags {
+		tags[i] = regexp.QuoteMeta(t)
+	}
+	return "/^(" + strings.Join(tags, "|") + ")$/"
 }
 
 // cycleRegex matches a docker tag of release cycle c: "c", "c.x...", "c-suffix".

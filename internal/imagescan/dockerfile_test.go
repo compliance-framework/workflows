@@ -132,7 +132,8 @@ func TestParseRef(t *testing.T) {
 			t.Errorf("ParseRef(%q) = %+v, %v", tc.in, r, err)
 		}
 	}
-	for _, bad := range []string{"node:", "", "$IMG:1"} {
+	// Anything else would reach docker's command line: a leading "-" is a flag there.
+	for _, bad := range []string{"node:", "", "$IMG:1", "-v", "--network=host", "node:-x", "a b", "node@sha256:ABC", "Repo/Upper"} {
 		if _, err := ParseRef(bad); err == nil {
 			t.Errorf("ParseRef(%q): want an error", bad)
 		}

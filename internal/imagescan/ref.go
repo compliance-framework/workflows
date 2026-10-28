@@ -22,7 +22,7 @@ func ParseRef(s string) (Ref, error) {
 	var r Ref
 	rest, digest, ok := strings.Cut(s, "@")
 	if ok {
-		if !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
+		if !refDigest.MatchString(digest) {
 			return r, fmt.Errorf("image %q: bad digest", s)
 		}
 		r.Digest = digest
@@ -34,12 +34,23 @@ func ParseRef(s string) (Ref, error) {
 			return r, fmt.Errorf("image %q: empty tag", s)
 		}
 	}
-	if rest == "" || strings.ContainsAny(rest, " \t$") {
+	if !refName.MatchString(rest) {
 		return r, fmt.Errorf("image %q: bad name", s)
+	}
+	if r.Tag != "" && !refTag.MatchString(r.Tag) {
+		return r, fmt.Errorf("image %q: bad tag", s)
 	}
 	r.Name = rest
 	return r, nil
 }
+
+// refName and refTag are Docker's reference grammar (distribution/reference), so a reference
+// read from a repo's file can't start with "-" and be read as a docker flag.
+var (
+	refName   = regexp.MustCompile(`^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*(?:\.[A-Za-z0-9-]+)*(?::[0-9]+)?(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$`)
+	refDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	refTag    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
+)
 
 // String is the reference as Docker takes it.
 func (r Ref) String() string {
