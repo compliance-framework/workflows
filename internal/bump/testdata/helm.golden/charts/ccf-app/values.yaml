@@ -13,4 +13,4 @@ ui:
 dex:
   image:
     repository: ghcr.io/dexidp/dex
-    tag: "v2.44.0"
+    tag: "v2.46.1"

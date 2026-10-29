@@ -11,7 +11,7 @@ name: ccf-smoke
 
 services:
   postgres:
-    image: postgres:17.5
+    image: postgres:17.11
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
