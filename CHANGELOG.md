@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.2](https://github.com/compliance-framework/workflows/compare/v1.9.1...v1.9.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **ccf-bump:** let go switch toolchains and keep the toolchain line and golang images in step ([#168](https://github.com/compliance-framework/workflows/issues/168)) ([ca987cd](https://github.com/compliance-framework/workflows/commit/ca987cd06f004792e0ac3519031605129d4c64c2))
+* **deps:** build with the go1.26.10 toolchain so Renovate can ship Go security fixes ([#171](https://github.com/compliance-framework/workflows/issues/171)) ([03c5f7a](https://github.com/compliance-framework/workflows/commit/03c5f7aef18ec7f6afb8bf6d028fdd7aa2c07582))
+* **image-scan:** rate Go findings by their Bitnami CVSS when the Go record has none ([#170](https://github.com/compliance-framework/workflows/issues/170)) ([278a5a7](https://github.com/compliance-framework/workflows/commit/278a5a7809d7c08642670f17c6355626eaf4cc71))
+* **renovate:** let docker tag updates through, take Go stdlib fixes via the toolchain line, and guard it in CI ([#169](https://github.com/compliance-framework/workflows/issues/169)) ([96bbff7](https://github.com/compliance-framework/workflows/commit/96bbff764af1dd57d9813daf90c91bc531e0ea6d))
+
 ## [1.9.1](https://github.com/compliance-framework/workflows/compare/v1.9.0...v1.9.1) (2026-10-28)
 
 
