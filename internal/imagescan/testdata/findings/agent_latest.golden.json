@@ -1,0 +1,104 @@
+{
+  "Ref": "ghcr.io/compliance-framework/agent:latest",
+  "OS": "Distroless",
+  "Findings": [
+    {
+      "image": "ghcr.io/compliance-framework/agent:latest",
+      "package": "stdlib",
+      "source": "stdlib",
+      "type": "lang",
+      "ecosystem": "Go",
+      "installed": "1.26.1",
+      "fixed": [
+        "1.25.9",
+        "1.26.2"
+      ],
+      "ids": [
+        "GO-2026-4864"
+      ],
+      "aliases": [
+        "BIT-golang-2026-32282",
+        "CVE-2026-32282"
+      ],
+      "score": 6.4,
+      "score_from": "BIT-golang-2026-32282"
+    },
+    {
+      "image": "ghcr.io/compliance-framework/agent:latest",
+      "package": "stdlib",
+      "source": "stdlib",
+      "type": "lang",
+      "ecosystem": "Go",
+      "installed": "1.26.1",
+      "fixed": [
+        "1.25.13",
+        "1.26.6",
+        "1.27.0-rc.3"
+      ],
+      "ids": [
+        "GO-2026-5026"
+      ],
+      "aliases": [
+        "CVE-2026-39821"
+      ],
+      "score": 9.6,
+      "score_from": "CVE-2026-39821"
+    },
+    {
+      "image": "ghcr.io/compliance-framework/agent:latest",
+      "package": "stdlib",
+      "source": "stdlib",
+      "type": "lang",
+      "ecosystem": "Go",
+      "installed": "1.26.1",
+      "fixed": [
+        "1.26.9",
+        "1.27.2"
+      ],
+      "ids": [
+        "GO-2026-6617"
+      ],
+      "aliases": [
+        "BIT-golang-2026-97032",
+        "CVE-2026-97032"
+      ],
+      "score": 7.5,
+      "score_from": "BIT-golang-2026-97032"
+    },
+    {
+      "image": "ghcr.io/compliance-framework/agent:latest",
+      "package": "stdlib",
+      "source": "stdlib",
+      "type": "lang",
+      "ecosystem": "Go",
+      "installed": "1.26.1",
+      "fixed": [
+        "1.26.10",
+        "1.27.3"
+      ],
+      "ids": [
+        "GO-2026-6809"
+      ],
+      "aliases": [
+        "CVE-2026-111943",
+        "RUSTSEC-2026-0381",
+        "RUSTSEC-2026-0382",
+        "RUSTSEC-2026-0383"
+      ],
+      "score": 0
+    },
+    {
+      "image": "ghcr.io/compliance-framework/agent:latest",
+      "package": "golang.org/x/crypto",
+      "source": "golang.org/x/crypto",
+      "type": "lang",
+      "ecosystem": "Go",
+      "installed": "0.58.0",
+      "ids": [
+        "GO-2026-5932"
+      ],
+      "score": 0
+    }
+  ],
+  "PackageManager": ""
+}

@@ -1,0 +1,18 @@
+{
+  "id": "RUSTSEC-2026-0383",
+  "summary": "Bundled root certificates allow trust in distrusted emSign intermediates",
+  "aliases": [
+    "CVE-2026-111943",
+    "GO-2026-6809",
+    "RUSTSEC-2026-0381",
+    "RUSTSEC-2026-0382"
+  ],
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "webpki-root-certs"
+      }
+    }
+  ]
+}

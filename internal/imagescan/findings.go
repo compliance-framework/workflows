@@ -36,6 +36,9 @@ type Finding struct {
 	IDs     []string `json:"ids"`               // the advisory IDs ("ALPINE-CVE-2026-111497")
 	Aliases []string `json:"aliases,omitempty"` // their aliases ("CVE-2026-111497")
 	Score   float64  `json:"score"`             // the highest CVSS base score of the advisories; 0 if none
+	// ScoreFrom is the alias whose OSV record gave Score, when the advisories themselves have no
+	// CVSS (a GO- advisory rated by its BIT-golang- alias); "" otherwise.
+	ScoreFrom string `json:"score_from,omitempty"`
 }
 
 // Severity is the rating of Score: CRITICAL from 9.0, HIGH from 7.0, MEDIUM from 4.0, LOW above
@@ -53,6 +56,10 @@ func (f Finding) Severity() string {
 	}
 	return "UNKNOWN"
 }
+
+// GoStdlib reports whether the finding is in the Go standard library compiled into a binary: what
+// fixes it is building the binary with a newer Go.
+func (f Finding) GoStdlib() bool { return f.Ecosystem == "Go" && f.Source == "stdlib" }
 
 // Actionable reports whether the finding has a fix and is HIGH or CRITICAL.
 func (f Finding) Actionable() bool { return len(f.Fixed) > 0 && f.Score >= 7 }

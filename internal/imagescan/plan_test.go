@@ -67,6 +67,15 @@ func planImages() map[string]fakeImage {
 		"ghcr.io/compliance-framework/agent:0.9.3": spikeImages["nginx:stable-alpine"],
 		"golang:1.26.1": spikeImages["nginx:stable-alpine"],
 		"golang:1.26.2": {},
+		// Third-party images with a Go binary built with Go 1.26.1 (agent's recorded report):
+		// 1.0.0 also has nginx's Alpine packages, which 1.0.1 fixes but not the Go binary; 2.0.1
+		// is rebuilt with a newer Go; 3.0.1 is not.
+		"gotool:1.0.0": {report: "nginx_stable-alpine.json,agent.json"},
+		"gotool:1.0.1": {report: "agent.json"},
+		"gotool:2.0.0": {report: "agent.json"},
+		"gotool:2.0.1": {},
+		"gotool:3.0.0": {report: "agent.json"},
+		"gotool:3.0.1": {report: "agent.json"},
 	}
 	return images
 }
@@ -74,7 +83,7 @@ func planImages() map[string]fakeImage {
 func TestPlan(t *testing.T) {
 	reg := fakeRegistry{
 		digests: map[string]string{"nginx:stable-alpine": newDigest},
-		tags:    map[string][]string{"golang": {"1.26.0", "1.26.1", "1.26.2", "1.27.0"}},
+		tags:    map[string][]string{"golang": {"1.26.0", "1.26.1", "1.26.2", "1.27.0"}, "gotool": {"1.0.0", "1.0.1", "2.0.0", "2.0.1", "3.0.0", "3.0.1"}},
 	}
 	type tgt struct {
 		ref, stage string
@@ -136,6 +145,28 @@ func TestPlan(t *testing.T) {
 			eolDown:   true,
 			notes:     []string{"endoflife.date nodejs unavailable, EOL rule skipped", "the tag is not pinned by digest"},
 			noteCount: 2,
+		},
+		{
+			name:    "rule 1: a Go binary rebuilt with a newer Go in the next patch",
+			targets: []tgt{{"gotool:2.0.0", "0", RoleFinal}},
+			rules:   "rule1-gobinary.golden.json",
+			notes:   []string{"gotool:2.0.1 fixes CVE-2026-39821, CVE-2026-97032 (rule 1)"},
+		},
+		{
+			name:    "rule 1: the OS fixes go ahead, the Go binary not yet rebuilt waits",
+			targets: []tgt{{"gotool:1.0.0", "0", RoleFinal}},
+			rules:   "rule1-mixed.golden.json",
+			notes: []string{
+				"gotool:1.0.1 fixes CVE-2026-111497, CVE-2026-92392 (rule 1)",
+				"the candidate gotool:1.0.1 still has the Go standard library finding(s) CVE-2026-39821, CVE-2026-97032, in a Go binary of the image, which wait for an upstream rebuild with a newer Go",
+			},
+			noteCount: 2,
+		},
+		{
+			name:      "no rule for a Go binary the next patch doesn't rebuild",
+			targets:   []tgt{{"gotool:3.0.0", "0", RoleFinal}},
+			notes:     []string{"the candidate gotool:3.0.1 still has the Go standard library finding(s) CVE-2026-39821, CVE-2026-97032"},
+			noteCount: 1,
 		},
 		{
 			name:    "internal images and build stages are only noted",

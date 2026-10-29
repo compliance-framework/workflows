@@ -51,6 +51,9 @@ type Target struct {
 //     human.
 //  3. Anything else actionable is logged as a note: the distribution has the fix, the upstream
 //     image hasn't been rebuilt with it yet.
+//
+// A Go standard library finding never holds rule 1 or 2 back: rule 1 fixes it only when the
+// candidate has (docs/image-scan.md#go-standard-library).
 type Planner struct {
 	Owner    string
 	Scanner  ImageScanner
@@ -136,8 +139,18 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) Plann
 			note("%s: scan of the candidate %s failed: %v", where, cand, err)
 			continue
 		}
-		if left := remaining(act, cs.Findings); len(left) > 0 {
+		// A Go standard library finding is in a Go binary of the image, which only the upstream's
+		// rebuild with a newer Go fixes: it never holds back the other fixes, and it is one of
+		// the rule's fixes only when the candidate has it fixed.
+		fixes, waiting := splitGoStdlib(act, cs.Findings)
+		if left := remaining(fixes, cs.Findings); len(left) > 0 {
 			note("%s: the candidate %s still has %s; the distribution's fix waits for an upstream rebuild", where, cand, strings.Join(cves(left), ", "))
+			continue
+		}
+		if len(waiting) > 0 {
+			note("%s: the candidate %s still has the Go standard library finding(s) %s, in a Go binary of the image, which wait for an upstream rebuild with a newer Go", where, cand, strings.Join(cves(waiting), ", "))
+		}
+		if len(fixes) == 0 {
 			continue
 		}
 		f := security[ref.Name+"\x00"+kind]
@@ -145,7 +158,7 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) Plann
 			f = &fix{dep: ref.Name, kind: kind}
 			security[ref.Name+"\x00"+kind] = f
 		}
-		f.findings = append(f.findings, act...)
+		f.findings = append(f.findings, fixes...)
 		f.images = append(f.images, ref.String())
 		f.tags = append(f.tags, ref.Tag)
 		f.cands = append(f.cands, cand.String())
@@ -153,7 +166,7 @@ func (p *Planner) Plan(ctx context.Context, repo string, targets []Target) Plann
 			f.newTags = append(f.newTags, cand.Tag)
 		}
 		fixed[ref.String()] = true
-		note("%s: %s fixes %s (rule 1)", where, cand, strings.Join(cves(act), ", "))
+		note("%s: %s fixes %s (rule 1)", where, cand, strings.Join(cves(fixes), ", "))
 	}
 
 	var rules []Rule
@@ -218,10 +231,11 @@ func (p *Planner) eolRule(ctx context.Context, repo string, ref Ref, act []Findi
 		return nil, "", false
 	}
 	// A runtime image's packages are fixed by a rebuild of the same release (rules 1 and 3); what
-	// a newer release fixes is the runtime itself. An OS image's release is everything in it.
-	trigger := act
+	// a newer release fixes is the runtime itself. An OS image's release is everything in it, but
+	// the Go standard library in a Go binary, which a rebuild with a newer Go fixes.
+	trigger := slices.DeleteFunc(slices.Clone(act), Finding.GoStdlib)
 	if slices.ContainsFunc(Runtimes, func(rt Runtime) bool { return rt.Name == line.Image }) {
-		trigger = slices.DeleteFunc(slices.Clone(act), func(f Finding) bool { return f.Type != TypeBinary })
+		trigger = slices.DeleteFunc(trigger, func(f Finding) bool { return f.Type != TypeBinary })
 	}
 	if len(trigger) == 0 {
 		return nil, "", false
@@ -309,6 +323,20 @@ func (p *Planner) candidate(ctx context.Context, ref Ref) (cand Ref, kind, why s
 	}
 	tagRef.Digest = d
 	return tagRef, "digest", "", nil
+}
+
+// splitGoStdlib splits act for rule 1: fixes are what the candidate (its findings got) must clear,
+// with the Go standard library findings it clears; waiting the Go standard library findings it
+// still has.
+func splitGoStdlib(act, got []Finding) (fixes, waiting []Finding) {
+	for _, f := range act {
+		if f.GoStdlib() && len(remaining([]Finding{f}, got)) > 0 {
+			waiting = append(waiting, f)
+		} else {
+			fixes = append(fixes, f)
+		}
+	}
+	return fixes, waiting
 }
 
 // actionable returns the findings with a fix that are HIGH or CRITICAL.

@@ -1,6 +1,7 @@
 package imagescan
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
@@ -13,7 +14,9 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // regexpTemp matches the scan's temporary directory.
@@ -79,13 +82,46 @@ func (f *fakeDocker) Run(_ context.Context, name string, args ...string) ([]byte
 		if img.report == "" {
 			return nil, &ExitError{Code: 128, Stderr: "No package sources found"}
 		}
-		data, err := os.ReadFile(filepath.Join("testdata", "osv-scanner", img.report))
+		data, err := readReports(strings.Split(img.report, ","))
 		if err != nil {
 			return nil, err
 		}
 		return data, &ExitError{Code: 1}
 	}
 	return nil, fmt.Errorf("unexpected docker %v", args)
+}
+
+// readReports reads testdata/osv-scanner reports, one image's: their results together, with the
+// first one's image metadata.
+func readReports(files []string) ([]byte, error) {
+	var out map[string]json.RawMessage
+	var results []json.RawMessage
+	for _, file := range files {
+		data, err := os.ReadFile(filepath.Join("testdata", "osv-scanner", file))
+		if err != nil {
+			return nil, err
+		}
+		if len(files) == 1 {
+			return data, nil
+		}
+		var r map[string]json.RawMessage
+		var res []json.RawMessage
+		if err := json.Unmarshal(data, &r); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(r["results"], &res); err != nil {
+			return nil, err
+		}
+		results = append(results, res...)
+		if out == nil {
+			out = r
+		}
+	}
+	var err error
+	if out["results"], err = json.Marshal(results); err != nil {
+		return nil, err
+	}
+	return json.Marshal(out)
 }
 
 func (f *fakeDocker) mount(args []string) string {
@@ -97,11 +133,71 @@ func (f *fakeDocker) mount(args []string) string {
 	return ""
 }
 
-// osvServer serves api.osv.dev's /v1/query from testdata/osv/<package>-<version>.json, recorded
-// from the real API; an unrecorded query fails the test.
-func osvServer(t *testing.T) *httptest.Server {
+// fakeOSV is api.osv.dev, from recorded responses: /v1/query from
+// testdata/osv/<package>-<version>.json (an unrecorded query fails the test), and /v1/vulns/<id>
+// from testdata/osv/vulns/<id>.json, with an unrecorded ID answered 404 as the real API answers an
+// ID it has no record of (CVE-2026-111943, a curl CVE in OSV only as CURL-CVE-...).
+type fakeOSV struct {
+	mu      *sync.Mutex // guards fetched, fail and down: a hung request's handler runs next to the next one's
+	fetched []string    // the IDs /v1/vulns was asked for, once per request
+	down    bool        // /v1/vulns answers 503
+	hang    bool        // /v1/vulns never answers (until the client gives up)
+	// fail answers an ID with failCode (503 by default) its first n times; n < 0 is always.
+	fail       map[string]int
+	failCode   int
+	retryAfter string // the failures' Retry-After header
+}
+
+// setDown turns the outage on or off between requests.
+func (f *fakeOSV) setDown(down bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.down = down
+}
+
+// requests returns the IDs /v1/vulns was asked for so far.
+func (f *fakeOSV) requests() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.fetched)
+}
+
+func (f *fakeOSV) serve(t *testing.T) *httptest.Server {
 	t.Helper()
+	f.mu = &sync.Mutex{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id, ok := strings.CutPrefix(r.URL.Path, "/v1/vulns/"); ok && r.Method == http.MethodGet {
+			f.mu.Lock()
+			f.fetched = append(f.fetched, id)
+			n := f.fail[id]
+			if n > 0 {
+				f.fail[id] = n - 1
+			}
+			down := f.down
+			f.mu.Unlock()
+			if f.hang {
+				select {
+				case <-r.Context().Done():
+				case <-time.After(5 * time.Second):
+				}
+				return
+			}
+			if down || n != 0 {
+				code := cmp.Or(f.failCode, http.StatusServiceUnavailable)
+				if f.retryAfter != "" {
+					w.Header().Set("Retry-After", f.retryAfter)
+				}
+				http.Error(w, "upstream unavailable", code)
+				return
+			}
+			data, err := os.ReadFile(filepath.Join("testdata", "osv", "vulns", id+".json"))
+			if err != nil {
+				http.Error(w, `{"code":5,"message":"Vulnerability not found."}`, http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write(data)
+			return
+		}
 		var q struct {
 			Package struct{ Name, Ecosystem string } `json:"package"`
 			Version string                           `json:"version"`
@@ -131,7 +227,11 @@ var spikeImages = map[string]fakeImage{
 }
 
 func newScanner(t *testing.T, docker *fakeDocker) *Scanner {
-	return &Scanner{Run: docker, Image: ScannerImage, OSV: &OSV{BaseURL: osvServer(t).URL}, TempDir: t.TempDir(), Pull: true}
+	return newScannerOSV(t, docker, &fakeOSV{})
+}
+
+func newScannerOSV(t *testing.T, docker *fakeDocker, osv *fakeOSV) *Scanner {
+	return &Scanner{Run: docker, Image: ScannerImage, OSV: &OSV{BaseURL: osv.serve(t).URL, retryWait: time.Millisecond}, TempDir: t.TempDir(), Pull: true}
 }
 
 // TestSpikeAcceptance is the scanner decision's acceptance check, on the spike's recorded

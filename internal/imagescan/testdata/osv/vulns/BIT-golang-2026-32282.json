@@ -1,0 +1,22 @@
+{
+  "id": "BIT-golang-2026-32282",
+  "summary": "TOCTOU permits root escape on Linux via Root.Chmod in os in internal/syscall/unix",
+  "aliases": [
+    "CVE-2026-32282",
+    "GO-2026-4864"
+  ],
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "Bitnami",
+        "name": "golang"
+      },
+      "severity": [
+        {
+          "type": "CVSS_V3",
+          "score": "CVSS:3.1/AV:L/AC:H/PR:H/UI:N/S:U/C:H/I:H/A:H"
+        }
+      ]
+    }
+  ]
+}

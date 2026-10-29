@@ -1,0 +1,22 @@
+{
+  "id": "BIT-golang-2026-97032",
+  "summary": "HTTP/2 server crash due to HPACK encoder race in net/http",
+  "aliases": [
+    "CVE-2026-97032",
+    "GO-2026-6617"
+  ],
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "Bitnami",
+        "name": "golang"
+      },
+      "severity": [
+        {
+          "type": "CVSS_V3",
+          "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+        }
+      ]
+    }
+  ]
+}

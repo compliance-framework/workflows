@@ -101,6 +101,7 @@ func Run(ctx context.Context, env Env, repos []manifest.Repo) []RepoResult {
 				if err != nil {
 					errorf("%s: %s: %v", img.Dockerfile, b.Ref, err)
 				}
+				res.Notes = appendWarnings(res.Notes, b.Ref.String(), s)
 				res.Targets = append(res.Targets, withStage(Target{Dockerfile: img.Dockerfile, Base: b, Scan: s, Err: err}))
 			}
 		}
@@ -112,6 +113,7 @@ func Run(ctx context.Context, env Env, repos []manifest.Repo) []RepoResult {
 					if err != nil {
 						res.Notes = append(res.Notes, fmt.Sprintf("published image %s not scanned: %v", ref, err))
 					}
+					res.Notes = appendWarnings(res.Notes, ref, s)
 					res.Published = append(res.Published, Target{Dockerfile: img.Dockerfile, Base: Base{Ref: Ref{Name: "ghcr.io/" + env.Owner + "/" + img.Name, Tag: tag}}, Scan: s, Err: err})
 				}
 			}
@@ -124,6 +126,20 @@ func Run(ctx context.Context, env Env, repos []manifest.Repo) []RepoResult {
 		out = append(out, res)
 	}
 	return out
+}
+
+// appendWarnings adds the warnings of ref's scan to notes, once per repo (an image can be the base
+// of several Dockerfiles).
+func appendWarnings(notes []string, ref string, s *Scan) []string {
+	if s == nil {
+		return notes
+	}
+	for _, w := range s.Warnings {
+		if n := fmt.Sprintf("**warning**: %s: %s", ref, w); !slices.Contains(notes, n) {
+			notes = append(notes, n)
+		}
+	}
+	return notes
 }
 
 // withStage copies t's scan with each finding's Stage set to the target's stage.
