@@ -15,7 +15,9 @@ import (
 	"github.com/compliance-framework/workflows/internal/bump"
 )
 
-// TestPatchDockerfile checks the managed block against testdata/patch/<case>.Dockerfile.golden:
+// TestPatchDockerfile patches testdata/patch/<case>.Dockerfile.in and checks the managed block
+// against <case>.Dockerfile.golden. Neither name is one Renovate's dockerfile manager reads, so a
+// Renovate update never moves the input's images away from the golden's. The block is
 // inserted right after the FROM of the final image's base stage (followed back through FROM
 // <stage>, after a FROM's continuation lines, before the stage's USER), regenerated in place of an
 // existing block, and removed when there is nothing to upgrade.
@@ -32,7 +34,7 @@ func TestPatchDockerfile(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join("testdata", "patch", tc.name+".Dockerfile")
-			src, err := os.ReadFile(path)
+			src, err := os.ReadFile(path + ".in")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -92,8 +92,9 @@ func TestUpdaters(t *testing.T) {
 		conflicts     []string
 		upToDate      []string
 		cmds          []string
-		golden        bool // compare changed files with testdata/<fixture>.golden
-		reapplyStable bool // a second scan of the result plans nothing
+		golden        bool              // compare changed files with testdata/<fixture>.golden
+		files, want   map[string]string // the checkout and its files after the run, in place of testdata/<fixture>
+		reapplyStable bool              // a second scan of the result plans nothing
 	}{
 		{
 			fixture: "service",
@@ -186,7 +187,8 @@ func TestUpdaters(t *testing.T) {
 			cfg:           Config{Source: "mock-agent"},
 			targets:       map[string]string{"mock-agent": "v0.1.0"},
 			changes:       []string{"Dockerfile Dockerfile ghcr.io/compliance-framework/mock-agent: alpine:3.20 -> v0.1.0"},
-			golden:        true,
+			files:         map[string]string{"Dockerfile": actionDockerfile("alpine:3.20")},
+			want:          map[string]string{"Dockerfile": actionDockerfile("ghcr.io/compliance-framework/mock-agent:0.1.0")},
 			reapplyStable: true,
 		},
 		{
@@ -234,7 +236,12 @@ func TestUpdaters(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d-%s", i, tc.fixture), func(t *testing.T) {
-			dir := copyDir(t, tc.fixture)
+			var dir string
+			if tc.files != nil {
+				dir = goImageFiles(t, tc.files)
+			} else {
+				dir = copyDir(t, tc.fixture)
+			}
 			rec := &recorder{}
 			cfg := tc.cfg
 			cfg.Owner, cfg.Run = "compliance-framework", rec.run
@@ -258,6 +265,11 @@ func TestUpdaters(t *testing.T) {
 			if tc.golden {
 				compareGolden(t, dir, tc.fixture)
 			}
+			for name, want := range tc.want {
+				if got, _ := os.ReadFile(filepath.Join(dir, name)); string(got) != want {
+					t.Errorf("%s: unexpected content:\n%s", name, got)
+				}
+			}
 			if tc.reapplyStable {
 				refs, err := ScanAll(dir, us)
 				if err != nil {
@@ -273,6 +285,18 @@ func TestUpdaters(t *testing.T) {
 			}
 		})
 	}
+}
+
+// actionDockerfile is a mock-agent action's Dockerfile whose source stage is image. It is written by
+// the test, not kept in testdata: Renovate reads this repo's testdata Dockerfiles and would pin and
+// move their alpine image away from the changes the test expects.
+func actionDockerfile(image string) string {
+	return `# replaced by ghcr.io/compliance-framework/mock-agent:<version> via ccf-bump
+FROM ` + image + ` AS source
+
+FROM alpine:3.20
+COPY --from=source /ap[p]/mock-agen[t] /usr/local/bin/
+`
 }
 
 func check(t *testing.T, what string, got, want []string) {
