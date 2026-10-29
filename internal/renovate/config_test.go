@@ -172,6 +172,7 @@ func TestSharedPreset(t *testing.T) {
 			PinDigests                 *bool    `json:"pinDigests"`
 			MatchDatasources           []string `json:"matchDatasources"`
 			MinimumReleaseAgeBehaviour string   `json:"minimumReleaseAgeBehaviour"`
+			RangeStrategy              string   `json:"rangeStrategy"`
 		} `json:"packageRules"`
 	}
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -244,12 +245,17 @@ func TestSharedPreset(t *testing.T) {
 		t.Errorf("vulnerabilityAlerts labels %v, addLabels %v: want none", va.Labels, va.AddLabels)
 	}
 
-	var internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, digestsUndated bool
+	var internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, dockerUndated, toolchainFix bool
 	var labelRules int
 	nonMajor := []string{"minor", "patch", "digest", "pin", "pinDigest"}
 	opaNames := []string{"github.com/open-policy-agent/opa", "open-policy-agent/opa", "openpolicyagent/opa"}
 	for _, r := range p.PackageRules {
 		off := r.Enabled != nil && !*r.Enabled
+		// The go directive is the minimum language version, which consumers inherit: Renovate
+		// leaves it alone (it reads it as a range every newer Go meets) and so must the preset.
+		if r.RangeStrategy != "" || slices.Contains(r.MatchDepTypes, "golang") {
+			t.Errorf("a rule matching depTypes %v sets rangeStrategy %q: the go directive is not bumped", r.MatchDepTypes, r.RangeStrategy)
+		}
 		// Only the majors rule sets PR limits: through calcLimit's lowest-limit-wins, a limit on
 		// another rule would cap the non-major group (the renovate:automerge rule matches every
 		// non-major update) or a security fix.
@@ -288,13 +294,23 @@ func TestSharedPreset(t *testing.T) {
 		case slices.Equal(r.MatchManagers, []string{"dockerfile"}):
 			digestsPinned = r.PinDigests != nil && *r.PinDigests && r.Enabled == nil && r.MatchPackageNames == nil &&
 				r.MatchDepTypes == nil && r.MatchUpdateTypes == nil && r.MatchRepositories == nil
-		// A digest or pinDigest update usually has no release timestamp (a floating tag is no
-		// version, and Docker Hub's tag list can fail), and with internalChecksFilter strict the
-		// default timestamp-required keeps it pending for good. Only those update types: a version
-		// update without a timestamp still waits.
+		// Docker updates have no release timestamp (a floating tag is no version, and the docker
+		// datasource dates no Docker Hub tag: agent's golang 1.27.3 and api's postgres stayed
+		// pending), and with internalChecksFilter strict the default timestamp-required keeps them
+		// pending for good. Docker only, majors included: the rule sets nothing but the behaviour,
+		// so a major still gets the majors rule (no auto-merge, needs-human, capped).
 		case r.MinimumReleaseAgeBehaviour != "":
-			digestsUndated = r.MinimumReleaseAgeBehaviour == "timestamp-optional" && slices.Equal(r.MatchDatasources, []string{"docker"}) &&
-				slices.Equal(r.MatchUpdateTypes, []string{"digest", "pinDigest"}) && r.MatchPackageNames == nil && r.MatchRepositories == nil
+			dockerUndated = r.MinimumReleaseAgeBehaviour == "timestamp-optional" && slices.Equal(r.MatchDatasources, []string{"docker"}) &&
+				slices.Equal(r.MatchUpdateTypes, []string{"minor", "patch", "major", "digest", "pinDigest"}) && r.MatchPackageNames == nil &&
+				r.MatchRepositories == nil && r.MatchManagers == nil && r.MatchDepTypes == nil && r.Automerge == nil &&
+				r.AddLabels == nil && r.GroupName == "" && r.PrConcurrentLimit == nil && r.PrHourlyLimit == nil
+		// Go standard-library fixes arrive through the go.mod toolchain line: Renovate matches OSV's
+		// "stdlib" vulnerabilities only for depType toolchain (vulnerabilities.js), so a toolchain
+		// update must release (fix). It sets nothing else: it joins the non-major group, and its
+		// security fixes get vulnerabilityAlerts' PR.
+		case slices.Contains(r.MatchDepTypes, "toolchain"):
+			toolchainFix = slices.Equal(r.MatchDepTypes, []string{"final", "toolchain"}) && r.SemanticCommitType == "fix" &&
+				r.MatchUpdateTypes == nil && r.MatchManagers == nil && r.MatchPackageNames == nil && r.GroupName == "" && r.Enabled == nil
 		case off && slices.Contains(r.MatchPackageNames, "github.com/compliance-framework/**") && slices.Contains(r.MatchPackageNames, "ghcr.io/compliance-framework/**"):
 			internalOff = len(r.MatchRepositories) == 0
 		case r.GroupName != "" && slices.Contains(r.MatchPackageNames, "*"):
@@ -311,9 +327,9 @@ func TestSharedPreset(t *testing.T) {
 	if labelRules != 1 {
 		t.Errorf("%d rules add %s, want 1", labelRules, AutomergeLabel)
 	}
-	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped || !digestsPinned || !digestsUndated {
-		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v, Dockerfile digests pinned %v, undated docker digest updates not held %v",
-			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, digestsUndated)
+	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped || !digestsPinned || !dockerUndated || !toolchainFix {
+		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v, Dockerfile digests pinned %v, undated docker updates not held %v, toolchain line fix(deps) %v",
+			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, dockerUndated, toolchainFix)
 	}
 }
 
