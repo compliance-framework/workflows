@@ -1,7 +1,8 @@
 // Package bump finds the pinned versions of internal dependencies in a repo checkout (Go modules,
 // go install pins, the action's source image, policy repos' OPA version, the ui sync script, helm
 // appVersions and image tags, shared-workflow refs), decides which to move to a target version
-// (never downgrading), and rewrites them. cmd/ccf-bump drives it.
+// (never downgrading), and rewrites them; the golang builder images then follow the go line that
+// go get left (FollowGo). cmd/ccf-bump drives it.
 package bump
 
 import (
@@ -17,11 +18,17 @@ import (
 	"github.com/compliance-framework/workflows/internal/manifest"
 )
 
-// Dependency names that are not repos: OPA (policy repos copy it from the agent's go.mod) and the
-// shared workflows (pinned to a release's commit SHA, see WorkflowsPin).
+// Dependency names that are not repos: OPA (policy repos copy it from the agent's go.mod), the
+// shared workflows (pinned to a release's commit SHA, see WorkflowsPin) and the Go toolchain of
+// the golang builder images, which must be at least the go line of the repo's go.mod: the
+// official golang image sets GOTOOLCHAIN=local, so a build in an older one fails (FollowGo).
 const (
 	DepOPA       = "opa"
 	DepWorkflows = "workflows"
+	DepGo        = "golang"
+	// DepToolchain is the go.mod toolchain line, which KeepToolchain keeps (standard-library
+	// security fixes reach a repo only through it).
+	DepToolchain = "go toolchain"
 )
 
 // Ref is one pinned version of a dependency, as found in a repo.
@@ -70,7 +77,8 @@ func (r Ref) Pinned() string {
 	return r.Current
 }
 
-// Change moves a Ref to To, a canonical version ("v1.2.3") or, for DepWorkflows, a ref.
+// Change moves a Ref to To, a canonical version ("v1.2.3"), for DepWorkflows a ref, or for DepGo
+// the golang image pin to write (1.26.3-alpine@sha256:...).
 type Change struct {
 	Ref
 	To string
@@ -89,6 +97,8 @@ type Plan struct {
 	Conflicts []Conflict
 	UpToDate  []Ref
 	NoTarget  []Ref // no target version: no final release, or not asked for
+	// Holds are reasons not to auto-merge that no change carries (ToolchainDropped).
+	Holds []string
 }
 
 // TagTime returns the commit time of dep's tag; it is needed only to compare a pseudo-version.
@@ -108,13 +118,17 @@ func Bare(v string) string {
 	return strings.TrimPrefix(Canonical(v), "v")
 }
 
-// Decide plans refs against targets (dep -> version). It never downgrades: a pin newer than the
+// Decide plans refs against targets (dep -> version), except the golang images (DepGo), which
+// FollowGo plans once go.mod has moved. It never downgrades: a pin newer than the
 // target, including a pseudo-version of a later commit, is a conflict. A pin that is not a version
 // (an image like alpine:3.20, a branch, a SHA, "latest") or is unknown is replaced, and so is a
 // shared-workflow ref that differs from the target ref.
 func Decide(refs []Ref, targets map[string]string, tagTime TagTime) (Plan, error) {
 	var p Plan
 	for _, r := range refs {
+		if r.Dep == DepGo || r.Dep == DepToolchain {
+			continue // their targets follow the go line go get leaves: FollowGo and KeepToolchain plan them
+		}
 		target, ok := targets[r.Dep]
 		if !ok || target == "" {
 			p.NoTarget = append(p.NoTarget, r)
@@ -231,11 +245,17 @@ func (c Change) Major() bool {
 		}
 		return c.pinnedVersion() == "" || tag == "" || semver.Major(c.pinnedVersion()) != semver.Major(tag)
 	}
-	from := Canonical(c.Current)
-	if !semver.IsValid(from) || !semver.IsValid(c.To) {
+	from, to := Canonical(c.Current), c.To
+	switch c.Dep {
+	case DepGo: // golang image pins: the versions of their tags, without variant or digest
+		from, to = Canonical(goPinVersion(c.Current)), Canonical(goPinVersion(c.To))
+	case DepToolchain: // go1.26.1
+		from, to = Canonical(strings.TrimPrefix(c.Current, "go")), Canonical(strings.TrimPrefix(c.To, "go"))
+	}
+	if !semver.IsValid(from) || !semver.IsValid(to) {
 		return true
 	}
-	return semver.Major(from) != semver.Major(c.To)
+	return semver.Major(from) != semver.Major(to)
 }
 
 // Why a bump PR is not auto-merged (Change.HoldReason), in its body and ccf-bump's output.
@@ -275,6 +295,11 @@ func (p Plan) HoldReasons(kind manifest.Kind) []string {
 	var out []string
 	for _, c := range p.Changes {
 		if r := c.HoldReason(kind); r != "" && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	for _, r := range p.Holds {
+		if !slices.Contains(out, r) {
 			out = append(out, r)
 		}
 	}
