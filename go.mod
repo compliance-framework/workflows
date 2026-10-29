@@ -2,6 +2,8 @@ module github.com/compliance-framework/workflows
 
 go 1.26.3
 
+toolchain go1.26.10
+
 require go.yaml.in/yaml/v3 v3.0.5
 
 require (
@@ -11,6 +13,7 @@ require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.8.0
 	github.com/open-policy-agent/opa v1.14.1
+	github.com/pandatix/go-cvss v0.6.4
 	golang.org/x/crypto v0.58.0
 	golang.org/x/mod v0.42.0
 	google.golang.org/grpc v1.84.0
@@ -62,7 +65,6 @@ require (
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/pandatix/go-cvss v0.6.4 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
