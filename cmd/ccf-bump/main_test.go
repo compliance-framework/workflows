@@ -216,6 +216,16 @@ func git(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
+// actionDockerfile is mock-agent-action's Dockerfile. It is written here, not kept in
+// internal/bump/testdata: Renovate reads this repo's testdata Dockerfiles and would pin and move
+// their alpine image.
+const actionDockerfile = `# replaced by ghcr.io/compliance-framework/mock-agent:<version> via ccf-bump
+FROM alpine:3.20 AS source
+
+FROM alpine:3.20
+COPY --from=source /ap[p]/mock-agen[t] /usr/local/bin/
+`
+
 // setup makes a local clone and a bare "GitHub" remote per mock repo, from internal/bump fixtures.
 func setup(t *testing.T) (root string, e env, gh *fakeGH, out *bytes.Buffer) {
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"} {
@@ -225,7 +235,7 @@ func setup(t *testing.T) (root string, e env, gh *fakeGH, out *bytes.Buffer) {
 		t.Setenv(k, "bot@example.com")
 	}
 	root = t.TempDir()
-	fixtures := map[string]string{"mock-api": "", "mock-agent": "", "mock-ui": "ui", "mock-agent-action": "action",
+	fixtures := map[string]string{"mock-api": "", "mock-agent": "", "mock-ui": "ui", "mock-agent-action": "",
 		"mock-plugin-1": "plugin", "mock-plugin-policies-1": "policies", "mock-helm-charts": "helm"}
 	for repo, fx := range fixtures {
 		dir := filepath.Join(root, "clones", repo)
@@ -239,6 +249,11 @@ func setup(t *testing.T) (root string, e env, gh *fakeGH, out *bytes.Buffer) {
 		}
 		if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(repo+"\n"), 0o644); err != nil {
 			t.Fatal(err)
+		}
+		if repo == "mock-agent-action" {
+			if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(actionDockerfile), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 		git(t, dir, "init", "--quiet", "-b", "main")
 		git(t, dir, "add", "-A")
