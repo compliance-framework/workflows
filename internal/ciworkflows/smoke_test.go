@@ -107,7 +107,8 @@ func TestStackSmokeWorkflow(t *testing.T) {
 }
 
 // TestSmokeCompose checks that the smoke stack only uses the published product images, binds
-// its ports to localhost and reads no env files (no secrets beyond what run.sh generates).
+// its ports to localhost and reads no env files (no secrets beyond what run.sh generates). The
+// postgres tag is Renovate's to move, so only the image name is checked.
 func TestSmokeCompose(t *testing.T) {
 	var c struct {
 		Services map[string]map[string]any `yaml:"services"`
@@ -120,7 +121,7 @@ func TestSmokeCompose(t *testing.T) {
 		t.Fatal(err)
 	}
 	images := map[string]string{
-		"postgres": "postgres:17.5",
+		"postgres": "postgres:",
 		"api":      "ghcr.io/compliance-framework/api:${SMOKE_API_TAG:?",
 		"ui":       "ghcr.io/compliance-framework/ui:${SMOKE_UI_TAG:?",
 		"agent":    "ghcr.io/compliance-framework/agent:${SMOKE_AGENT_TAG:?",
