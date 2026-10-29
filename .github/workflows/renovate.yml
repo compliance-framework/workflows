@@ -225,7 +225,7 @@ jobs:
         with:
           configurationFile: ${{ steps.config.outputs.path }}
           token: ${{ steps.token.outputs.token }}
-          renovate-version: 44.193.1
+          renovate-version: 44.198.0
         env:
           LOG_LEVEL: ${{ inputs.log_level || 'info' }}
       # A fresh token: Renovate may have used most of the first one's hour. Scoped to the same
