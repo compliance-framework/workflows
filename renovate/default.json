@@ -40,9 +40,9 @@
       "pinDigests": true
     },
     {
-      "description": "Docker updates have no release timestamp: a floating tag such as stable-alpine is no version to date, and Renovate's docker datasource gives Docker Hub tags (golang, postgres, node) none either. With internalChecksFilter strict the default minimumReleaseAgeBehaviour (timestamp-required) keeps every such update pending for good, so no docker update could ever pass minimumReleaseAge: a rebuild with CVE fixes (digest, pinDigest) or a new golang or postgres tag (minor, patch) would never get a PR, only a Dependency Dashboard line. timestamp-optional lets them through; one that has a timestamp still waits minimumReleaseAge. Majors keep timestamp-required.",
+      "description": "Docker updates have no release timestamp: a floating tag such as stable-alpine is no version to date, and Renovate's docker datasource gives Docker Hub tags (golang, postgres, node) none either. With internalChecksFilter strict the default minimumReleaseAgeBehaviour (timestamp-required) keeps every such update pending for good, so no docker update could ever pass minimumReleaseAge: a rebuild with CVE fixes (digest, pinDigest) or a new golang, postgres or node tag (minor, patch, major) would never get a PR, only a Dependency Dashboard line. timestamp-optional lets them through; one that has a timestamp still waits minimumReleaseAge. Majors are included: they never auto-merge (a human merges them, labelled needs-human) and the majors rule still caps them, so skipping the timestamp only lets their PR open.",
       "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["minor", "patch", "digest", "pinDigest"],
+      "matchUpdateTypes": ["minor", "patch", "major", "digest", "pinDigest"],
       "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {

@@ -297,11 +297,13 @@ func TestSharedPreset(t *testing.T) {
 		// Docker updates have no release timestamp (a floating tag is no version, and the docker
 		// datasource dates no Docker Hub tag: agent's golang 1.27.3 and api's postgres stayed
 		// pending), and with internalChecksFilter strict the default timestamp-required keeps them
-		// pending for good. Docker only, and not majors: they still wait for a timestamp.
+		// pending for good. Docker only, majors included: the rule sets nothing but the behaviour,
+		// so a major still gets the majors rule (no auto-merge, needs-human, capped).
 		case r.MinimumReleaseAgeBehaviour != "":
 			dockerUndated = r.MinimumReleaseAgeBehaviour == "timestamp-optional" && slices.Equal(r.MatchDatasources, []string{"docker"}) &&
-				slices.Equal(r.MatchUpdateTypes, []string{"minor", "patch", "digest", "pinDigest"}) && r.MatchPackageNames == nil &&
-				r.MatchRepositories == nil && r.MatchManagers == nil && r.MatchDepTypes == nil
+				slices.Equal(r.MatchUpdateTypes, []string{"minor", "patch", "major", "digest", "pinDigest"}) && r.MatchPackageNames == nil &&
+				r.MatchRepositories == nil && r.MatchManagers == nil && r.MatchDepTypes == nil && r.Automerge == nil &&
+				r.AddLabels == nil && r.GroupName == "" && r.PrConcurrentLimit == nil && r.PrHourlyLimit == nil
 		// Go standard-library fixes arrive through the go.mod toolchain line: Renovate matches OSV's
 		// "stdlib" vulnerabilities only for depType toolchain (vulnerabilities.js), so a toolchain
 		// update must release (fix). It sets nothing else: it joins the non-major group, and its
@@ -326,7 +328,7 @@ func TestSharedPreset(t *testing.T) {
 		t.Errorf("%d rules add %s, want 1", labelRules, AutomergeLabel)
 	}
 	if !internalOff || !grouped || !opaOff || !opaAPI || !indirectFix || !majorsCapped || !digestsPinned || !dockerUndated || !toolchainFix {
-		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v, Dockerfile digests pinned %v, undated docker non-major updates not held %v, toolchain line fix(deps) %v",
+		t.Errorf("package rules: internal off %v, non-majors grouped and auto-merged %v, OPA off outside api %v, OPA own PR in api %v, indirect Go modules fix %v, majors needs-human and capped at 3 open / 1 an hour %v, Dockerfile digests pinned %v, undated docker updates not held %v, toolchain line fix(deps) %v",
 			internalOff, grouped, opaOff, opaAPI, indirectFix, majorsCapped, digestsPinned, dockerUndated, toolchainFix)
 	}
 }
