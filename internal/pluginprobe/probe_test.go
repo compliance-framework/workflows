@@ -298,7 +298,15 @@ func TestRunAndReport(t *testing.T) {
 	if err := r.WriteMarkdown(&md); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"| Plugin | Protocol |", "| v1 | - | ok | the binary does not depend on ", "`missing\\|plugin` | - | - | **failed**: ", "| Policy bundle |", "| 0 | **failed**: opa check: no .rego files"} {
+	// Whether the test binary's build info lists the agent depends on the Go toolchain (go1.27
+	// records a test binary's module dependencies, go1.26 doesn't), so the row follows LibVersion.
+	selfRow := "| v1 | - | ok | the binary does not depend on "
+	if lib, err := LibVersion(self(t)); err != nil {
+		t.Fatal(err)
+	} else if lib != "" {
+		selfRow = "| v1 | " + lib + " | ok |"
+	}
+	for _, want := range []string{"| Plugin | Protocol |", selfRow, "`missing\\|plugin` | - | - | **failed**: ", "| Policy bundle |", "| 0 | **failed**: opa check: no .rego files"} {
 		if !strings.Contains(md.String(), want) {
 			t.Errorf("markdown lacks %q:\n%s", want, md.String())
 		}
