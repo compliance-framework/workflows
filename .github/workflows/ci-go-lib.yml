@@ -195,7 +195,7 @@ jobs:
           go-version-file: go.mod
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          version: v2.18.3
+          version: v2.19.0
           install-only: true
       - name: goreleaser check
         # Exit code 2 means a valid config with deprecated properties: a warning, not a failure.
