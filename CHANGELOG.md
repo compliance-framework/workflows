@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.3](https://github.com/compliance-framework/workflows/compare/v1.9.2...v1.9.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update module golang.org/x/net to v0.62.0 [security] ([#173](https://github.com/compliance-framework/workflows/issues/173)) ([5f8a24d](https://github.com/compliance-framework/workflows/commit/5f8a24de043e0b036fb2e488c602d7ec398220e0))
+
 ## [1.9.2](https://github.com/compliance-framework/workflows/compare/v1.9.1...v1.9.2) (2026-10-29)
 
 
