@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.3](https://github.com/compliance-framework/workflows/compare/v1.9.2...v1.9.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* **deps:** update all non-major dependencies ([#184](https://github.com/compliance-framework/workflows/issues/184)) ([6f16ad9](https://github.com/compliance-framework/workflows/commit/6f16ad916988982dc2fe5927784d112902dc51ae))
+* **deps:** update module github.com/klauspost/compress to v1.20.2 [security] ([#185](https://github.com/compliance-framework/workflows/issues/185)) ([9744a5d](https://github.com/compliance-framework/workflows/commit/9744a5d8b696f7bee63d49deeaadc928eb72a31d))
+* **deps:** update module golang.org/x/net to v0.62.0 [security] ([#173](https://github.com/compliance-framework/workflows/issues/173)) ([5f8a24d](https://github.com/compliance-framework/workflows/commit/5f8a24de043e0b036fb2e488c602d7ec398220e0))
+
 ## [1.9.2](https://github.com/compliance-framework/workflows/compare/v1.9.1...v1.9.2) (2026-10-29)
 
 
