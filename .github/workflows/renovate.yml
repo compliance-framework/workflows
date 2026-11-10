@@ -220,12 +220,12 @@ jobs:
           permission-workflows: ${{ env.DRY_RUN == 'off' && 'write' || '' }} # action updates in .github/workflows
           permission-checks: read # branch status
           permission-vulnerability-alerts: read # Dependabot alerts, for vulnerability fixes
-      - uses: renovatebot/github-action@43b963bf5dd5e57f1f95c59765a018d782870211 # v46.3.11
+      - uses: renovatebot/github-action@1c0cf989c02653fba0efe7ca5772338860ca71dc # v46.3.12
         timeout-minutes: 55 # within the token's hour
         with:
           configurationFile: ${{ steps.config.outputs.path }}
           token: ${{ steps.token.outputs.token }}
-          renovate-version: 44.222.2
+          renovate-version: 44.227.0
         env:
           LOG_LEVEL: ${{ inputs.log_level || 'info' }}
       # A fresh token: Renovate may have used most of the first one's hour. Scoped to the same
