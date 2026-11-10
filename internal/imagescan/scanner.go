@@ -18,7 +18,7 @@ import (
 // ScannerImage is the osv-scanner the tool runs, from its official image, pinned by digest. This
 // repo's renovate.json tracks the line with a custom manager (TestScannerImageRenovate), so
 // Renovate updates it like any other dependency. It is the same tool as ci-common.yml's vulns job.
-const ScannerImage = "ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0"
+const ScannerImage = "ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde"
 
 // Platform is the platform the tool pulls and scans: the one the CI runners build and run.
 const Platform = "linux/amd64"
