@@ -114,7 +114,7 @@ jobs:
       # A snapshot: the archives gooci uploads, without publishing a release.
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          version: v2.19.0
+          version: v2.20.0
           args: release --snapshot --clean
       - name: Install gooci
         run: go install github.com/compliance-framework/gooci@v0.0.7
