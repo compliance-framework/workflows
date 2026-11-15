@@ -4,7 +4,7 @@ go 1.26.3
 
 toolchain go1.27.4
 
-require go.yaml.in/yaml/v3 v3.0.6
+require go.yaml.in/yaml/v4 v4.0.0
 
 require (
 	github.com/compliance-framework/agent v0.9.0
@@ -14,6 +14,7 @@ require (
 	github.com/hashicorp/go-plugin v1.8.0
 	github.com/open-policy-agent/opa v1.14.1
 	github.com/pandatix/go-cvss v0.6.4
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/crypto v0.59.0
 	golang.org/x/mod v0.42.0
 	google.golang.org/grpc v1.85.0
