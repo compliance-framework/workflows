@@ -15,7 +15,7 @@ require (
 	github.com/open-policy-agent/opa v1.14.1
 	github.com/pandatix/go-cvss v0.6.4
 	golang.org/x/crypto v0.59.0
-	golang.org/x/mod v0.42.0
+	golang.org/x/mod v0.43.0
 	google.golang.org/grpc v1.85.0
 )
 
