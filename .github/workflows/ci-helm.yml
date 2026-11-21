@@ -45,7 +45,7 @@ jobs:
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         id: setup
         with:
-          version: v4.3.1
+          version: v4.3.2
       # kubeconform is built from source at a pinned version, like actionlint in ci-common.yml.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         id: go
@@ -106,7 +106,7 @@ jobs:
           persist-credentials: false
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
-          version: v4.3.1
+          version: v4.3.2
       - uses: helm/chart-testing-action@720270857a28afd41e2426521a7801db09e9b510 # v2.9.0
         with:
           version: 3.15.0
