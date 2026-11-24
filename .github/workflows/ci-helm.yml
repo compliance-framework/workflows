@@ -47,7 +47,7 @@ jobs:
         with:
           version: v4.3.2
       # kubeconform is built from source at a pinned version, like actionlint in ci-common.yml.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         id: go
         with:
           go-version: stable
