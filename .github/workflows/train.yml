@@ -104,7 +104,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       # The release bot is installed on every org repo: a token minted with an owner and no
       # repositories would reach all of them, so only mint one for a non-empty list.
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      - uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         id: token
         if: steps.plan.outputs.repos != ''
         with:
@@ -125,7 +125,7 @@ jobs:
       # Every live run may read commands: one on an open train, and one that starts a live train
       # and keeps reconciling it (--watch). A dry run closes its train in the run that starts it
       # and reads none, so write (open, or a live start) is the condition.
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      - uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         id: members
         if: steps.plan.outputs.write == 'true'
         continue-on-error: true
